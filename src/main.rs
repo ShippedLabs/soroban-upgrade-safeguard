@@ -20,6 +20,28 @@ enum OutputFormat {
     Json,
 }
 
+/// Minimum severity to print in text reports.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum MinSeverity {
+    /// Print informational, warning, and critical findings.
+    #[default]
+    Info,
+    /// Print warning and critical findings.
+    Warning,
+    /// Print only critical findings.
+    Critical,
+}
+
+impl From<MinSeverity> for diff::Severity {
+    fn from(value: MinSeverity) -> Self {
+        match value {
+            MinSeverity::Info => diff::Severity::Info,
+            MinSeverity::Warning => diff::Severity::Warning,
+            MinSeverity::Critical => diff::Severity::Critical,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -34,6 +56,10 @@ struct Args {
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     format: OutputFormat,
+
+    /// Minimum severity to print in text output
+    #[arg(long, value_enum, default_value_t = MinSeverity::Info)]
+    min_severity: MinSeverity,
 }
 
 fn main() -> Result<()> {
@@ -81,7 +107,7 @@ fn main() -> Result<()> {
         // Single JSON document to stdout; no decorative text, no ANSI codes.
         println!("{}", serde_json::to_string_pretty(&safety_report.to_json())?);
     } else {
-        println!("{}", safety_report.generate_summary_text());
+        println!("{}", safety_report.generate_summary_text(args.min_severity.into()));
     }
 
     if !safety_report.is_safe {
@@ -90,4 +116,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-

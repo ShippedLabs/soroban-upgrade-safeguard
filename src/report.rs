@@ -82,7 +82,7 @@ impl SafetyReport {
     }
 
     /// Generate a structured, human-readable text output for the CLI.
-    pub fn generate_summary_text(&self) -> String {
+    pub fn generate_summary_text(&self, min_severity: Severity) -> String {
         let mut output = String::new();
         output.push_str(&"\n========================================\n".bold().to_string());
         output.push_str(&"    SOROBAN UPGRADE SAFETY REPORT\n".bold().cyan().to_string());
@@ -114,9 +114,18 @@ impl SafetyReport {
         categories.sort();
 
         for category in categories {
-            output.push_str(&format!("--- [{}] ---\n", category.to_ascii_uppercase()).magenta().bold().to_string());
             let group = self.findings_by_category.get(category).unwrap();
-            for finding in group {
+            let visible_findings: Vec<&Finding> = group
+                .iter()
+                .filter(|finding| severity_rank(&finding.severity) >= severity_rank(&min_severity))
+                .collect();
+
+            if visible_findings.is_empty() {
+                continue;
+            }
+
+            output.push_str(&format!("--- [{}] ---\n", category.to_ascii_uppercase()).magenta().bold().to_string());
+            for finding in visible_findings {
                 let formatted = match finding.severity {
                     Severity::Critical => format!("🔴 {}", finding.message).red(),
                     Severity::Warning => format!("🟡 {}", finding.message).yellow(),
@@ -133,5 +142,13 @@ impl SafetyReport {
         }
 
         output
+    }
+}
+
+fn severity_rank(severity: &Severity) -> u8 {
+    match severity {
+        Severity::Info => 0,
+        Severity::Warning => 1,
+        Severity::Critical => 2,
     }
 }
