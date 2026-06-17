@@ -81,28 +81,114 @@ impl SafetyReport {
         }
     }
 
+    /// Generate Markdown output suitable for GitHub PR comments and CI summaries.
+    pub fn generate_markdown(&self) -> String {
+        let mut output = String::new();
+        output.push_str("# Soroban Upgrade Safety Report\n\n");
+
+        let status = if self.is_safe {
+            "PASSED (no breaking changes detected)"
+        } else {
+            "FAILED (critical breaking changes detected)"
+        };
+        output.push_str(&format!("**Status:** {status}\n\n"));
+
+        output.push_str("## Summary\n\n");
+        output.push_str("| Severity | Count |\n");
+        output.push_str("| --- | ---: |\n");
+        output.push_str(&format!("| Critical | {} |\n", self.critical_count));
+        output.push_str(&format!("| Warning | {} |\n", self.warning_count));
+        output.push_str(&format!("| Info | {} |\n", self.info_count));
+        output.push_str(&format!("| Total | {} |\n", self.total_findings));
+
+        if self.total_findings == 0 {
+            output.push_str("\n## Findings\n\n");
+            output.push_str(
+                "No relevant changes detected. The upgrade is identical in its exports and types.\n",
+            );
+            return output;
+        }
+
+        output.push_str("\n## Findings by Category\n\n");
+
+        let mut categories: Vec<&String> = self.findings_by_category.keys().collect();
+        categories.sort();
+
+        for category in categories {
+            output.push_str(&format!("### {category}\n\n"));
+            let group = self.findings_by_category.get(category).unwrap();
+            for finding in group {
+                output.push_str(&format!(
+                    "- **{}:** {}\n",
+                    severity_label(&finding.severity),
+                    finding.message
+                ));
+            }
+            output.push('\n');
+        }
+
+        if !self.is_safe {
+            output.push_str("## Action Required\n\n");
+            output.push_str(
+                "The new contract version modifies existing storage layouts or function interfaces.\n",
+            );
+            output.push_str(
+                "Deploying this upgrade may result in orphaned data, serialization panics, or broken integrations.\n",
+            );
+        }
+
+        output
+    }
+
     /// Generate a structured, human-readable text output for the CLI.
     pub fn generate_summary_text(&self) -> String {
         let mut output = String::new();
-        output.push_str(&"\n========================================\n".bold().to_string());
-        output.push_str(&"    SOROBAN UPGRADE SAFETY REPORT\n".bold().cyan().to_string());
-        output.push_str(&"========================================\n".bold().to_string());
-        
-        let status = if self.is_safe { 
+        output.push_str(
+            &"\n========================================\n"
+                .bold()
+                .to_string(),
+        );
+        output.push_str(
+            &"    SOROBAN UPGRADE SAFETY REPORT\n"
+                .bold()
+                .cyan()
+                .to_string(),
+        );
+        output.push_str(
+            &"========================================\n"
+                .bold()
+                .to_string(),
+        );
+
+        let status = if self.is_safe {
             "✅ PASSED (No breaking changes detected)".green().bold()
-        } else { 
-            "❌ FAILED (Critical breaking changes detected)".red().bold()
+        } else {
+            "❌ FAILED (Critical breaking changes detected)"
+                .red()
+                .bold()
         };
         output.push_str(&format!("Status: {}\n", status));
 
-        let crit_str = if self.critical_count > 0 { self.critical_count.to_string().red().bold() } else { self.critical_count.to_string().green() };
-        let warn_str = if self.warning_count > 0 { self.warning_count.to_string().yellow().bold() } else { self.warning_count.to_string().normal() };
+        let crit_str = if self.critical_count > 0 {
+            self.critical_count.to_string().red().bold()
+        } else {
+            self.critical_count.to_string().green()
+        };
+        let warn_str = if self.warning_count > 0 {
+            self.warning_count.to_string().yellow().bold()
+        } else {
+            self.warning_count.to_string().normal()
+        };
         let info_str = self.info_count.to_string().blue();
-        
+
         output.push_str(&format!("Critical: {}\n", crit_str));
         output.push_str(&format!("Warnings: {}\n", warn_str));
         output.push_str(&format!("Info:     {}\n", info_str));
-        output.push_str(&"----------------------------------------\n\n".dimmed().to_string());
+        output.push_str(
+            &"----------------------------------------\n\n"
+                .dimmed()
+                .to_string(),
+        );
 
         if self.total_findings == 0 {
             output.push_str(&"No relevant changes detected. The upgrade is identical in its exports and types.\n".green().to_string());
@@ -114,7 +200,12 @@ impl SafetyReport {
         categories.sort();
 
         for category in categories {
-            output.push_str(&format!("--- [{}] ---\n", category.to_ascii_uppercase()).magenta().bold().to_string());
+            output.push_str(
+                &format!("--- [{}] ---\n", category.to_ascii_uppercase())
+                    .magenta()
+                    .bold()
+                    .to_string(),
+            );
             let group = self.findings_by_category.get(category).unwrap();
             for finding in group {
                 let formatted = match finding.severity {
@@ -133,5 +224,13 @@ impl SafetyReport {
         }
 
         output
+    }
+}
+
+fn severity_label(severity: &Severity) -> &'static str {
+    match severity {
+        Severity::Critical => "Critical",
+        Severity::Warning => "Warning",
+        Severity::Info => "Info",
     }
 }
