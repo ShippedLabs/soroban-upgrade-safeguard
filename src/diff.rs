@@ -507,7 +507,10 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_xdr::curr::{ScSpecTypeUdt, StringM, VecM};
+    use stellar_xdr::curr::{
+        ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeUdt, ScSpecUdtEnumCaseV0,
+        ScSpecUdtEnumV0, ScSpecUdtStructFieldV0, ScSpecUdtStructV0, StringM, VecM,
+    };
 
     /// Helper: build a minimal ContractSpec with the given structs.
     fn spec_with_structs(structs: Vec<(&str, Vec<(&str, ScSpecTypeDef)>)>) -> ContractSpec {
@@ -539,6 +542,56 @@ mod tests {
         ScSpecTypeDef::Udt(ScSpecTypeUdt {
             name: name.try_into().unwrap(),
         })
+    }
+
+    /// Helper: build a minimal ContractSpec with the given functions.
+    fn spec_with_functions(functions: Vec<(&str, Vec<(&str, ScSpecTypeDef)>, Vec<ScSpecTypeDef>)>) -> ContractSpec {
+        let mut spec = ContractSpec::default();
+        for (name, inputs, outputs) in functions {
+            let xdr_inputs: Vec<ScSpecFunctionInputV0> = inputs
+                .into_iter()
+                .map(|(iname, itype)| ScSpecFunctionInputV0 {
+                    doc: StringM::default(),
+                    name: iname.try_into().unwrap(),
+                    type_: itype,
+                })
+                .collect();
+            spec.functions.insert(
+                name.to_string(),
+                ScSpecFunctionV0 {
+                    doc: StringM::default(),
+                    name: name.try_into().unwrap(),
+                    inputs: VecM::try_from(xdr_inputs).unwrap(),
+                    outputs: VecM::try_from(outputs).unwrap(),
+                },
+            );
+        }
+        spec
+    }
+
+    /// Helper: build a minimal ContractSpec with the given enums.
+    fn spec_with_enums(enums: Vec<(&str, Vec<(u32, &str)>)>) -> ContractSpec {
+        let mut spec = ContractSpec::default();
+        for (name, cases) in enums {
+            let xdr_cases: Vec<ScSpecUdtEnumCaseV0> = cases
+                .into_iter()
+                .map(|(value, cname)| ScSpecUdtEnumCaseV0 {
+                    doc: StringM::default(),
+                    value: value.try_into().unwrap(),
+                    name: cname.try_into().unwrap(),
+                })
+                .collect();
+            spec.enums.insert(
+                name.to_string(),
+                ScSpecUdtEnumV0 {
+                    doc: StringM::default(),
+                    lib: StringM::default(),
+                    name: name.try_into().unwrap(),
+                    cases: VecM::try_from(xdr_cases).unwrap(),
+                },
+            );
+        }
+        spec
     }
 
     // ---------------------------------------------------------------
@@ -700,5 +753,220 @@ mod tests {
         let f = field_change.unwrap();
         assert_eq!(f.severity, Severity::Critical);
         assert_eq!(f.type_name.as_deref(), Some("Data"));
+    }
+
+    // ---------------------------------------------------------------
+    // Function tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn function_removed_detected() {
+        let old = spec_with_functions(vec![("transfer", vec![("amount", ScSpecTypeDef::U64)], vec![])]);
+        let new = spec_with_functions(vec![]);
+
+        let report = compare(&old, &new);
+
+        let removed = report
+            .findings
+            .iter()
+            .any(|f| f.category == "Function Removed" && f.severity == Severity::Critical);
+        assert!(removed, "Should detect function removal");
+    }
+
+    #[test]
+    fn function_unchanged_no_finding() {
+        let old = spec_with_functions(vec![("transfer", vec![("amount", ScSpecTypeDef::U64)], vec![])]);
+        let new = spec_with_functions(vec![("transfer", vec![("amount", ScSpecTypeDef::U64)], vec![])]);
+
+        let report = compare(&old, &new);
+
+        let critical = report
+            .findings
+            .iter()
+            .filter(|f| f.severity == Severity::Critical)
+            .count();
+        assert_eq!(critical, 0, "Should have no critical findings for unchanged function");
+    }
+
+    #[test]
+    fn parameter_type_changed_detected() {
+        let old = spec_with_functions(vec![("transfer", vec![("amount", ScSpecTypeDef::U64)], vec![])]);
+        let new = spec_with_functions(vec![("transfer", vec![("amount", ScSpecTypeDef::I128)], vec![])]);
+
+        let report = compare(&old, &new);
+
+        let type_change = report
+            .findings
+            .iter()
+            .any(|f| f.category == "Parameter Type Changed" && f.severity == Severity::Critical);
+        assert!(type_change, "Should detect parameter type change");
+    }
+
+    #[test]
+    fn parameter_type_unchanged_no_finding() {
+        let old = spec_with_functions(vec![("transfer", vec![("amount", ScSpecTypeDef::U64)], vec![])]);
+        let new = spec_with_functions(vec![("transfer", vec![("amount", ScSpecTypeDef::U64)], vec![])]);
+
+        let report = compare(&old, &new);
+
+        let type_changes = report
+            .findings
+            .iter()
+            .filter(|f| f.category == "Parameter Type Changed")
+            .count();
+        assert_eq!(type_changes, 0, "Should have no parameter type change findings");
+    }
+
+    // ---------------------------------------------------------------
+    // Struct field tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn struct_field_removed_detected() {
+        let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32), ("name", ScSpecTypeDef::String)])]);
+        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+
+        let report = compare(&old, &new);
+
+        let removed = report
+            .findings
+            .iter()
+            .any(|f| f.category == "Struct Field Removed" && f.severity == Severity::Critical);
+        assert!(removed, "Should detect struct field removal");
+    }
+
+    #[test]
+    fn struct_field_unchanged_no_finding() {
+        let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+
+        let report = compare(&old, &new);
+
+        let critical = report
+            .findings
+            .iter()
+            .filter(|f| f.severity == Severity::Critical)
+            .count();
+        assert_eq!(critical, 0, "Should have no critical findings for unchanged struct");
+    }
+
+    #[test]
+    fn struct_field_reordered_detected() {
+        let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32), ("name", ScSpecTypeDef::String)])]);
+        let new = spec_with_structs(vec![("Data", vec![("name", ScSpecTypeDef::String), ("amount", ScSpecTypeDef::U32)])]);
+
+        let report = compare(&old, &new);
+
+        let reordered = report
+            .findings
+            .iter()
+            .any(|f| f.category == "Struct Field Reordered" && f.severity == Severity::Critical);
+        assert!(reordered, "Should detect struct field reordering");
+    }
+
+    #[test]
+    fn struct_field_order_unchanged_no_finding() {
+        let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32), ("name", ScSpecTypeDef::String)])]);
+        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32), ("name", ScSpecTypeDef::String)])]);
+
+        let report = compare(&old, &new);
+
+        let reordered = report
+            .findings
+            .iter()
+            .filter(|f| f.category == "Struct Field Reordered")
+            .count();
+        assert_eq!(reordered, 0, "Should have no reordering findings");
+    }
+
+    #[test]
+    fn struct_field_added_detected() {
+        let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32), ("name", ScSpecTypeDef::String)])]);
+
+        let report = compare(&old, &new);
+
+        let added = report
+            .findings
+            .iter()
+            .any(|f| f.category == "Struct Field Added" && f.severity == Severity::Warning);
+        assert!(added, "Should detect struct field addition");
+    }
+
+    #[test]
+    fn struct_field_not_added_no_finding() {
+        let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+
+        let report = compare(&old, &new);
+
+        let added = report
+            .findings
+            .iter()
+            .filter(|f| f.category == "Struct Field Added")
+            .count();
+        assert_eq!(added, 0, "Should have no field addition findings");
+    }
+
+    // ---------------------------------------------------------------
+    // Enum tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn enum_case_removed_detected() {
+        let old = spec_with_enums(vec![("Status", vec![(0, "Active"), (1, "Inactive")])]);
+        let new = spec_with_enums(vec![("Status", vec![(0, "Active")])]);
+
+        let report = compare(&old, &new);
+
+        let removed = report
+            .findings
+            .iter()
+            .any(|f| f.category == "Enum Case Removed" && f.severity == Severity::Critical);
+        assert!(removed, "Should detect enum case removal");
+    }
+
+    #[test]
+    fn enum_case_unchanged_no_finding() {
+        let old = spec_with_enums(vec![("Status", vec![(0, "Active"), (1, "Inactive")])]);
+        let new = spec_with_enums(vec![("Status", vec![(0, "Active"), (1, "Inactive")])]);
+
+        let report = compare(&old, &new);
+
+        let critical = report
+            .findings
+            .iter()
+            .filter(|f| f.severity == Severity::Critical)
+            .count();
+        assert_eq!(critical, 0, "Should have no critical findings for unchanged enum");
+    }
+
+    #[test]
+    fn enum_value_changed_detected() {
+        let old = spec_with_enums(vec![("Status", vec![(0, "Active"), (1, "Inactive")])]);
+        let new = spec_with_enums(vec![("Status", vec![(0, "Active"), (2, "Inactive")])]);
+
+        let report = compare(&old, &new);
+
+        let value_changed = report
+            .findings
+            .iter()
+            .any(|f| f.category == "Enum Case Value Changed" && f.severity == Severity::Critical);
+        assert!(value_changed, "Should detect enum value change");
+    }
+
+    #[test]
+    fn enum_value_unchanged_no_finding() {
+        let old = spec_with_enums(vec![("Status", vec![(0, "Active"), (1, "Inactive")])]);
+        let new = spec_with_enums(vec![("Status", vec![(0, "Active"), (1, "Inactive")])]);
+
+        let report = compare(&old, &new);
+
+        let value_changed = report
+            .findings
+            .iter()
+            .filter(|f| f.category == "Enum Case Value Changed")
+            .count();
+        assert_eq!(value_changed, 0, "Should have no enum value change findings");
     }
 }
