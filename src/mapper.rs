@@ -37,7 +37,7 @@ pub fn type_to_string(type_def: &ScSpecTypeDef) -> String {
             type_to_string(&map.value_type)
         ),
         ScSpecTypeDef::Tuple(tuple) => {
-            let inner: Vec<String> = tuple.value_types.iter().map(|t| type_to_string(t)).collect();
+            let inner: Vec<String> = tuple.value_types.iter().map(type_to_string).collect();
             format!("({})", inner.join(", "))
         }
         ScSpecTypeDef::BytesN(b) => format!("BytesN<{}>", b.n),
@@ -123,16 +123,19 @@ impl<'a> LayoutMapper<'a> {
                 if deps.insert(name.clone()) {
                     // It's a new UDT we haven't seen. Let's recursively find its members.
                     if let Some(struct_def) = self.spec.structs.get(&name) {
-                        let fields: &[stellar_xdr::curr::ScSpecUdtStructFieldV0] = struct_def.fields.as_ref();
+                        let fields: &[stellar_xdr::curr::ScSpecUdtStructFieldV0] =
+                            struct_def.fields.as_ref();
                         for field in fields {
                             self.extract_udts(&field.type_, deps);
                         }
                     } else if let Some(union_def) = self.spec.unions.get(&name) {
-                        let cases: &[stellar_xdr::curr::ScSpecUdtUnionCaseV0] = union_def.cases.as_ref();
+                        let cases: &[stellar_xdr::curr::ScSpecUdtUnionCaseV0] =
+                            union_def.cases.as_ref();
                         for case in cases {
                             match case {
                                 ScSpecUdtUnionCaseV0::TupleV0(tuple) => {
-                                    let types: &[stellar_xdr::curr::ScSpecTypeDef] = tuple.type_.as_ref();
+                                    let types: &[stellar_xdr::curr::ScSpecTypeDef] =
+                                        tuple.type_.as_ref();
                                     for t in types {
                                         self.extract_udts(t, deps);
                                     }

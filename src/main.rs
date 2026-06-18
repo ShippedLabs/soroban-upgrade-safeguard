@@ -80,24 +80,40 @@ fn main() -> Result<()> {
     progress("🔍 Soroban Upgrade Safeguard".to_string());
     progress("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".to_string());
 
-    progress(format!("\n{}", "📦 Loading and Parsing contracts...".cyan().bold()));
+    progress(format!(
+        "\n{}",
+        "📦 Loading and Parsing contracts...".cyan().bold()
+    ));
 
     // Old WASM
     let old = loader::load_wasm(&args.old_wasm)?;
     let old_meta = parser::extract_metadata(&old.bytes)?;
     let old_spec = spec::ContractSpec::from_entries(&old_meta.spec);
-    progress(format!("  {} {} ({} bytes)", "✅ Old:".green().bold(), old.path, old.bytes.len()));
+    progress(format!(
+        "  {} {} ({} bytes)",
+        "✅ Old:".green().bold(),
+        old.path,
+        old.bytes.len()
+    ));
     progress(format!("     └─ {}", old_spec.summary().dimmed()));
 
     // New WASM
     let new = loader::load_wasm(&args.new_wasm)?;
     let new_meta = parser::extract_metadata(&new.bytes)?;
     let new_spec = spec::ContractSpec::from_entries(&new_meta.spec);
-    progress(format!("  {} {} ({} bytes)", "✅ New:".green().bold(), new.path, new.bytes.len()));
+    progress(format!(
+        "  {} {} ({} bytes)",
+        "✅ New:".green().bold(),
+        new.path,
+        new.bytes.len()
+    ));
     progress(format!("     └─ {}", new_spec.summary().dimmed()));
 
     // Run comparison
-    progress(format!("\n{}", "🔬 Analyzing structural compatibility...".cyan().bold()));
+    progress(format!(
+        "\n{}",
+        "🔬 Analyzing structural compatibility...".cyan().bold()
+    ));
     let diff_report = diff::compare(&old_spec, &new_spec);
 
     // Generate Safety Report
@@ -105,9 +121,15 @@ fn main() -> Result<()> {
 
     if json {
         // Single JSON document to stdout; no decorative text, no ANSI codes.
-        println!("{}", serde_json::to_string_pretty(&safety_report.to_json())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&safety_report.to_json())?
+        );
     } else {
-        println!("{}", safety_report.generate_summary_text(args.min_severity.into()));
+        println!(
+            "{}",
+            safety_report.generate_summary_text(args.min_severity.into())
+        );
     }
 
     if !safety_report.is_safe {

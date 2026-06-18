@@ -21,8 +21,8 @@ fn decode_spec_entries(data: &[u8]) -> Result<Vec<ScSpecEntry>> {
     let mut entries = Vec::new();
 
     while (limited.inner.position() as usize) < data.len() {
-        let entry = ScSpecEntry::read_xdr(&mut limited)
-            .context("Failed to decode ScSpecEntry XDR")?;
+        let entry =
+            ScSpecEntry::read_xdr(&mut limited).context("Failed to decode ScSpecEntry XDR")?;
         entries.push(entry);
     }
 
@@ -35,8 +35,8 @@ pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata> {
     let parser = Parser::new(0);
 
     for payload in parser.parse_all(bytes) {
-        match payload.context("Failed to parse WASM payload")? {
-            Payload::CustomSection(section) => match section.name() {
+        if let Payload::CustomSection(section) = payload.context("Failed to parse WASM payload")? {
+            match section.name() {
                 "contractspecv0" => {
                     let entries = decode_spec_entries(section.data())
                         .context("Failed to decode contractspecv0 section")?;
@@ -46,12 +46,9 @@ pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata> {
                     metadata.env_meta = Some(section.data().to_vec());
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     }
 
     Ok(metadata)
 }
-
-

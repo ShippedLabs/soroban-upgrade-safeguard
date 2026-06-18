@@ -33,17 +33,27 @@ pub struct DiffReport {
     pub findings: Vec<Finding>,
 }
 
+#[allow(dead_code)]
 impl DiffReport {
     pub fn critical_count(&self) -> usize {
-        self.findings.iter().filter(|f| f.severity == Severity::Critical).count()
+        self.findings
+            .iter()
+            .filter(|f| f.severity == Severity::Critical)
+            .count()
     }
 
     pub fn warning_count(&self) -> usize {
-        self.findings.iter().filter(|f| f.severity == Severity::Warning).count()
+        self.findings
+            .iter()
+            .filter(|f| f.severity == Severity::Warning)
+            .count()
     }
 
     pub fn info_count(&self) -> usize {
-        self.findings.iter().filter(|f| f.severity == Severity::Info).count()
+        self.findings
+            .iter()
+            .filter(|f| f.severity == Severity::Info)
+            .count()
     }
 }
 
@@ -149,8 +159,10 @@ fn check_function_signature(
                 category: "Parameter Type Changed".to_string(),
                 message: format!(
                     "Function '{}': parameter {} ('{}') type changed from `{}` to `{}`.",
-                    name, i, old_name, 
-                    crate::mapper::type_to_string(&old_input.type_), 
+                    name,
+                    i,
+                    old_name,
+                    crate::mapper::type_to_string(&old_input.type_),
                     crate::mapper::type_to_string(&new_input.type_)
                 ),
                 type_name: None,
@@ -182,8 +194,9 @@ fn check_function_signature(
                     category: "Return Type Changed".to_string(),
                     message: format!(
                         "Function '{}': return type {} changed from `{}` to `{}`.",
-                        name, i, 
-                        crate::mapper::type_to_string(old_out), 
+                        name,
+                        i,
+                        crate::mapper::type_to_string(old_out),
                         crate::mapper::type_to_string(new_out)
                     ),
                     type_name: None,
@@ -207,7 +220,11 @@ fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepo
             None => {
                 report.findings.push(Finding {
                     severity: Severity::Critical,
-                    category: if is_evt { "Event Definition Removed".to_string() } else { "Struct Removed".to_string() },
+                    category: if is_evt {
+                        "Event Definition Removed".to_string()
+                    } else {
+                        "Struct Removed".to_string()
+                    },
                     message: format!(
                         "{} '{}' was removed. Storage or systems relying on this type will break.",
                         if is_evt { "Event struct" } else { "Struct" },
@@ -248,7 +265,11 @@ fn check_struct_fields(
     let old_fields: &[ScSpecUdtStructFieldV0] = old_struct.fields.as_ref();
     let new_fields: &[ScSpecUdtStructFieldV0] = new_struct.fields.as_ref();
     let is_evt = is_event(name);
-    let category_prefix = if is_evt { "Event Schema" } else { "Struct Field" };
+    let category_prefix = if is_evt {
+        "Event Schema"
+    } else {
+        "Struct Field"
+    };
     let msg_prefix = if is_evt { "Event schema" } else { "Struct" };
 
     // Check for removed fields
@@ -294,8 +315,11 @@ fn check_struct_fields(
                 category: format!("{} Type Changed", category_prefix),
                 message: format!(
                     "{} '{}': field '{}' (position {}) type changed from `{}` to `{}`.",
-                    msg_prefix, name, old_name, i, 
-                    crate::mapper::type_to_string(&old_field.type_), 
+                    msg_prefix,
+                    name,
+                    old_name,
+                    i,
+                    crate::mapper::type_to_string(&old_field.type_),
                     crate::mapper::type_to_string(&new_field.type_)
                 ),
                 type_name: Some(name.to_string()),
@@ -313,7 +337,7 @@ fn check_struct_fields(
                     "Struct '{}': new field '{}' appended. \
                      Existing storage entries won't have this field — ensure migration handles defaults.",
                     name,
-                    new_field.name.to_string()
+                    new_field.name
                 ),
                 type_name: Some(name.to_string()),
             });
@@ -329,7 +353,11 @@ fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport
             None => {
                 report.findings.push(Finding {
                     severity: Severity::Critical,
-                    category: if is_evt { "Event Enum Removed".to_string() } else { "Enum Removed".to_string() },
+                    category: if is_evt {
+                        "Event Enum Removed".to_string()
+                    } else {
+                        "Enum Removed".to_string()
+                    },
                     message: format!(
                         "{} '{}' was removed. Data using this type will be invalid.",
                         if is_evt { "Event enum" } else { "Enum" },
@@ -365,14 +393,18 @@ fn check_enum_cases(
     report: &mut DiffReport,
 ) {
     let is_evt = is_event(name);
-    let category_prefix = if is_evt { "Event Enum Case" } else { "Enum Case" };
+    let category_prefix = if is_evt {
+        "Event Enum Case"
+    } else {
+        "Enum Case"
+    };
     let msg_prefix = if is_evt { "Event enum" } else { "Enum" };
     let old_cases: &[ScSpecUdtEnumCaseV0] = old_enum.cases.as_ref();
     let new_cases: &[ScSpecUdtEnumCaseV0] = new_enum.cases.as_ref();
 
     for old_case in old_cases {
         let old_name = old_case.name.to_string();
-        
+
         match new_cases.iter().find(|c| c.name.to_string() == old_name) {
             None => {
                 // The case was removed entirely
@@ -428,7 +460,7 @@ fn check_enum_cases(
 fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
     let old_mapper = LayoutMapper::new(old);
     let reverse_deps = old_mapper.build_reverse_dependencies();
-    
+
     // Collect all UDTs that had a critical breaking change.
     // We read `type_name` directly — no message-text parsing needed.
     let mut broken_types = std::collections::HashSet::new();
@@ -439,23 +471,23 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
             }
         }
     }
-    
+
     // A queue for transitive breaks
     let mut queue: Vec<String> = broken_types.into_iter().collect();
     let mut i = 0;
     let mut cascaded = std::collections::HashSet::new();
-    
+
     while i < queue.len() {
         let current_broken_type = queue[i].clone();
         i += 1;
-        
+
         if let Some(dependents) = reverse_deps.get(&current_broken_type) {
             for dep in dependents {
                 // Ignore if it was the original broken type
                 if !cascaded.contains(dep) {
                     cascaded.insert(dep.clone());
                     queue.push(dep.clone());
-                    
+
                     report.findings.push(Finding {
                         severity: Severity::Critical,
                         category: "Cascading Layout Break".to_string(),
@@ -533,7 +565,10 @@ mod tests {
                 && f.type_name.as_deref() == Some("Inner")
                 && f.category != "Cascading Layout Break"
         });
-        assert!(inner_critical, "Expected a direct critical finding for Inner");
+        assert!(
+            inner_critical,
+            "Expected a direct critical finding for Inner"
+        );
 
         // Outer should have a cascading break
         let outer_cascade = report.findings.iter().any(|f| {
@@ -562,7 +597,8 @@ mod tests {
         report.findings.push(Finding {
             severity: Severity::Critical,
             category: "TOTALLY CUSTOM CATEGORY".to_string(),
-            message: "This message has no quotes and mentions no type prefix whatsoever.".to_string(),
+            message: "This message has no quotes and mentions no type prefix whatsoever."
+                .to_string(),
             type_name: Some("Child".to_string()),
         });
 
@@ -587,9 +623,7 @@ mod tests {
     // ---------------------------------------------------------------
     #[test]
     fn function_findings_do_not_cascade() {
-        let old = spec_with_structs(vec![
-            ("MyStruct", vec![("val", ScSpecTypeDef::U32)]),
-        ]);
+        let old = spec_with_structs(vec![("MyStruct", vec![("val", ScSpecTypeDef::U32)])]);
 
         let mut report = DiffReport::default();
         // Simulate a function-level Critical finding with type_name: None
@@ -636,8 +670,14 @@ mod tests {
             .filter_map(|f| f.type_name.as_deref())
             .collect();
 
-        assert!(cascade_types.contains(&"Mid"), "Mid should cascade from Leaf");
-        assert!(cascade_types.contains(&"Top"), "Top should cascade from Mid");
+        assert!(
+            cascade_types.contains(&"Mid"),
+            "Mid should cascade from Leaf"
+        );
+        assert!(
+            cascade_types.contains(&"Top"),
+            "Top should cascade from Mid"
+        );
     }
 
     // ---------------------------------------------------------------
@@ -646,18 +686,15 @@ mod tests {
     // ---------------------------------------------------------------
     #[test]
     fn struct_field_type_change_severity_and_category() {
-        let old = spec_with_structs(vec![
-            ("Data", vec![("amount", ScSpecTypeDef::U32)]),
-        ]);
-        let new = spec_with_structs(vec![
-            ("Data", vec![("amount", ScSpecTypeDef::I128)]),
-        ]);
+        let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
+        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::I128)])]);
 
         let report = compare(&old, &new);
 
-        let field_change = report.findings.iter().find(|f| {
-            f.category == "Struct Field Type Changed"
-        });
+        let field_change = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Struct Field Type Changed");
         assert!(field_change.is_some(), "Should detect field type change");
 
         let f = field_change.unwrap();

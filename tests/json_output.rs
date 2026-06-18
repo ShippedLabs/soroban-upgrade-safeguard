@@ -60,22 +60,36 @@ fn json_breaking_upgrade_reports_critical_and_exits_one() {
     let mut saw_critical = false;
     for (_category, findings) in categories {
         for finding in findings.as_array().expect("findings must be an array") {
-            let severity = finding["severity"].as_str().expect("severity must be a string");
+            let severity = finding["severity"]
+                .as_str()
+                .expect("severity must be a string");
             assert!(
                 matches!(severity, "critical" | "warning" | "info"),
                 "unexpected severity: {severity}"
             );
-            assert!(finding["category"].is_string(), "finding must have a category");
-            assert!(finding["message"].is_string(), "finding must have a message");
+            assert!(
+                finding["category"].is_string(),
+                "finding must have a category"
+            );
+            assert!(
+                finding["message"].is_string(),
+                "finding must have a message"
+            );
             if severity == "critical" {
                 saw_critical = true;
             }
         }
     }
-    assert!(saw_critical, "breaking upgrade must contain a critical finding");
+    assert!(
+        saw_critical,
+        "breaking upgrade must contain a critical finding"
+    );
 
     // JSON stdout must be free of ANSI color codes.
-    assert!(!stdout.contains('\u{1b}'), "JSON output must not contain ANSI codes");
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "JSON output must not contain ANSI codes"
+    );
 }
 
 #[test]
@@ -85,5 +99,8 @@ fn json_identical_upgrade_is_safe_and_exits_zero() {
     assert_eq!(code, 0, "non-breaking upgrade must exit 0");
     assert_eq!(json["is_safe"], Value::Bool(true));
     assert_eq!(json["counts"]["critical"].as_u64().unwrap(), 0);
-    assert!(!stdout.contains('\u{1b}'), "JSON output must not contain ANSI codes");
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "JSON output must not contain ANSI codes"
+    );
 }
