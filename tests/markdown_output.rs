@@ -12,12 +12,17 @@ fn wasm(name: &str) -> PathBuf {
 /// Run the binary with `--format markdown` on the given pair and return
 /// (exit code, raw stdout, raw stderr).
 fn run_markdown(old: &str, new: &str) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
-        .arg(wasm(old))
-        .arg(wasm(new))
-        .args(["--format", "markdown"])
-        .output()
-        .expect("failed to run binary");
+    run_markdown_ext(old, new, false)
+}
+
+/// Same as `run_markdown`, optionally passing `--strict`.
+fn run_markdown_ext(old: &str, new: &str, strict: bool) -> (i32, String, String) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"));
+    cmd.arg(wasm(old)).arg(wasm(new)).args(["--format", "markdown"]);
+    if strict {
+        cmd.arg("--strict");
+    }
+    let output = cmd.output().expect("failed to run binary");
 
     let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("stderr was not valid UTF-8");
@@ -113,5 +118,27 @@ fn markdown_identical_upgrade_is_safe_and_exits_zero() {
     assert!(
         stderr.contains("🔍 Soroban Upgrade Safeguard"),
         "Decorative progress should be in stderr"
+    );
+}
+
+#[test]
+fn markdown_strict_warning_only_indicates_strict_mode() {
+    let (code, stdout, _stderr) = run_markdown_ext("v1.wasm", "v3.wasm", true);
+
+    assert_eq!(
+        code, 1,
+        "warning-only upgrade under strict mode must exit 1"
+    );
+    assert!(
+        stdout.contains("[STRICT MODE ACTIVE]"),
+        "Markdown report must indicate strict mode is active"
+    );
+    assert!(
+        stdout.contains("## Status: ❌ FAILED (Warnings detected in strict mode)"),
+        "A warnings-only strict failure must not be labelled a critical breaking change"
+    );
+    assert!(
+        !stdout.contains("Critical breaking changes detected"),
+        "Must not contradict the zero critical count in the summary table"
     );
 }

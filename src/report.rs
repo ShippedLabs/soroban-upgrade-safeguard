@@ -363,9 +363,14 @@ impl SafetyReport {
     pub fn generate_summary_markdown(&self) -> String {
         let mut output = String::new();
         output.push_str("# Soroban Upgrade Safety Report\n\n");
+        if self.strict {
+            output.push_str("**[STRICT MODE ACTIVE]**\n\n");
+        }
 
         let status = if self.is_safe {
             "✅ PASSED (No breaking changes detected)"
+        } else if self.strict && self.critical_count == 0 {
+            "❌ FAILED (Warnings detected in strict mode)"
         } else {
             "❌ FAILED (Critical breaking changes detected)"
         };
