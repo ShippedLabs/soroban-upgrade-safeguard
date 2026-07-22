@@ -163,6 +163,7 @@ fn batch_manifest_json_mode_json_output() {
 
     let json: Value = serde_json::from_str(&stdout).expect("output must be valid JSON");
     assert_eq!(json["is_safe"], Value::Bool(false));
+    assert_eq!(json["recommended_bump"], "major");
     assert_eq!(json["total_pairs"].as_u64().unwrap(), 2);
 
     // Check results object
@@ -173,7 +174,9 @@ fn batch_manifest_json_mode_json_output() {
     assert!(results.contains_key("breaking_json"));
 
     assert_eq!(results["clean_json"]["is_safe"], Value::Bool(true));
+    assert_eq!(results["clean_json"]["recommended_bump"], "patch");
     assert_eq!(results["breaking_json"]["is_safe"], Value::Bool(false));
+    assert_eq!(results["breaking_json"]["recommended_bump"], "major");
 }
 
 #[test]

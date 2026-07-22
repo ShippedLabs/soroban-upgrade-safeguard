@@ -346,8 +346,19 @@ fn run() -> Result<()> {
                     );
                 }
 
+                let recommended_bump = results
+                    .values()
+                    .map(report::SafetyReport::recommended_bump)
+                    .max_by_key(|bump| match *bump {
+                        "major" => 2,
+                        "minor" => 1,
+                        _ => 0,
+                    })
+                    .unwrap_or("patch");
+
                 let batch_json = serde_json::json!({
                     "is_safe": overall_safe,
+                    "recommended_bump": recommended_bump,
                     "strict": args.strict,
                     "total_pairs": pairs.len(),
                     "limit_violation": any_limit_violation,
