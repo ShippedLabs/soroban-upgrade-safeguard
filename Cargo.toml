@@ -36,3 +36,9 @@ ureq = { version = "2.9", features = ["json"] }
 # Property-based/fuzz testing for the decode + type-walk paths (see
 # tests/fuzz_walk.rs). Dev-only: it does not affect the shipped binary.
 proptest = "1"
+
+# Snapshot testing for the report renderers, and the format-conformance check
+# that every field is surfaced in every format (see tests/report_snapshots.rs
+# and tests/format_conformance.rs). Dev-only: it does not affect the shipped
+# binary.
+insta = "1"
