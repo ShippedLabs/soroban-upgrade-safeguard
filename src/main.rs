@@ -10,6 +10,7 @@ use soroban_upgrade_safeguard::{
     limits::{find_limit_error, LimitsConfig, ResourcePolicy},
     loader, parser, report, spec,
     suppression::{SuppressionConfig, DEFAULT_CONFIG_FILE},
+    view::{self, BatchReportView, PairFailureInfo},
 };
 
 /// Output format for the safety report.
@@ -251,7 +252,7 @@ fn run() -> Result<()> {
         progress(format!("Loaded {} pair(s) for comparison.\n", pairs.len()));
 
         let mut results = std::collections::BTreeMap::new();
-        let mut failed: std::collections::BTreeMap<String, PairFailure> =
+        let mut failed: std::collections::BTreeMap<String, PairFailureInfo> =
             std::collections::BTreeMap::new();
         let mut overall_safe = true;
         let mut any_limit_violation = false;
@@ -323,151 +324,23 @@ fn run() -> Result<()> {
                         },
                         message
                     ));
-                    failed.insert(contract_name, PairFailure { message, is_limit });
+                    failed.insert(contract_name, PairFailureInfo { message, is_limit });
                 }
             }
 
             progress("\n----------------------------------------\n".to_string());
         }
 
+        // One batch view model, rendered per format. The per-pair detail
+        // sections reuse the single-pair renderers, so batch and single-pair
+        // output share heading structure, terminology, and severity vocabulary —
+        // and the old Markdown heading-stripping string surgery is gone.
+        let batch_view =
+            BatchReportView::new(&results, &failed, args.strict, pairs.len(), args.explain);
         match args.format {
-            OutputFormat::Json => {
-                let mut results_json = serde_json::Map::new();
-                for (name, report) in &results {
-                    results_json.insert(name.clone(), serde_json::to_value(report.to_json())?);
-                }
-
-                let mut failed_json = serde_json::Map::new();
-                for (name, failure) in &failed {
-                    failed_json.insert(
-                        name.clone(),
-                        serde_json::json!({
-                            "error": failure.message,
-                            "limit_violation": failure.is_limit,
-                        }),
-                    );
-                }
-
-                let batch_json = serde_json::json!({
-                    "is_safe": overall_safe,
-                    "strict": args.strict,
-                    "total_pairs": pairs.len(),
-                    "limit_violation": any_limit_violation,
-                    "results": results_json,
-                    "failed": failed_json,
-                });
-
-                println!("{}", serde_json::to_string_pretty(&batch_json)?);
-            }
-            OutputFormat::Markdown => {
-                let mut markdown = String::new();
-                markdown.push_str("# Soroban Upgrade Safety Report (Batch Mode)\n\n");
-
-                let status = if overall_safe {
-                    "✅ PASSED (All contracts safe)"
-                } else {
-                    "❌ FAILED (Some contracts have breaking changes)"
-                };
-                markdown.push_str(&format!("## Status: {}\n\n", status));
-                markdown.push_str("### Summary\n\n");
-                markdown
-                    .push_str("| Contract | Status | Critical | Warning | Info | Suppressed |\n");
-                markdown.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
-
-                for (name, report) in &results {
-                    let status_str = if report.is_safe {
-                        "✅ PASSED"
-                    } else {
-                        "❌ FAILED"
-                    };
-                    markdown.push_str(&format!(
-                        "| {} | {} | {} | {} | {} | {} |\n",
-                        name,
-                        status_str,
-                        report.critical_count,
-                        report.warning_count,
-                        report.info_count,
-                        report.suppressed_count
-                    ));
-                }
-
-                for (name, failure) in &failed {
-                    let status_str = if failure.is_limit {
-                        "⛔ ERROR (limit)"
-                    } else {
-                        "⛔ ERROR"
-                    };
-                    markdown.push_str(&format!("| {} | {} | — | — | — | — |\n", name, status_str));
-                }
-
-                markdown.push_str("\n---\n\n");
-
-                if !failed.is_empty() {
-                    markdown.push_str("### Errored Pairs\n\n");
-                    for (name, failure) in &failed {
-                        markdown.push_str(&format!("- **{}**: {}\n", name, failure.message));
-                    }
-                    markdown.push_str("\n---\n\n");
-                }
-
-                for (name, report) in &results {
-                    markdown.push_str(&format!("## Details: {}\n\n", name));
-                    let report_md = report.generate_summary_markdown();
-                    let stripped_md = report_md.replace("# Soroban Upgrade Safety Report\n\n", "");
-                    markdown.push_str(&stripped_md);
-                    markdown.push_str("\n---\n\n");
-                }
-
-                println!("{}", markdown);
-            }
-            OutputFormat::Text => {
-                println!("========================================");
-                println!("    SOROBAN BATCH SAFETY REPORT");
-                println!("========================================");
-
-                let status = if overall_safe {
-                    "✅ PASSED (All contracts safe)".green().bold()
-                } else {
-                    "❌ FAILED (Some contracts have breaking changes)"
-                        .red()
-                        .bold()
-                };
-                println!("Overall Status: {}\n", status);
-
-                println!("Summary of Contracts:");
-                for (name, report) in &results {
-                    let status_str = if report.is_safe {
-                        "✅ PASSED".green()
-                    } else {
-                        "❌ FAILED".red().bold()
-                    };
-                    println!(
-                        "  - {}: {} ({} critical, {} warnings, {} info, {} suppressed)",
-                        name.bold(),
-                        status_str,
-                        report.critical_count,
-                        report.warning_count,
-                        report.info_count,
-                        report.suppressed_count
-                    );
-                }
-                for (name, failure) in &failed {
-                    let status_str = if failure.is_limit {
-                        "⛔ ERROR (resource limit)".red().bold()
-                    } else {
-                        "⛔ ERROR".red().bold()
-                    };
-                    println!("  - {}: {} — {}", name.bold(), status_str, failure.message);
-                }
-
-                println!("\n========================================\n");
-
-                for (name, report) in &results {
-                    println!("=== Contract: {} ===", name.bold().magenta());
-                    println!("{}", report.generate_summary_text(args.explain));
-                    println!("========================================\n");
-                }
-            }
+            OutputFormat::Json => println!("{}", view::render_batch_json(&batch_view)?),
+            OutputFormat::Markdown => println!("{}", view::render_batch_markdown(&batch_view)),
+            OutputFormat::Text => println!("{}", view::render_batch_text(&batch_view)),
         }
 
         // Exit precedence: a resource-limit violation (2) dominates ordinary
@@ -608,20 +481,13 @@ fn run() -> Result<()> {
         &progress,
     )?;
 
+    // One view model, rendered per format. stdout carries only the document in
+    // JSON/Markdown mode (decorative progress went to stderr above).
+    let single_view = safety_report.to_view(args.explain);
     match args.format {
-        OutputFormat::Json => {
-            // Single JSON document to stdout; no decorative text, no ANSI codes.
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&safety_report.to_json())?
-            );
-        }
-        OutputFormat::Markdown => {
-            println!("{}", safety_report.generate_summary_markdown());
-        }
-        OutputFormat::Text => {
-            println!("{}", safety_report.generate_summary_text(args.explain));
-        }
+        OutputFormat::Json => println!("{}", view::render_single_json(&single_view)?),
+        OutputFormat::Markdown => println!("{}", view::render_single_markdown(&single_view)),
+        OutputFormat::Text => println!("{}", view::render_single_text(&single_view)),
     }
 
     if !safety_report.is_safe {
@@ -636,14 +502,6 @@ struct ContractPair {
     old: PathBuf,
     new: PathBuf,
     name: Option<String>,
-}
-
-/// A batch pair that could not be compared. Recorded so one bad pair fails only
-/// itself; `is_limit` distinguishes an adversarial-input rejection (exit 2) from
-/// an ordinary failure such as a missing or malformed file.
-struct PairFailure {
-    message: String,
-    is_limit: bool,
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]
