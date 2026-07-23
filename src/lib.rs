@@ -45,6 +45,7 @@ pub mod parser;
 pub mod report;
 pub mod spec;
 pub mod suppression;
+pub mod view;
 
 use std::path::Path;
 

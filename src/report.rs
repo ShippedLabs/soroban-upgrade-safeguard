@@ -1,8 +1,8 @@
 use crate::diff::{DiffReport, Finding, Severity};
 use crate::suppression::SuppressionConfig;
-use colored::Colorize;
+use crate::view::{self, SingleReportView};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 /// A finding as it appears in the report, augmented with suppression state.
 ///
@@ -49,24 +49,6 @@ pub struct SeverityCounts {
     pub critical: usize,
     pub warning: usize,
     pub info: usize,
-}
-
-/// A machine-readable view of a [`SafetyReport`] for `--format json`.
-///
-/// Borrows from the owning report. Categories are stored in a [`BTreeMap`]
-/// so the emitted JSON has a stable, diffable key order.
-#[derive(Serialize)]
-pub struct SafetyReportJson<'a> {
-    pub is_safe: bool,
-    pub strict: bool,
-    pub counts: SeverityCounts,
-    /// Findings (of any severity) acknowledged by the suppression config.
-    pub suppressed_count: usize,
-    pub total_findings: usize,
-    pub recommended_bump: &'static str,
-    pub baseline_source: Option<&'a str>,
-    pub verified_code_hash: Option<&'a str>,
-    pub findings_by_category: BTreeMap<&'a str, &'a Vec<ReportedFinding>>,
 }
 
 impl SafetyReport {
@@ -172,9 +154,16 @@ impl SafetyReport {
         }
     }
 
-    /// Build a serializable, machine-readable view of this report.
-    pub fn to_json(&self) -> SafetyReportJson<'_> {
-        SafetyReportJson {
+    /// Build the intermediate [`SingleReportView`] that every output format
+    /// renders from.
+    ///
+    /// This is the single place the report's data is shaped for presentation.
+    /// `explain` controls whether the text and Markdown layers surface
+    /// per-finding remediation guidance; the guidance itself is only ever
+    /// *present* on findings when the report was built in explain mode, so JSON
+    /// (which always serializes whatever is present) is unaffected by this flag.
+    pub fn to_view(&self, explain: bool) -> SingleReportView<'_> {
+        SingleReportView {
             is_safe: self.is_safe,
             strict: self.strict,
             counts: SeverityCounts {
@@ -187,256 +176,27 @@ impl SafetyReport {
             recommended_bump: self.recommended_bump(),
             baseline_source: self.baseline_source.as_deref(),
             verified_code_hash: self.verified_code_hash.as_deref(),
-            findings_by_category: self
-                .findings_by_category
-                .iter()
-                .map(|(k, v)| (k.as_str(), v))
-                .collect(),
+            categories: view::ordered_categories(&self.findings_by_category),
+            status: view::single_status(self.is_safe, self.strict, self.critical_count),
+            explain,
         }
     }
 
-    /// Generate a structured, human-readable text output for the CLI.
+    /// A serializable, machine-readable view of this report (`--format json`).
+    ///
+    /// Serializing the returned value produces the single-pair JSON document.
+    pub fn to_json(&self) -> SingleReportView<'_> {
+        self.to_view(false)
+    }
+
+    /// Generate the colored, human-readable text report for the CLI.
     pub fn generate_summary_text(&self, explain: bool) -> String {
-        let mut output = String::new();
-        output.push_str(
-            &"\n========================================\n"
-                .bold()
-                .to_string(),
-        );
-        output.push_str(
-            &"    SOROBAN UPGRADE SAFETY REPORT\n"
-                .bold()
-                .cyan()
-                .to_string(),
-        );
-        if self.strict {
-            output.push_str(&"    [STRICT MODE ACTIVE]\n".bold().yellow().to_string());
-        }
-        output.push_str(
-            &"========================================\n"
-                .bold()
-                .to_string(),
-        );
-
-        let status = if self.is_safe {
-            "✅ PASSED (No breaking changes detected)".green().bold()
-        } else if self.strict && self.critical_count == 0 {
-            "❌ FAILED (Warnings detected in strict mode)".red().bold()
-        } else {
-            "❌ FAILED (Critical breaking changes detected)"
-                .red()
-                .bold()
-        };
-        output.push_str(&format!("Status: {}\n", status));
-
-        let crit_str = if self.critical_count > 0 {
-            self.critical_count.to_string().red().bold()
-        } else {
-            self.critical_count.to_string().green()
-        };
-        let warn_str = if self.warning_count > 0 {
-            self.warning_count.to_string().yellow().bold()
-        } else {
-            self.warning_count.to_string().normal()
-        };
-        let info_str = self.info_count.to_string().blue();
-
-        output.push_str(&format!("Critical: {}\n", crit_str));
-        output.push_str(&format!("Warnings: {}\n", warn_str));
-        output.push_str(&format!("Info:     {}\n", info_str));
-        if self.suppressed_count > 0 {
-            output.push_str(&format!(
-                "Suppressed: {}\n",
-                self.suppressed_count.to_string().magenta().bold()
-            ));
-        }
-        let bump = self.recommended_bump();
-        let bump_str = match bump {
-            "major" => "major".red().bold(),
-            "minor" => "minor".yellow().bold(),
-            "patch" => "patch".green().bold(),
-            _ => bump.normal(),
-        };
-        output.push_str(&format!("Recommended Bump: {}\n", bump_str));
-
-        if let Some(source) = &self.baseline_source {
-            output.push_str(&format!("Baseline Source: {}\n", source));
-        }
-        if let Some(hash) = &self.verified_code_hash {
-            output.push_str(&format!("Verified Code Hash: {}\n", hash.dimmed()));
-        }
-
-        output.push_str(
-            &"----------------------------------------\n\n"
-                .dimmed()
-                .to_string(),
-        );
-
-        if self.total_findings == 0 {
-            output.push_str(&"No relevant changes detected. The upgrade is identical in its exports and types.\n".green().to_string());
-            return output;
-        }
-
-        // Sort categories to have consistent output; surface Environment first.
-        let mut categories: Vec<&String> = self.findings_by_category.keys().collect();
-        categories.sort_by(|a, b| {
-            let rank = |name: &str| if name == "Environment" { 0 } else { 1 };
-            rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
-        });
-
-        for category in categories {
-            output.push_str(
-                &format!("--- [{}] ---\n", category.to_ascii_uppercase())
-                    .magenta()
-                    .bold()
-                    .to_string(),
-            );
-            let group = self.findings_by_category.get(category).unwrap();
-            for reported in group {
-                let finding = &reported.finding;
-
-                if reported.suppressed {
-                    // Suppressed findings are still listed, but clearly marked
-                    // and dimmed so they read as acknowledged, not active.
-                    let label = format!("🔕 [SUPPRESSED] {}", finding.message)
-                        .dimmed()
-                        .to_string();
-                    output.push_str(&format!("{}\n", label));
-                    if let Some(reason) = &reported.suppression_reason {
-                        output
-                            .push_str(&format!("    ↳ reason: {}\n", reason).dimmed().to_string());
-                    }
-                    if explain {
-                        if let Some(remediation) = &reported.remediation {
-                            output.push_str(
-                                &format!("    ↳ guidance: {}\n", remediation)
-                                    .dimmed()
-                                    .to_string(),
-                            );
-                        }
-                    }
-                    continue;
-                }
-
-                let formatted = match finding.severity {
-                    Severity::Critical => format!("🔴 {}", finding.message).red(),
-                    Severity::Warning => format!("🟡 {}", finding.message).yellow(),
-                    Severity::Info => format!("🔵 {}", finding.message).cyan(),
-                };
-                output.push_str(&format!("{}\n", formatted));
-                if explain {
-                    if let Some(remediation) = &reported.remediation {
-                        output.push_str(
-                            &format!("    ↳ guidance: {}\n", remediation)
-                                .green()
-                                .to_string(),
-                        );
-                    }
-                }
-            }
-            output.push('\n');
-        }
-
-        if !self.is_safe {
-            if self.strict && self.critical_count == 0 {
-                output.push_str(
-                    &"⚠️  ACTION REQUIRED: Strict mode is active and warnings were detected.\n"
-                        .yellow()
-                        .bold()
-                        .to_string(),
-                );
-                output.push_str(
-                    &"These warnings must be resolved or strict mode disabled to proceed.\n"
-                        .yellow()
-                        .to_string(),
-                );
-            } else {
-                output.push_str(&"⚠️  ACTION REQUIRED: The new contract version modifies existing storage layouts or function interfaces.\n".red().bold().to_string());
-                output.push_str(&"Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.\n".red().to_string());
-            }
-        }
-
-        output
+        view::render_single_text(&self.to_view(explain))
     }
 
-    /// Generate a structured Markdown output.
+    /// Generate the standalone Markdown report.
     pub fn generate_summary_markdown(&self) -> String {
-        let mut output = String::new();
-        output.push_str("# Soroban Upgrade Safety Report\n\n");
-
-        let status = if self.is_safe {
-            "✅ PASSED (No breaking changes detected)"
-        } else {
-            "❌ FAILED (Critical breaking changes detected)"
-        };
-        output.push_str(&format!("## Status: {}\n\n", status));
-
-        output.push_str("### Summary Table\n\n");
-        output.push_str("| Finding Severity | Count |\n");
-        output.push_str("| :--- | :--- |\n");
-        output.push_str(&format!("| **Critical** | {} |\n", self.critical_count));
-        output.push_str(&format!("| **Warning** | {} |\n", self.warning_count));
-        output.push_str(&format!("| **Info** | {} |\n", self.info_count));
-        if self.suppressed_count > 0 {
-            output.push_str(&format!("| **Suppressed** | {} |\n", self.suppressed_count));
-        }
-        output.push_str(&format!(
-            "\n**Recommended SemVer Bump**: `{}`\n\n",
-            self.recommended_bump()
-        ));
-
-        if let Some(source) = &self.baseline_source {
-            output.push_str(&format!("**Baseline Source**: `{}`\n\n", source));
-        }
-        if let Some(hash) = &self.verified_code_hash {
-            output.push_str(&format!("**Verified Code Hash**: `{}`\n\n", hash));
-        }
-
-        output.push_str("---\n\n");
-
-        if self.total_findings == 0 {
-            output.push_str("No relevant changes detected. The upgrade is identical in its exports and types.\n");
-            return output;
-        }
-
-        // Sort categories to have consistent output; surface Environment first.
-        let mut categories: Vec<&String> = self.findings_by_category.keys().collect();
-        categories.sort_by(|a, b| {
-            let rank = |name: &str| if name == "Environment" { 0 } else { 1 };
-            rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
-        });
-
-        for category in categories {
-            output.push_str(&format!("### {}\n\n", category));
-            let group = self.findings_by_category.get(category).unwrap();
-            for reported in group {
-                let finding = &reported.finding;
-
-                if reported.suppressed {
-                    output.push_str(&format!("- 🔕 **[SUPPRESSED]** {}\n", finding.message));
-                    if let Some(reason) = &reported.suppression_reason {
-                        output.push_str(&format!("  - ↳ reason: {}\n", reason));
-                    }
-                    continue;
-                }
-
-                let emoji = match finding.severity {
-                    Severity::Critical => "🔴",
-                    Severity::Warning => "🟡",
-                    Severity::Info => "🔵",
-                };
-                output.push_str(&format!("- {} {}\n", emoji, finding.message));
-            }
-            output.push('\n');
-        }
-
-        if !self.is_safe {
-            output.push_str("### ⚠️ Action Required\n\n");
-            output.push_str("- The new contract version modifies existing storage layouts or function interfaces.\n");
-            output.push_str("- Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.\n");
-        }
-
-        output
+        view::render_single_markdown(&self.to_view(false))
     }
 }
 
