@@ -1,4 +1,7 @@
 # Ignore all Cargo build output, including nested fixture projects
 **/target/
 
+# Pending insta snapshots, written on snapshot mismatch before review
+**/*.snap.new
+
 fix.md
