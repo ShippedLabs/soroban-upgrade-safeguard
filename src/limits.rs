@@ -164,7 +164,8 @@ impl std::error::Error for LimitError {}
 /// regardless of how much context was attached along the way.
 #[must_use]
 pub fn find_limit_error(err: &anyhow::Error) -> Option<&LimitError> {
-    err.chain().find_map(|cause| cause.downcast_ref::<LimitError>())
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<LimitError>())
 }
 
 impl LimitError {

@@ -4,7 +4,7 @@ use std::fmt;
 use std::path::Path;
 use stellar_xdr::curr::{
     ContractExecutable, Hash, LedgerEntry, LedgerEntryData, LedgerKey, LedgerKeyContractCode,
-    LedgerKeyContractData, ReadXdr, ScAddress, ScVal, WriteXdr,
+    LedgerKeyContractData, Limits, ReadXdr, ScAddress, ScVal, WriteXdr,
 };
 use wasmparser::{Parser, Payload};
 
@@ -141,11 +141,7 @@ pub fn fetch_wasm_from_rpc_with_policy(
     let response = query_rpc(
         rpc_url,
         "getLedgerEntries",
-        serde_json::json!({
-            "keys": [ledger_key
-                .to_xdr_base64(Limits::none())
-                .map_err(|e| anyhow::anyhow!("Failed to serialize LedgerKey: {}", e))?]
-        }),
+        serde_json::json!({ "keys": [key_b64] }),
     )?;
 
     let entries = response["result"]["entries"]
@@ -189,21 +185,19 @@ pub fn fetch_wasm_from_rpc_with_policy(
         hash: wasm_hash.clone(),
     });
 
-    let code_key_b64 = code_ledger_key.to_xdr_base64(policy.xdr_limits()).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to serialize ContractCode LedgerKey to base64: {}",
-            e
-        )
-    })?;
+    let code_key_b64 = code_ledger_key
+        .to_xdr_base64(policy.xdr_limits())
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to serialize ContractCode LedgerKey to base64: {}",
+                e
+            )
+        })?;
 
     let code_response = query_rpc(
         rpc_url,
         "getLedgerEntries",
-        serde_json::json!({
-            "keys": [code_ledger_key
-                .to_xdr_base64(Limits::none())
-                .map_err(|e| anyhow::anyhow!("Failed to serialize code key: {}", e))?]
-        }),
+        serde_json::json!({ "keys": [code_key_b64] }),
     )?;
 
     let code_entries = code_response["result"]["entries"]
@@ -334,6 +328,65 @@ fn query_rpc(rpc_url: &str, method: &str, params: serde_json::Value) -> Result<s
     }
 
     Ok(response)
+}
+
+/// Find the single RPC `getLedgerEntries` result entry whose `key` matches the
+/// requested [`LedgerKey`].
+///
+/// The RPC returns an array of `{ "key": <base64 XDR>, "xdr": <base64 XDR> }`
+/// objects. Rather than trusting positional order, we match the entry whose
+/// serialized key equals the one we asked for, and reject anything ambiguous or
+/// malformed so a surprising RPC response fails loudly instead of silently
+/// loading the wrong bytecode. `context` names the lookup for error messages.
+fn find_entry_by_key<'a>(
+    entries: &'a [serde_json::Value],
+    expected_key: &LedgerKey,
+    context: &str,
+) -> Result<&'a serde_json::Value> {
+    if entries.is_empty() {
+        bail!("{}: RPC response returned zero entries", context);
+    }
+
+    let expected_b64 = expected_key
+        .to_xdr_base64(Limits::none())
+        .map_err(|e| anyhow::anyhow!("{}: failed to serialize expected key: {}", context, e))?;
+
+    let mut matched: Vec<&serde_json::Value> = Vec::new();
+
+    for entry in entries {
+        let key_b64 = entry["key"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("{}: RPC entry missing 'key' field", context))?;
+
+        let _xdr_b64 = entry["xdr"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("{}: RPC entry missing 'xdr' field", context))?;
+
+        if key_b64 == expected_b64 {
+            matched.push(entry);
+        }
+    }
+
+    if matched.is_empty() {
+        return Err(IntegrityError {
+            kind: IntegrityErrorKind::KeyMismatch,
+            details: format!(
+                "{}: no entry matches the expected ledger key (possible RPC manipulation)",
+                context
+            ),
+        }
+        .into());
+    }
+
+    if matched.len() > 1 {
+        bail!(
+            "{}: {} entries share the same ledger key (possible RPC manipulation)",
+            context,
+            matched.len()
+        );
+    }
+
+    Ok(matched[0])
 }
 
 #[cfg(test)]

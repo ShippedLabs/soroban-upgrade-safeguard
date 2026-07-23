@@ -55,7 +55,10 @@ pub fn try_type_to_string(
         ScSpecTypeDef::Symbol => "Symbol".to_string(),
         ScSpecTypeDef::Address => "Address".to_string(),
         ScSpecTypeDef::Option(opt) => {
-            format!("Option<{}>", try_type_to_string(&opt.value_type, depth + 1, max)?)
+            format!(
+                "Option<{}>",
+                try_type_to_string(&opt.value_type, depth + 1, max)?
+            )
         }
         ScSpecTypeDef::Result(res) => format!(
             "Result<{}, {}>",
@@ -63,7 +66,10 @@ pub fn try_type_to_string(
             try_type_to_string(&res.error_type, depth + 1, max)?
         ),
         ScSpecTypeDef::Vec(vec) => {
-            format!("Vec<{}>", try_type_to_string(&vec.element_type, depth + 1, max)?)
+            format!(
+                "Vec<{}>",
+                try_type_to_string(&vec.element_type, depth + 1, max)?
+            )
         }
         ScSpecTypeDef::Map(map) => format!(
             "Map<{}, {}>",

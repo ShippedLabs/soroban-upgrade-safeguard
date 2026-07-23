@@ -289,6 +289,8 @@ fn run() -> Result<()> {
                         explain: args.explain,
                         strict: args.strict,
                         policy: &policy,
+                        baseline_source: Some("Local File"),
+                        verified_code_hash: None,
                     },
                     &progress,
                 )
@@ -395,10 +397,7 @@ fn run() -> Result<()> {
                     } else {
                         "⛔ ERROR"
                     };
-                    markdown.push_str(&format!(
-                        "| {} | {} | — | — | — | — |\n",
-                        name, status_str
-                    ));
+                    markdown.push_str(&format!("| {} | {} | — | — | — | — |\n", name, status_str));
                 }
 
                 markdown.push_str("\n---\n\n");
@@ -529,7 +528,49 @@ fn run() -> Result<()> {
     // same resource policy as file input.
     let old = if let Some(contract_id) = old_source {
         let rpc_url = args.rpc_url.as_ref().unwrap();
-        loader::fetch_wasm_from_rpc_with_policy(contract_id, rpc_url, &policy)?
+        let wasm = loader::fetch_wasm_from_rpc_with_policy(contract_id, rpc_url, &policy)?;
+
+        // ── Expected hash pinning ─────────────────────────────────────────
+        // When the caller pins the on-chain baseline with --expected-wasm-hash,
+        // verify the fetched bytecode's hash matches before trusting it.
+        if let Some(ref expected_hex) = args.expected_wasm_hash {
+            let expected_hash = hex::decode(expected_hex).with_context(|| {
+                format!(
+                    "Invalid --expected-wasm-hash: '{}' (must be 64 hex chars)",
+                    expected_hex
+                )
+            })?;
+
+            if expected_hash.len() != 32 {
+                anyhow::bail!(
+                    "Invalid --expected-wasm-hash length: got {} bytes, expected 32",
+                    expected_hash.len()
+                );
+            }
+
+            let mut expected_arr = [0u8; 32];
+            expected_arr.copy_from_slice(&expected_hash);
+
+            match wasm.verified_hash {
+                Some(actual) if actual == expected_arr => {
+                    progress("  ✅ On-chain WASM hash matches --expected-wasm-hash".to_string());
+                }
+                Some(actual) => {
+                    anyhow::bail!(
+                        "Hash mismatch: --expected-wasm-hash {}, but verified on-chain hash is {}",
+                        hex::encode(expected_arr),
+                        hex::encode(actual),
+                    );
+                }
+                None => {
+                    anyhow::bail!(
+                        "--expected-wasm-hash provided but baseline has no verified hash"
+                    );
+                }
+            }
+        }
+
+        wasm
     } else {
         loader::load_wasm(&args.wasm_paths[0])?
     };
@@ -561,6 +602,8 @@ fn run() -> Result<()> {
             explain: args.explain,
             strict: args.strict,
             policy: &policy,
+            baseline_source,
+            verified_code_hash: verified_hash_hex.as_deref(),
         },
         &progress,
     )?;
@@ -617,6 +660,10 @@ struct ContractComparison<'a> {
     explain: bool,
     strict: bool,
     policy: &'a ResourcePolicy,
+    /// Where the baseline (old) contract was sourced from ("RPC"/"Local File").
+    baseline_source: Option<&'a str>,
+    /// Hex SHA-256 of the baseline WASM, when it was verified (RPC mode).
+    verified_code_hash: Option<&'a str>,
 }
 
 /// Helper function to run comparison for a single pair.
@@ -633,6 +680,8 @@ fn compare_contracts(
         explain,
         strict,
         policy,
+        baseline_source,
+        verified_code_hash,
     } = comparison;
     let old_meta = parser::extract_metadata_with_policy(old_bytes, policy)?;
     let old_spec = spec::ContractSpec::from_entries(&old_meta.spec);

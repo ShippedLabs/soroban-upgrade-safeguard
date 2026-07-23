@@ -119,10 +119,7 @@ fn decode_spec_entries_with_policy(
 }
 
 /// Decodes concatenated ScEnvMetaEntry XDR objects from raw bytes under `policy`.
-fn decode_env_meta_entries(
-    data: &[u8],
-    policy: &ResourcePolicy,
-) -> Result<Vec<ScEnvMetaEntry>> {
+fn decode_env_meta_entries(data: &[u8], policy: &ResourcePolicy) -> Result<Vec<ScEnvMetaEntry>> {
     let cursor = Cursor::new(data);
     let mut limited = Limited::new(cursor, policy.xdr_limits());
     let mut entries = Vec::new();
@@ -195,15 +192,18 @@ pub fn extract_metadata_with_policy(
                     let section_index = spec_section_index;
                     spec_section_index += 1;
 
-                    let entries =
-                        decode_spec_entries_with_policy(section.data(), policy, metadata.spec.len())
-                            .with_context(|| {
-                                format!(
-                                    "Failed to decode contractspecv0 section {} at byte offset {}",
-                                    section_index,
-                                    section.data_offset()
-                                )
-                            })?;
+                    let entries = decode_spec_entries_with_policy(
+                        section.data(),
+                        policy,
+                        metadata.spec.len(),
+                    )
+                    .with_context(|| {
+                        format!(
+                            "Failed to decode contractspecv0 section {} at byte offset {}",
+                            section_index,
+                            section.data_offset()
+                        )
+                    })?;
                     metadata.spec.extend(entries);
                 }
                 "contractenvmetav0" => {
