@@ -60,7 +60,8 @@ The source lives under `src/` and is split into focused modules. Understanding t
 - `spec.rs` defines `ContractSpec`, the in-memory model that groups functions and user-defined types by name.
 - `mapper.rs` turns type definitions into readable signatures and builds the reverse dependency graph used for cascade detection.
 - `diff.rs` holds the comparison logic and the `Finding` and `Severity` types. This is where most detection rules live.
-- `report.rs` aggregates findings into a `SafetyReport` and renders the colored summary.
+- `report.rs` aggregates findings into a `SafetyReport` and builds the `SingleReportView` that every output format renders from.
+- `view.rs` is the single view model. All three formats — JSON, colored text, and Markdown — and both single-pair and batch mode render from `SingleReportView`/`BatchReportView` and nothing else; no renderer post-processes another's output. To add a field to a report, add it to the view model here and to each `render_*` function. The conformance tests (`tests/format_conformance.rs`) fail if a format is missed, and the snapshots (`tests/report_snapshots.rs`) pin the exact output.
 
 Tests and fixtures live under `tests/`.
 
