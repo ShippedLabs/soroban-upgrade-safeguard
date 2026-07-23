@@ -1,0 +1,25 @@
+---
+source: tests/report_snapshots.rs
+expression: render_single_markdown(&provenance_report().to_view(false))
+---
+# Soroban Upgrade Safety Report
+
+## Status: ✅ PASSED (No breaking changes detected)
+
+### Summary Table
+
+| Finding Severity | Count |
+| :--- | :--- |
+| **Critical** | 0 |
+| **Warning** | 0 |
+| **Info** | 0 |
+
+**Recommended SemVer Bump**: `patch`
+
+**Baseline Source**: `RPC`
+
+**Verified Code Hash**: `deadbeefcafef00d1122334455667788990011223344556677889900aabbccddee`
+
+---
+
+No relevant changes detected. The upgrade is identical in its exports and types.

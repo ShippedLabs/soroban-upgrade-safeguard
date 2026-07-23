@@ -1,0 +1,56 @@
+---
+source: tests/report_snapshots.rs
+expression: render_batch_markdown(&view)
+---
+# Soroban Upgrade Safety Report (Batch Mode)
+
+## Status: ✅ PASSED (All contracts safe)
+
+### Summary
+
+| Contract | Status | Critical | Warning | Info | Suppressed |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| normal | ✅ PASSED | 0 | 0 | 0 | 0 |
+| safe\|weird | ✅ PASSED | 0 | 0 | 0 | 0 |
+
+---
+
+## Details: normal
+
+## Status: ✅ PASSED (No breaking changes detected)
+
+### Summary Table
+
+| Finding Severity | Count |
+| :--- | :--- |
+| **Critical** | 0 |
+| **Warning** | 0 |
+| **Info** | 0 |
+
+**Recommended SemVer Bump**: `patch`
+
+---
+
+No relevant changes detected. The upgrade is identical in its exports and types.
+
+---
+
+## Details: safe|weird
+
+## Status: ✅ PASSED (No breaking changes detected)
+
+### Summary Table
+
+| Finding Severity | Count |
+| :--- | :--- |
+| **Critical** | 0 |
+| **Warning** | 0 |
+| **Info** | 0 |
+
+**Recommended SemVer Bump**: `patch`
+
+---
+
+No relevant changes detected. The upgrade is identical in its exports and types.
+
+---

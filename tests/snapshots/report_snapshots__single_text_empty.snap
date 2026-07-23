@@ -1,0 +1,16 @@
+---
+source: tests/report_snapshots.rs
+expression: render_single_text(&empty_report().to_view(false))
+---
+
+========================================
+    SOROBAN UPGRADE SAFETY REPORT
+========================================
+Status: ✅ PASSED (No breaking changes detected)
+Critical: 0
+Warnings: 0
+Info:     0
+Recommended Bump: patch
+----------------------------------------
+
+No relevant changes detected. The upgrade is identical in its exports and types.

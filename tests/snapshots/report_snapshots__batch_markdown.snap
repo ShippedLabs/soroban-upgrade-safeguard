@@ -1,0 +1,73 @@
+---
+source: tests/report_snapshots.rs
+expression: render_batch_markdown(&view)
+---
+# Soroban Upgrade Safety Report (Batch Mode)
+
+## Status: ❌ FAILED (Some contracts have breaking changes)
+
+### Summary
+
+| Contract | Status | Critical | Warning | Info | Suppressed |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| breaking_contract | ❌ FAILED | 2 | 0 | 1 | 1 |
+| clean_contract | ✅ PASSED | 0 | 0 | 0 | 0 |
+
+---
+
+## Details: breaking_contract
+
+## Status: ❌ FAILED (Critical breaking changes detected)
+
+### Summary Table
+
+| Finding Severity | Count |
+| :--- | :--- |
+| **Critical** | 2 |
+| **Warning** | 0 |
+| **Info** | 1 |
+| **Suppressed** | 1 |
+
+**Recommended SemVer Bump**: `major`
+
+---
+
+### Environment
+
+- 🔵 Protocol version changed from 20 to 21
+
+### Function Signature Changed
+
+- 🔕 **[SUPPRESSED]** Function 'initialize' signature changed
+  - ↳ reason: Planned re-init for the v2 migration.
+
+### Struct Field Removed
+
+- 🔴 Field 'threshold' removed from struct 'ConfigData'
+
+### ⚠️ Action Required
+
+- The new contract version modifies existing storage layouts or function interfaces.
+- Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.
+
+---
+
+## Details: clean_contract
+
+## Status: ✅ PASSED (No breaking changes detected)
+
+### Summary Table
+
+| Finding Severity | Count |
+| :--- | :--- |
+| **Critical** | 0 |
+| **Warning** | 0 |
+| **Info** | 0 |
+
+**Recommended SemVer Bump**: `patch`
+
+---
+
+No relevant changes detected. The upgrade is identical in its exports and types.
+
+---

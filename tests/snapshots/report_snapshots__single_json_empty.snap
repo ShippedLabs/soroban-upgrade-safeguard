@@ -1,0 +1,19 @@
+---
+source: tests/report_snapshots.rs
+expression: json
+---
+{
+  "is_safe": true,
+  "strict": false,
+  "counts": {
+    "critical": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "suppressed_count": 0,
+  "total_findings": 0,
+  "recommended_bump": "patch",
+  "baseline_source": null,
+  "verified_code_hash": null,
+  "findings_by_category": {}
+}

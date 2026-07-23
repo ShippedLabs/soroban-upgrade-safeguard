@@ -1,0 +1,41 @@
+---
+source: tests/report_snapshots.rs
+expression: render_batch_text(&view)
+---
+========================================
+    SOROBAN BATCH SAFETY REPORT
+========================================
+Overall Status: ❌ FAILED (Some contracts have breaking changes)
+
+Summary of Contracts:
+  - only_contract: ❌ FAILED (2 critical, 0 warnings, 1 info, 1 suppressed)
+
+========================================
+
+=== Contract: only_contract ===
+
+========================================
+    SOROBAN UPGRADE SAFETY REPORT
+========================================
+Status: ❌ FAILED (Critical breaking changes detected)
+Critical: 2
+Warnings: 0
+Info:     1
+Suppressed: 1
+Recommended Bump: major
+----------------------------------------
+
+--- [ENVIRONMENT] ---
+🔵 Protocol version changed from 20 to 21
+
+--- [FUNCTION SIGNATURE CHANGED] ---
+🔕 [SUPPRESSED] Function 'initialize' signature changed
+    ↳ reason: Planned re-init for the v2 migration.
+
+--- [STRUCT FIELD REMOVED] ---
+🔴 Field 'threshold' removed from struct 'ConfigData'
+
+⚠️  ACTION REQUIRED: The new contract version modifies existing storage layouts or function interfaces.
+Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.
+
+========================================

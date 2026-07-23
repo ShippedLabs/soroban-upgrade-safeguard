@@ -1,0 +1,76 @@
+---
+source: tests/report_snapshots.rs
+expression: json
+---
+{
+  "is_safe": false,
+  "strict": false,
+  "total_pairs": 2,
+  "limit_violation": false,
+  "results": {
+    "breaking_contract": {
+      "is_safe": false,
+      "strict": false,
+      "counts": {
+        "critical": 2,
+        "warning": 0,
+        "info": 1
+      },
+      "suppressed_count": 1,
+      "total_findings": 3,
+      "recommended_bump": "major",
+      "baseline_source": null,
+      "verified_code_hash": null,
+      "findings_by_category": {
+        "Environment": [
+          {
+            "severity": "info",
+            "category": "Environment",
+            "message": "Protocol version changed from 20 to 21",
+            "type_name": null,
+            "target": null,
+            "remediation": "Verify that the target network supports the new protocol version."
+          }
+        ],
+        "Function Signature Changed": [
+          {
+            "severity": "critical",
+            "category": "Function Signature Changed",
+            "message": "Function 'initialize' signature changed",
+            "type_name": null,
+            "target": "initialize",
+            "suppressed": true,
+            "suppression_reason": "Planned re-init for the v2 migration.",
+            "remediation": "Update call sites, SDKs, and tests to match the new parameter structure."
+          }
+        ],
+        "Struct Field Removed": [
+          {
+            "severity": "critical",
+            "category": "Struct Field Removed",
+            "message": "Field 'threshold' removed from struct 'ConfigData'",
+            "type_name": "ConfigData",
+            "target": "ConfigData.threshold",
+            "remediation": "Restore the field or perform a state migration."
+          }
+        ]
+      }
+    },
+    "clean_contract": {
+      "is_safe": true,
+      "strict": false,
+      "counts": {
+        "critical": 0,
+        "warning": 0,
+        "info": 0
+      },
+      "suppressed_count": 0,
+      "total_findings": 0,
+      "recommended_bump": "patch",
+      "baseline_source": null,
+      "verified_code_hash": null,
+      "findings_by_category": {}
+    }
+  },
+  "failed": {}
+}

@@ -1,0 +1,31 @@
+---
+source: tests/report_snapshots.rs
+expression: render_single_text(&rich_report().to_view(true))
+---
+
+========================================
+    SOROBAN UPGRADE SAFETY REPORT
+========================================
+Status: ❌ FAILED (Critical breaking changes detected)
+Critical: 2
+Warnings: 0
+Info:     1
+Suppressed: 1
+Recommended Bump: major
+----------------------------------------
+
+--- [ENVIRONMENT] ---
+🔵 Protocol version changed from 20 to 21
+    ↳ guidance: Verify that the target network supports the new protocol version.
+
+--- [FUNCTION SIGNATURE CHANGED] ---
+🔕 [SUPPRESSED] Function 'initialize' signature changed
+    ↳ reason: Planned re-init for the v2 migration.
+    ↳ guidance: Update call sites, SDKs, and tests to match the new parameter structure.
+
+--- [STRUCT FIELD REMOVED] ---
+🔴 Field 'threshold' removed from struct 'ConfigData'
+    ↳ guidance: Restore the field or perform a state migration.
+
+⚠️  ACTION REQUIRED: The new contract version modifies existing storage layouts or function interfaces.
+Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.

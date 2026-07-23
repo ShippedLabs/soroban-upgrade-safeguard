@@ -1,0 +1,19 @@
+---
+source: tests/report_snapshots.rs
+expression: render_single_text(&all_suppressed_report().to_view(false))
+---
+
+========================================
+    SOROBAN UPGRADE SAFETY REPORT
+========================================
+Status: ✅ PASSED (No breaking changes detected)
+Critical: 1
+Warnings: 0
+Info:     0
+Suppressed: 1
+Recommended Bump: major
+----------------------------------------
+
+--- [STRUCT FIELD REMOVED] ---
+🔕 [SUPPRESSED] Field 'threshold' removed from struct 'ConfigData'
+    ↳ reason: Reviewed: storage migration ships in v2.

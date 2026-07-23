@@ -1,0 +1,21 @@
+---
+source: tests/report_snapshots.rs
+expression: render_single_markdown(&empty_report().to_view(false))
+---
+# Soroban Upgrade Safety Report
+
+## Status: ✅ PASSED (No breaking changes detected)
+
+### Summary Table
+
+| Finding Severity | Count |
+| :--- | :--- |
+| **Critical** | 0 |
+| **Warning** | 0 |
+| **Info** | 0 |
+
+**Recommended SemVer Bump**: `patch`
+
+---
+
+No relevant changes detected. The upgrade is identical in its exports and types.

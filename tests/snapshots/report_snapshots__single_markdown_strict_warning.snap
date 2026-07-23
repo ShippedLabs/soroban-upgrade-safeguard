@@ -1,0 +1,28 @@
+---
+source: tests/report_snapshots.rs
+expression: render_single_markdown(&strict_warning_report().to_view(false))
+---
+# Soroban Upgrade Safety Report
+
+## Status: ❌ FAILED (Warnings detected in strict mode)
+
+### Summary Table
+
+| Finding Severity | Count |
+| :--- | :--- |
+| **Critical** | 0 |
+| **Warning** | 1 |
+| **Info** | 0 |
+
+**Recommended SemVer Bump**: `minor`
+
+---
+
+### Struct Field Added
+
+- 🟡 Field 'nickname' added to struct 'Account'
+
+### ⚠️ Action Required
+
+- Strict mode is active and warnings were detected.
+- These warnings must be resolved or strict mode disabled to proceed.
