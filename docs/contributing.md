@@ -205,6 +205,7 @@ When in doubt about whether something should be critical or a warning, lean towa
 3. Ensure `cargo fmt --check`, `cargo clippy`, `cargo build`, and `cargo test` all pass locally before pushing. These are the exact steps the CI workflow runs, so a clean local run means CI will pass.
 4. Open a pull request that describes the change, the motivation, and how you verified it. Link any related issue. The CI workflow at `.github/workflows/ci.yml` will run automatically and must be green before the pull request can be merged.
 5. Be responsive to review feedback. Small follow-up commits during review are fine; we can squash on merge.
+6. Update `CHANGELOG.md` when your pull request introduces a notable user-facing change.
 
 ## Reporting Bugs
 
