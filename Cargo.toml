@@ -35,7 +35,7 @@ wasmparser = "0.201.0"
 wat = { version = "1.254", default-features = false }
 
 # Stellar/Soroban XDR
-stellar-xdr = { version = "21.2.0", features = ["std", "curr", "arbitrary", "base64"] }
+stellar-xdr = { version = "26.0.1", features = ["std", "curr", "arbitrary", "base64"] }
 stellar-strkey = "0.0.8"
 
 # CLI and Utilities
