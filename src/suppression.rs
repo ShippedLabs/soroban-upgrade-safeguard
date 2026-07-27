@@ -212,6 +212,7 @@ impl SuppressionConfig {
             }
         }
 
+        let mut has_old_format = false;
         for rule in &self.rules {
             if let Some(expiry_str) = &rule.expiry {
                 if is_expired(expiry_str)? {
@@ -247,7 +248,14 @@ impl SuppressionConfig {
                         rule.target
                     );
                 }
+            } else {
+                has_old_format = true;
             }
+        }
+        if has_old_format {
+            eprintln!(
+                "Warning: Deprecated old-format suppression rule detected. Please update config to use the new secure format."
+            );
         }
         Ok(())
     }

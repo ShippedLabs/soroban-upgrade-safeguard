@@ -4,6 +4,8 @@
     [STRICT MODE ACTIVE]
 ========================================
 Status: ❌ FAILED (Warnings detected in strict mode)
+Scope:  Exported interface + environment metadata only — storage layout is NOT verified by this result.
+        Storage layout: NOT analyzed — no storage schema supplied.
 Critical: 0
 Warnings: 2
 Info:     0

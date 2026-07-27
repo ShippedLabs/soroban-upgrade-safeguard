@@ -43,11 +43,120 @@
     },
     "BaselineStatus": {
       "description": "Whether a finding in the current run was already present in the baseline.",
-      "enum": [
-        "new",
-        "persisting"
+      "oneOf": [
+        {
+          "description": "Not present in the baseline report.",
+          "enum": [
+            "new"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Present in both the baseline and the current run.",
+          "enum": [
+            "persisting"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "BuildMetrics": {
+      "description": "Per-build size and interface-count metrics, carried in the report for all three output formats. These are purely informational and never affect `is_safe`, the exit code, or the recommended bump.",
+      "properties": {
+        "new_enum_count": {
+          "description": "Number of enums in the new spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "new_error_enum_count": {
+          "description": "Number of error enums in the new spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "new_function_count": {
+          "description": "Number of exported functions in the new spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "new_size_bytes": {
+          "description": "Total WASM binary size in bytes for the new build.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "new_struct_count": {
+          "description": "Number of structs in the new spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "new_union_count": {
+          "description": "Number of unions in the new spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_enum_count": {
+          "description": "Number of enums in the old spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_error_enum_count": {
+          "description": "Number of error enums in the old spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_function_count": {
+          "description": "Number of exported functions in the old spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_size_bytes": {
+          "description": "Total WASM binary size in bytes for the old build.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_struct_count": {
+          "description": "Number of structs in the old spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_union_count": {
+          "description": "Number of unions in the old spec.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "size_delta_bytes": {
+          "description": "Byte delta: `new_size_bytes as i64 - old_size_bytes as i64`.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "new_enum_count",
+        "new_error_enum_count",
+        "new_function_count",
+        "new_size_bytes",
+        "new_struct_count",
+        "new_union_count",
+        "old_enum_count",
+        "old_error_enum_count",
+        "old_function_count",
+        "old_size_bytes",
+        "old_struct_count",
+        "old_union_count",
+        "size_delta_bytes"
       ],
-      "type": "string"
+      "type": "object"
     },
     "FailedPair": {
       "properties": {
@@ -236,6 +345,17 @@
         "is_safe": {
           "type": "boolean"
         },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BuildMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Build size and interface-count metrics (always present in CLI output)."
+        },
         "recommended_bump": {
           "enum": [
             "major",
@@ -270,6 +390,13 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "unmatched_suppressions": {
+          "description": "Suppression rules from the config that matched no finding.",
+          "items": {
+            "$ref": "#/definitions/UnmatchedSuppressionJson"
+          },
+          "type": "array"
+        },
         "verified_code_hash": {
           "type": [
             "string",
@@ -288,7 +415,8 @@
         "strict",
         "suppressed_count",
         "tool_version",
-        "total_findings"
+        "total_findings",
+        "unmatched_suppressions"
       ],
       "type": "object"
     },
@@ -434,6 +562,24 @@
           "type": "object"
         }
       ]
+    },
+    "UnmatchedSuppressionJson": {
+      "description": "JSON representation of a suppression rule that matched no finding.",
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "category"
+      ],
+      "type": "object"
     }
   },
   "properties": {

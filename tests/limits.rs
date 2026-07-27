@@ -151,13 +151,17 @@ fn deeply_nested_type_through_pipeline_errors() {
             }));
         }
         let mut spec = ContractSpec::default();
-        spec.functions.insert(
-            "f".to_string(),
-            ScSpecFunctionV0 {
+        spec.structs.insert(
+            "MyStruct".to_string(),
+            stellar_xdr::curr::ScSpecUdtStructV0 {
                 doc: StringM::default(),
-                name: "f".try_into().unwrap(),
-                inputs: VecM::default(),
-                outputs: VecM::try_from(vec![chain]).unwrap(),
+                lib: StringM::default(),
+                name: "MyStruct".try_into().unwrap(),
+                fields: VecM::try_from(vec![stellar_xdr::curr::ScSpecUdtStructFieldV0 {
+                    doc: StringM::default(),
+                    name: "field".try_into().unwrap(),
+                    type_: chain,
+                }]).unwrap(),
             },
         );
         spec

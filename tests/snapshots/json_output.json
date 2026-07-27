@@ -1,6 +1,15 @@
 {
   "is_safe": false,
   "strict": false,
+  "certifies": "Exported interface + environment metadata only — storage layout is NOT verified by this result.",
+  "scope": {
+    "exported_interface_analyzed": true,
+    "env_metadata_analyzed": true,
+    "storage_layout_analyzed": false,
+    "old_spec_section_count": 1,
+    "new_spec_section_count": 1,
+    "summary": "Exported interface + environment metadata only — storage layout is NOT verified by this result."
+  },
   "counts": {
     "critical": 3,
     "warning": 0,
@@ -13,41 +22,75 @@
   "baseline_source": null,
   "verified_code_hash": null,
   "findings_by_category": {
-    "Event Enum Case Added": [
+    "Enum Case Added": [
       {
+        "rule_id": "enum_case_added",
         "severity": "info",
-        "category": "Event Enum Case Added",
-        "message": "Event enum 'StatusEvent': new case 'Archived' (value 4) added.",
+        "category": "Enum Case Added",
+        "message": "Enum 'StatusEvent': new case 'Archived' (value 4) added.",
         "type_name": "StatusEvent",
-        "target": "StatusEvent.Archived"
+        "target": "StatusEvent.Archived",
+        "classification": {
+          "class": "storage"
+        },
+        "fingerprint": "77b6e671294377d7493570e4b06926e9ef8c7abffb3e4b18a50c739b65a99154"
       }
     ],
-    "Event Enum Case Value Changed": [
+    "Enum Case Value Changed": [
       {
+        "rule_id": "enum_case_value_changed",
         "severity": "critical",
-        "category": "Event Enum Case Value Changed",
-        "message": "Event enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.",
+        "category": "Enum Case Value Changed",
+        "message": "Enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.",
         "type_name": "StatusEvent",
-        "target": "StatusEvent.Paused"
+        "target": "StatusEvent.Paused",
+        "classification": {
+          "class": "storage"
+        },
+        "fingerprint": "a49d56852a9edc56d1d76f083aaf43a579dc362f58b0bd37826beb253736a2fe"
       }
     ],
     "Function Signature Changed": [
       {
+        "rule_id": "function_signature_changed",
         "severity": "critical",
         "category": "Function Signature Changed",
         "message": "Function 'initialize': parameter count changed from 1 to 2.",
         "type_name": null,
-        "target": "initialize"
+        "target": "initialize",
+        "fingerprint": "6a24fd5d70d6c3433cd62ebc4ad3c8799d556f7d71912b4856e21ed7813a23f2"
       }
     ],
     "Struct Field Removed": [
       {
+        "rule_id": "struct_field_removed",
         "severity": "critical",
         "category": "Struct Field Removed",
         "message": "Struct 'ConfigData': field 'threshold' was removed. Backwards compatibility is broken.",
         "type_name": "ConfigData",
-        "target": "ConfigData.threshold"
+        "target": "ConfigData.threshold",
+        "classification": {
+          "class": "storage"
+        },
+        "fingerprint": "b5669d68fdd4accb0aad4c920a6b305b079570b0362a7d7641cff8db741ca70f"
       }
     ]
-  }
+  },
+  "metrics": {
+    "old_size_bytes": 876,
+    "new_size_bytes": 852,
+    "size_delta_bytes": -24,
+    "old_function_count": 2,
+    "new_function_count": 2,
+    "old_struct_count": 1,
+    "new_struct_count": 1,
+    "old_enum_count": 1,
+    "new_enum_count": 1,
+    "old_union_count": 0,
+    "new_union_count": 0,
+    "old_error_enum_count": 0,
+    "new_error_enum_count": 0
+  },
+  "unmatched_suppressions": [],
+  "tool_version": "0.1.0"
 }

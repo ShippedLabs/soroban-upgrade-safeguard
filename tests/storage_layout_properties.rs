@@ -189,7 +189,7 @@ fn removing_any_field_of_an_internal_struct_is_critical() {
 #[test]
 fn changing_any_field_type_is_critical() {
     let baseline = struct_schema("value_type", "PositionState", &BASE_FIELDS);
-    let replacements = ["u32", "i128", "Address", "Bytes", "Vec<u32>", "Option<u64>"];
+    let replacements = ["u32", "String", "Address", "Bytes", "Vec<u32>", "Option<u64>"];
 
     for position in 0..BASE_FIELDS.len() {
         for replacement in replacements {

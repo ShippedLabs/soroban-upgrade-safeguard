@@ -207,13 +207,67 @@ pub fn report_duplicate_spec_entries(
     }
 }
 
+/// Prefix applied to every finding that came from a declared storage schema.
+///
+/// Storage findings deliberately reuse the exported-interface categories, since
+/// they are the same structural breaks; the prefix keeps the two scopes visibly
+/// distinct in the report and in `findings_by_category` without duplicating the
+/// comparison logic.
+pub const STORAGE_CATEGORY_PREFIX: &str = "Storage ";
+
+/// Category for a storage-schema reference whose target layout is unknown.
+pub const STORAGE_UNRESOLVED_CATEGORY: &str = "Storage Reference Unresolved";
+
 /// Compare two resolved storage schemas through the same diff engine used for
 /// the exported interface, returning a `DiffReport` with the storage findings.
 pub fn compare_storage_schemas(
     old: &crate::storage_schema::ResolvedStorageSchema,
     new: &crate::storage_schema::ResolvedStorageSchema,
 ) -> DiffReport {
-    compare_with_classification(&old.spec, &new.spec, &ClassificationConfig::none())
+    let mut report = compare_with_classification(&old.spec, &new.spec, &ClassificationConfig::none());
+
+    for finding in &mut report.findings {
+        // Prefer the old build's declaration: it describes the layout that
+        // existing on-chain data was actually written with.
+        let meta = finding
+            .type_name
+            .as_deref()
+            .and_then(|name| old.meta.get(name).or_else(|| new.meta.get(name)));
+
+        if let Some(meta) = meta {
+            finding.severity = storage_severity(meta.role, &finding.category, &finding.severity);
+            finding.message = format!(
+                "[declared {} ({})] {}",
+                meta.role.label(),
+                meta.durability.label(),
+                finding.message
+            );
+        } else {
+            finding.message = format!("[declared storage type] {}", finding.message);
+        }
+
+        finding.category = format!("{}{}", STORAGE_CATEGORY_PREFIX, finding.category);
+    }
+
+    report
+}
+
+/// Re-evaluate a finding's severity in light of the role the type plays.
+///
+/// A storage key's serialized bytes *are* the address of every entry written
+/// under it. Appending a field to a value type is a migration concern, because
+/// existing bytes still decode for the fields that were already there. Appending
+/// a field to a *key* changes the address itself, so every existing entry
+/// becomes unreachable: the same edit, a categorically worse outcome.
+fn storage_severity(
+    role: crate::storage_schema::DeclarationRole,
+    category: &str,
+    current: &Severity,
+) -> Severity {
+    if role == crate::storage_schema::DeclarationRole::StorageKey && category == "Struct Field Added" {
+        return Severity::Critical;
+    }
+    current.clone()
 }
 
 /// Inject `Info` findings for schema references the resolver could not match
@@ -226,10 +280,10 @@ pub fn report_unresolved_storage_references(
     for name in unresolved {
         report.findings.push(Finding {
             severity: Severity::Info,
-            category: ENVIRONMENT_CATEGORY.to_string(),
+            category: STORAGE_UNRESOLVED_CATEGORY.to_string(),
             message: format!(
-                "Storage schema references type '{}' which could not be resolved against \
-                 the exported spec. Coverage for this type is not guaranteed.",
+                "Storage schema references type '{}', which is neither declared in the \
+                 schema nor exported by the contract. Its layout could not be analyzed.",
                 name
             ),
             type_name: Some(name.clone()),
@@ -2201,7 +2255,7 @@ mod tests {
         ]);
         // New spec: Inner has its field type changed -> triggers Critical
         let new = spec_with_structs(vec![
-            ("Inner", vec![("value", ScSpecTypeDef::U64)]),
+            ("Inner", vec![("value", ScSpecTypeDef::Bool)]),
             ("Outer", vec![("inner", udt("Inner"))]),
         ]);
 
@@ -2325,7 +2379,7 @@ mod tests {
             ("Top", vec![("mid", udt("Mid"))]),
         ]);
         let new = spec_with_structs(vec![
-            ("Leaf", vec![("x", ScSpecTypeDef::U64)]), // break
+            ("Leaf", vec![("x", ScSpecTypeDef::Bool)]), // break
             ("Mid", vec![("leaf", udt("Leaf"))]),
             ("Top", vec![("mid", udt("Mid"))]),
         ]);
@@ -2356,7 +2410,7 @@ mod tests {
     #[test]
     fn struct_field_type_change_severity_and_category() {
         let old = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::U32)])]);
-        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::I128)])]);
+        let new = spec_with_structs(vec![("Data", vec![("amount", ScSpecTypeDef::Bool)])]);
 
         let report = compare(&old, &new);
 

@@ -59,7 +59,7 @@ fn fixture_pair_union_variant_type_change_is_unsafe() {
         vec![ScSpecUdtUnionCaseV0::TupleV0(ScSpecUdtUnionCaseTupleV0 {
             doc: StringM::default(),
             name: "Pay".try_into().unwrap(),
-            type_: VecM::try_from(vec![ScSpecTypeDef::U64]).unwrap(),
+            type_: VecM::try_from(vec![ScSpecTypeDef::Bool]).unwrap(),
         })],
     );
 
@@ -70,7 +70,7 @@ fn fixture_pair_union_variant_type_change_is_unsafe() {
     assert!(report
         .findings
         .iter()
-        .any(|f| { f.severity == Severity::Critical && f.category == "Union Case Type Changed" }));
+        .any(|f| { f.severity == Severity::Critical && f.category.starts_with("Union Case Type Changed") }));
 }
 
 #[test]

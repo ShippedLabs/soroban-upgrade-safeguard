@@ -2,11 +2,25 @@
 ========================================
     SOROBAN UPGRADE SAFETY REPORT
 ========================================
-Status: ✅ PASSED (No breaking changes detected)
+Status: ✅ PASSED (No exported-interface breaking changes)
+Scope:  Exported interface + environment metadata only — storage layout is NOT verified by this result.
+        Storage layout: NOT analyzed — no storage schema supplied.
 Critical: 0
 Warnings: 0
 Info:     0
 Recommended Bump: patch
 ----------------------------------------
 
-No relevant changes detected. The upgrade is identical in its exports and types.
+No relevant changes detected. The exported interface is identical in its exports and types.
+
+Note: this result does NOT certify storage-layout compatibility. Internal value types serialized into storage and storage-key discriminants need not appear in the exported spec, so a green verdict here says nothing about whether stored data will still deserialize after the upgrade.
+
+========================================
+📊 BUILD METRICS
+========================================
+WASM size:  876 B → 876 B (+0 B)
+Functions:  2 → 2
+Structs:    1 → 1
+Enums:      1 → 1
+Unions:     0 → 0
+Error Enums:0 → 0

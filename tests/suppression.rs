@@ -110,13 +110,23 @@ fn rule_id_based_suppression_matches_stable_identifier() {
         rule_id = "struct_field_removed"
         target  = "ConfigData.threshold"
         reason  = "Reviewed storage migration"
+
+        [[suppress]]
+        rule_id = "enum_case_value_changed"
+        target   = "StatusEvent.Paused"
+        reason   = "Reviewed"
+
+        [[suppress]]
+        rule_id = "function_signature_changed"
+        target   = "initialize"
+        reason   = "Reviewed"
         "#,
     );
 
     let (json, code) = run(Some(&config));
 
     assert_eq!(code, 0, "suppressing by rule_id should pass the run");
-    assert_eq!(json["suppressed_count"].as_u64().unwrap(), 1);
+    assert_eq!(json["suppressed_count"].as_u64().unwrap(), 3);
     assert!(
         findings(&json).iter().any(|(c, t, s)| c == "Struct Field Removed"
             && t.as_deref() == Some("ConfigData.threshold")

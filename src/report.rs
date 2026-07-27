@@ -1,4 +1,4 @@
-use crate::diff::{DiffReport, Finding, Severity};
+use crate::diff::{DiffReport, Finding, Severity, STORAGE_CATEGORY_PREFIX, STORAGE_UNRESOLVED_CATEGORY};
 use crate::limits::ResourcePolicy;
 use crate::rules::{canonical_rule_id, guidance_for_rule_id};
 use crate::suppression::SuppressionConfig;
@@ -383,7 +383,6 @@ pub struct SafetyReportJson<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<&'a BuildMetrics>,
     /// Suppression rules from the config that matched no finding.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unmatched_suppressions: Vec<UnmatchedSuppressionJson>,
     /// This tool's version, so a later run can detect an incompatible
     /// baseline before comparing against this report via `--baseline`.
@@ -1410,10 +1409,51 @@ impl CategoryFilter {
     }
 }
 
-/// Returns remediation/explanation guidance for a given stable rule id.
-pub fn get_remediation_guidance(rule_id: &str) -> Option<&'static str> {
-    guidance_for_rule_id(rule_id)
-        .or_else(|| canonical_rule_id(rule_id).and_then(guidance_for_rule_id))
+/// Returns remediation/explanation guidance for a given finding category.
+///
+/// Storage-schema findings reuse the exported-interface categories behind a
+/// [`STORAGE_CATEGORY_PREFIX`], so guidance is looked up storage-first and then
+/// falls back to the shared advice for the underlying structural change.
+pub fn get_remediation_guidance(category: &str) -> Option<&'static str> {
+    if category == STORAGE_UNRESOLVED_CATEGORY {
+        return Some(
+            "Declare the referenced type in the storage schema, or confirm it is not \
+             serialized into storage. Until it resolves, its layout is not analyzed.",
+        );
+    }
+
+    if let Some(base) = category.strip_prefix(STORAGE_CATEGORY_PREFIX) {
+        return storage_remediation_guidance(base).or_else(|| {
+            guidance_for_rule_id(base)
+                .or_else(|| canonical_rule_id(base).and_then(guidance_for_rule_id))
+        });
+    }
+
+    guidance_for_rule_id(category)
+        .or_else(|| canonical_rule_id(category).and_then(guidance_for_rule_id))
+}
+
+/// Guidance specific to declared storage types, where the consequence of a
+/// structural change is stored-data corruption rather than a broken caller.
+fn storage_remediation_guidance(base_category: &str) -> Option<&'static str> {
+    if base_category.starts_with("Struct Field Type Changed") {
+        return Some("This corrupts stored data. Existing entries hold bytes in the old type's encoding. Revert the type, or migrate every affected entry.");
+    }
+    if base_category.starts_with("Union Case Type Changed") {
+        return Some("This corrupts stored data. The payload encoding changed under an unchanged discriminant. Revert the payload type, or migrate the affected entries.");
+    }
+    match base_category {
+        "Struct Field Reordered" => Some("This corrupts stored data. Soroban serializes struct fields positionally, so reordering makes existing entries decode into the wrong fields. Restore the original field order and append any new field at the end."),
+        "Struct Field Removed" => Some("This corrupts stored data. Existing entries still contain bytes for this field. Restore the field, or perform an explicit migration that rewrites every affected entry before the upgrade."),
+        "Struct Field Added" => Some("For a storage value this needs a migration or default, because existing entries lack the field. For a storage key it is fatal: the key's bytes change, so every existing entry becomes unreachable."),
+        "Union Case Reordered" => Some("This orphans stored data. Union cases are addressed by positional discriminant, so reordering changes which variant existing bytes decode as. Restore the original case order and append new cases at the end."),
+        "Union Case Removed" => Some("This orphans stored data written under the removed discriminant. Restore the case, or migrate the affected entries before upgrading."),
+        "Enum Case Value Changed" => Some("This orphans stored data. The discriminant is what was written to storage, so changing it makes existing entries resolve to a different case or to nothing. Restore the original value."),
+        "Enum Case Removed" => Some("This orphans stored data written under this discriminant. Restore the case, or migrate the affected entries."),
+        "Struct Removed" | "Enum Removed" | "Union Removed" => Some("A declared storage type disappeared while data written with it may still exist on chain. Restore the type, or migrate the affected entries before upgrading."),
+        "Cascading Layout Break" => Some("This type embeds a modified storage type, so its stored bytes are no longer decodable. Resolve the break in the referenced type."),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,10 @@
 # Soroban Upgrade Safety Report
 
-## Status: ❌ FAILED (Critical breaking changes detected)
+## Status: ❌ FAILED (Exported-interface breaking changes detected)
+
+_Exported interface + environment metadata only — storage layout is NOT verified by this result._
+
+**Scope:** Storage layout: NOT analyzed — no storage schema supplied.
 
 ### Summary Table
 
@@ -14,13 +18,13 @@
 
 ---
 
-### Event Enum Case Added
+### Enum Case Added
 
-- 🔵 Event enum 'StatusEvent': new case 'Archived' (value 4) added.
+- 🔵 Enum 'StatusEvent': new case 'Archived' (value 4) added.
 
-### Event Enum Case Value Changed
+### Enum Case Value Changed
 
-- 🔴 Event enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.
+- 🔴 Enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.
 
 ### Function Signature Changed
 
@@ -34,3 +38,14 @@
 
 - The new contract version modifies existing storage layouts or function interfaces.
 - Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.
+## 📊 Build Metrics
+
+| Metric | Old | New | Delta |
+| :--- | ---: | ---: | ---: |
+| **WASM size** | 876 B | 852 B | -24 B |
+| **Functions** | 2 | 2 | +0 |
+| **Structs** | 1 | 1 | +0 |
+| **Enums** | 1 | 1 | +0 |
+| **Unions** | 0 | 0 | +0 |
+| **Error Enums** | 0 | 0 | +0 |
+

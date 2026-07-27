@@ -117,7 +117,7 @@ fn substring_name_is_not_an_event_by_default() {
     ]);
     let new = spec_with_structs(&[
         ("PreventList", &[]),
-        ("EventCounterCache", &[("count", ScSpecTypeDef::U32)]),
+        ("EventCounterCache", &[("count", ScSpecTypeDef::Bool)]),
     ]);
 
     let report = compare_with_classification(&old, &new, &ClassificationConfig::none());
@@ -275,7 +275,7 @@ fn rename_with_field_changes_reports_the_rename_and_the_break() {
     let new = spec_with_structs(&[(
         "Account",
         &[
-            ("amount", ScSpecTypeDef::U64),
+            ("amount", ScSpecTypeDef::Bool),
             ("owner", ScSpecTypeDef::Bytes),
         ],
     )]);

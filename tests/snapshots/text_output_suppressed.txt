@@ -2,7 +2,9 @@
 ========================================
     SOROBAN UPGRADE SAFETY REPORT
 ========================================
-Status: ❌ FAILED (Critical breaking changes detected)
+Status: ❌ FAILED (Exported-interface breaking changes detected)
+Scope:  Exported interface + environment metadata only — storage layout is NOT verified by this result.
+        Storage layout: NOT analyzed — no storage schema supplied.
 Critical: 3
 Warnings: 0
 Info:     1
@@ -10,13 +12,13 @@ Suppressed: 1
 Recommended Bump: major
 ----------------------------------------
 
---- [EVENT ENUM CASE ADDED] ---
-🔵 Event enum 'StatusEvent': new case 'Archived' (value 4) added.
-    ↳ guidance: No action required. Update event indexers and consumers to handle the new event enum case if necessary.
+--- [ENUM CASE ADDED] ---
+🔵 Enum 'StatusEvent': new case 'Archived' (value 4) added.
+    ↳ guidance: No action required. Ensure consumers can handle the new case gracefully.
 
---- [EVENT ENUM CASE VALUE CHANGED] ---
-🔴 Event enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.
-    ↳ guidance: This is a breaking change. Downstream event indexers or consumers relying on these values will fail. Revert the value change.
+--- [ENUM CASE VALUE CHANGED] ---
+🔴 Enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.
+    ↳ guidance: This is a breaking change. Modifying case values breaks serialization/deserialization. Revert the value change.
 
 --- [FUNCTION SIGNATURE CHANGED] ---
 🔴 Function 'initialize': parameter count changed from 1 to 2.
@@ -29,3 +31,11 @@ Recommended Bump: major
 
 ⚠️  ACTION REQUIRED: The new contract version modifies existing storage layouts or function interfaces.
 Deploying this upgrade will result in orphaned data, serialization panics, or broken integrations.
+
+========================================
+🔕 APPLIED SUPPRESSIONS AUDIT LOG
+========================================
+ - Category:    Struct Field Removed
+   Target:      ConfigData.threshold
+   Reason:      Planned storage migration in v2.
+
