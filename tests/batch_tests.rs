@@ -1072,3 +1072,38 @@ fn manifest_with_three_colliding_derived_names_disambiguates_all() {
     // total_pairs must equal the number of results
     assert_eq!(json["total_pairs"].as_u64().unwrap(), 3);
 }
+
+#[test]
+fn directory_scan_matches_uppercase_wasm_extension() {
+    // Regression test for issue #179: files with a .WASM extension must be
+    // scanned the same as files with a lowercase .wasm extension.
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("uppercase_ext_scan");
+    let old_dir = tmp.join("old");
+    let new_dir = tmp.join("new");
+
+    std::fs::create_dir_all(&old_dir).expect("create old dir");
+    std::fs::create_dir_all(&new_dir).expect("create new dir");
+
+    // Use uppercase .WASM extension for both sides — a clean (v1 → v1) pair.
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("token.WASM")).expect("copy old");
+    std::fs::copy(wasm("v1.wasm"), new_dir.join("token.WASM")).expect("copy new");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("--old-dir")
+        .arg(&old_dir)
+        .arg("--new-dir")
+        .arg(&new_dir)
+        .output()
+        .expect("failed to run binary");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+    let code = output.status.code().expect("process terminated by signal");
+
+    // The binary must find the pair and report a clean result rather than
+    // bailing out with "No matching .wasm contract pairs found".
+    assert_eq!(code, 0, "uppercase .WASM scan must exit 0 (clean pair). stdout:\n{stdout}");
+    assert!(
+        stdout.contains("Overall Status: ✅ PASSED"),
+        "must report PASSED for clean uppercase .WASM pair. stdout:\n{stdout}"
+    );
+}
