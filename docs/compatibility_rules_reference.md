@@ -65,6 +65,24 @@ consumers. It fails when either directional verdict is incompatible.
 - **Why it breaks**: Arguments are sent positionally on the wire. Reordering them swaps the values received by the contract logic.
 - **Remediation**: Revert the parameter order.
 
+### 2.4 Host Import / Protocol Capability Changes
+
+A WASM import that a contract did not previously need can raise the minimum
+Stellar protocol version the target network must support to run it, even
+when the exported spec is byte-identical. `diff::compare_host_imports`
+classifies these changes against the versioned registry in
+`src/capability.rs` — see [Host Imports and Protocol
+Capabilities](documentation.md#host-imports-and-protocol-capabilities) for
+the full explanation and [capability-registry.md](capability-registry.md)
+for how the registry itself is maintained.
+
+- **Host Import Added**: A new import resolves to a recognized capability. Warning.
+- **Host Import Removed**: A previously imported recognized capability is gone. Informational.
+- **Host Import Signature Changed**: The same `(module, name)` import resolves to a different parameter/result signature on each side. Critical for a recognized capability, Warning for an unrecognized one.
+- **Unknown Host Import**: The import is not in the registry, so no protocol requirement is assigned. Warning — this is a visibility signal, not a guess.
+- **Protocol Requirement Raised**: The highest protocol implied by the new build's recognized imports exceeds the old build's. Warning.
+- **Protocol Environment Mismatch**: A build's own declared protocol version (`contractenvmetav0`) is lower than what its own recognized imports require. Critical.
+
 ---
 
 ## 3. Event & Indexer Changes (`event_indexer`)

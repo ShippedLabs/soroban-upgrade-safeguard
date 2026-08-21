@@ -53,6 +53,12 @@ pub enum FindingCategory {
     ErrorEnumCaseAdded,
     TypeKindChanged,
     CascadingLayoutBreak,
+    HostImportAdded,
+    HostImportRemoved,
+    HostImportSignatureChanged,
+    UnknownHostImport,
+    ProtocolRequirementRaised,
+    ProtocolEnvironmentMismatch,
 }
 
 impl std::str::FromStr for FindingCategory {
@@ -113,6 +119,12 @@ impl FindingCategory {
             FindingCategory::ErrorEnumCaseAdded => "Error Enum Case Added",
             FindingCategory::TypeKindChanged => "Type Kind Changed",
             FindingCategory::CascadingLayoutBreak => "Cascading Layout Break",
+            FindingCategory::HostImportAdded => "Host Import Added",
+            FindingCategory::HostImportRemoved => "Host Import Removed",
+            FindingCategory::HostImportSignatureChanged => "Host Import Signature Changed",
+            FindingCategory::UnknownHostImport => "Unknown Host Import",
+            FindingCategory::ProtocolRequirementRaised => "Protocol Requirement Raised",
+            FindingCategory::ProtocolEnvironmentMismatch => "Protocol Environment Mismatch",
         }
     }
 
@@ -167,6 +179,12 @@ impl FindingCategory {
             FindingCategory::ErrorEnumCaseAdded => Severity::Info,
             FindingCategory::TypeKindChanged => Severity::Critical,
             FindingCategory::CascadingLayoutBreak => Severity::Critical,
+            FindingCategory::HostImportAdded => Severity::Warning,
+            FindingCategory::HostImportRemoved => Severity::Info,
+            FindingCategory::HostImportSignatureChanged => Severity::Warning,
+            FindingCategory::UnknownHostImport => Severity::Warning,
+            FindingCategory::ProtocolRequirementRaised => Severity::Warning,
+            FindingCategory::ProtocolEnvironmentMismatch => Severity::Critical,
         }
     }
 
@@ -304,6 +322,24 @@ impl FindingCategory {
             }
             FindingCategory::CascadingLayoutBreak => {
                 "A type embeds another type that has a critical layout break."
+            }
+            FindingCategory::HostImportAdded => {
+                "The new contract imports a recognized Soroban host function that the old contract did not import."
+            }
+            FindingCategory::HostImportRemoved => {
+                "A recognized Soroban host function that the old contract imported is no longer imported by the new contract."
+            }
+            FindingCategory::HostImportSignatureChanged => {
+                "The same module/name import appears in both builds, but its resolved parameter or result types differ."
+            }
+            FindingCategory::UnknownHostImport => {
+                "An import's module/name pair is not present in the host import capability registry, so its protocol requirement cannot be determined."
+            }
+            FindingCategory::ProtocolRequirementRaised => {
+                "The minimum Stellar protocol version implied by the new contract's recognized host imports is higher than the old contract's."
+            }
+            FindingCategory::ProtocolEnvironmentMismatch => {
+                "A contract's declared environment metadata protocol version is lower than the minimum protocol implied by its own recognized host imports."
             }
         }
     }
@@ -443,6 +479,24 @@ impl FindingCategory {
             FindingCategory::CascadingLayoutBreak => {
                 "This is a breaking change. A nested user-defined type has a breaking layout change. Resolve the break in the referenced type."
             }
+            FindingCategory::HostImportAdded => {
+                "Verify the target network has activated the required protocol version before deploying, and that any client tooling accounts for the new capability."
+            }
+            FindingCategory::HostImportRemoved => {
+                "No action is typically required. If external tooling detects the old capability to gate behavior, update it to stop expecting the import."
+            }
+            FindingCategory::HostImportSignatureChanged => {
+                "Investigate why the same import now resolves to a different function type. For a recognized capability this should not happen and may indicate a toolchain or build issue; for an unrecognized import, confirm the provider did not change its calling convention."
+            }
+            FindingCategory::UnknownHostImport => {
+                "Manually verify the protocol or provider requirement for this import, then consider proposing it for addition to the capability registry so future comparisons classify it automatically."
+            }
+            FindingCategory::ProtocolRequirementRaised => {
+                "Confirm the target network has activated the reported protocol version before deploying the upgrade, and update deployment documentation accordingly."
+            }
+            FindingCategory::ProtocolEnvironmentMismatch => {
+                "This indicates the build's declared environment metadata undersells what it actually requires. Rebuild with a matching SDK/toolchain version, or investigate how the binary was produced."
+            }
         }
     }
 
@@ -493,6 +547,12 @@ impl FindingCategory {
             FindingCategory::ErrorEnumCaseAdded,
             FindingCategory::TypeKindChanged,
             FindingCategory::CascadingLayoutBreak,
+            FindingCategory::HostImportAdded,
+            FindingCategory::HostImportRemoved,
+            FindingCategory::HostImportSignatureChanged,
+            FindingCategory::UnknownHostImport,
+            FindingCategory::ProtocolRequirementRaised,
+            FindingCategory::ProtocolEnvironmentMismatch,
         ]
     }
 

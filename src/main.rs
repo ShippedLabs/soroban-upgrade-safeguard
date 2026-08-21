@@ -3,6 +3,7 @@ use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use soroban_upgrade_safeguard::{
     attestation::{
@@ -13,6 +14,7 @@ use soroban_upgrade_safeguard::{
     },
     color::{should_disable_color, ColorMode},
     diff, loader, parser,
+    remote::{self, RemoteFetchConfig, RemoteRef},
     render::RenderableReport,
     report,
     rpc::RpcClientConfig,
@@ -279,6 +281,44 @@ struct Args {
     /// Path to a JSON file containing captured ledger/storage entries for offline validation.
     #[arg(long, value_name = "EMPIRICAL_FILE")]
     empirical_file: Option<PathBuf>,
+
+    /// Maximum bytes accepted for any `https://` input download.
+    #[arg(long, value_name = "BYTES", default_value_t = remote::DEFAULT_MAX_BYTES)]
+    remote_max_bytes: usize,
+
+    /// Timeout, in seconds, for any single `https://` input request.
+    #[arg(long, value_name = "SECONDS", default_value_t = remote::DEFAULT_TIMEOUT_SECS)]
+    remote_timeout_secs: u64,
+
+    /// Maximum redirect hops followed when fetching an `https://` input.
+    #[arg(long, value_name = "COUNT", default_value_t = remote::DEFAULT_MAX_REDIRECTS)]
+    remote_max_redirects: u32,
+
+    /// Directory used to cache verified `https://` input downloads by digest.
+    /// Defaults to a directory under the OS temp dir; see
+    /// `SOROBAN_SAFEGUARD_REMOTE_CACHE`.
+    #[arg(long, value_name = "DIR")]
+    remote_cache_dir: Option<PathBuf>,
+
+    /// Do not read from or write to the remote-artifact cache for this run.
+    #[arg(long)]
+    no_remote_cache: bool,
+
+    /// Delete every cached `https://` input artifact and exit.
+    #[arg(long)]
+    clear_remote_cache: bool,
+}
+
+/// Build the remote-fetch policy for `https://` inputs from the top-level CLI flags.
+fn remote_fetch_config(args: &Args) -> RemoteFetchConfig {
+    RemoteFetchConfig {
+        max_bytes: args.remote_max_bytes,
+        timeout: Duration::from_secs(args.remote_timeout_secs),
+        max_redirects: args.remote_max_redirects,
+        cache_dir: args.remote_cache_dir.clone(),
+        no_cache: args.no_remote_cache,
+        https_only: true,
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -427,7 +467,9 @@ fn rpc_config(url: &str, headers: &[String]) -> Result<RpcClientConfig> {
 /// Decode one build and emit its interface as JSON, or just its hash.
 fn run_extract(args: &ExtractArgs) -> Result<()> {
     let build = match (&args.wasm, &args.contract_id) {
-        (Some(path), None) => loader::load_wasm(path)?,
+        (Some(path), None) => load_wasm_input(path, &RemoteFetchConfig::default(), &|line| {
+            eprintln!("{line}");
+        })?,
         (None, Some(contract_id)) => {
             let rpc_url = args
                 .rpc_url
@@ -463,9 +505,34 @@ fn run_extract(args: &ExtractArgs) -> Result<()> {
     Ok(())
 }
 
+/// Reads bytes for an artifact reference that may be a local path or an
+/// `https://…#sha256=<hex>` remote reference (used for storage-schema
+/// references in `attest`/`verify-attestation`).
+fn read_artifact_bytes(path: &Path) -> Result<Vec<u8>> {
+    if let Some(remote) =
+        RemoteRef::parse(&path.to_string_lossy()).map_err(|e| anyhow::anyhow!(e))?
+    {
+        let artifact = remote::fetch_verified(&remote, &RemoteFetchConfig::default())?;
+        eprintln!(
+            "🌐 Remote input: {} (sha256:{}, cache {}{})",
+            artifact.final_url,
+            artifact.sha256,
+            artifact.cache_status,
+            artifact
+                .media_type
+                .as_deref()
+                .map(|m| format!(", {m}"))
+                .unwrap_or_default()
+        );
+        Ok(artifact.bytes)
+    } else {
+        std::fs::read(path)
+            .with_context(|| format!("Failed to read artifact '{}'.", path.display()))
+    }
+}
+
 fn file_artifact(path: &Path) -> Result<AttestedArtifact> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("Failed to read artifact '{}'.", path.display()))?;
+    let bytes = read_artifact_bytes(path)?;
     Ok(AttestedArtifact {
         name: path.to_string_lossy().to_string(),
         digest: ArtifactDigest::from_bytes(&bytes),
@@ -626,7 +693,7 @@ fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
         .zip(&statement.predicate.storage_schemas)
     {
         if let Some(path) = path {
-            artifacts.insert(artifact.name.clone(), std::fs::read(path)?);
+            artifacts.insert(artifact.name.clone(), read_artifact_bytes(path)?);
         }
     }
     let mut failures = signatures.failures;
@@ -819,6 +886,19 @@ fn run_init(args: &InitArgs) -> Result<()> {
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    if args.clear_remote_cache {
+        let dir = args
+            .remote_cache_dir
+            .clone()
+            .unwrap_or_else(remote::default_cache_dir);
+        remote::clear_cache(&dir)
+            .with_context(|| format!("Failed to clear remote cache at '{}'", dir.display()))?;
+        if !args.quiet {
+            println!("Cleared remote artifact cache at '{}'", dir.display());
+        }
+        return Ok(());
+    }
+
     match &args.command {
         Some(Command::Extract(extract_args)) => return run_extract(extract_args),
         Some(Command::Render(render_args)) => return run_render(render_args),
@@ -946,6 +1026,7 @@ fn run_batch(
             args.new_dir.as_ref().unwrap(),
         )?
     };
+    let remote_config = remote_fetch_config(args);
 
     progress("🔍 Soroban Upgrade Safeguard (Batch Mode)".to_string());
     progress("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".to_string());
@@ -1115,7 +1196,10 @@ fn run_batch(
             contract_name.bold()
         ));
 
-        let report = match (loader::load_wasm(&pair.old), loader::load_wasm(&pair.new)) {
+        let report = match (
+            load_wasm_input(&pair.old, &remote_config, progress),
+            load_wasm_input(&pair.new, &remote_config, progress),
+        ) {
             (Ok(old_wasm), Ok(new_wasm)) => {
                 match compare_contracts(
                     &ContractComparison {
@@ -1531,6 +1615,8 @@ fn run_single(
             "📦 Loading and Parsing contracts...".cyan().bold()
         ));
 
+        let remote_config = remote_fetch_config(args);
+
         let old = if let Some(contract_id) = old_source {
             let rpc_url = args.rpc_url.as_ref().unwrap();
             loader::fetch_wasm_from_rpc_with_config(
@@ -1538,10 +1624,10 @@ fn run_single(
                 &rpc_config(rpc_url, &args.rpc_headers)?,
             )?
         } else {
-            load_positional_wasm(&args.wasm_paths[0])?
+            load_wasm_input(&args.wasm_paths[0], &remote_config, progress)?
         };
 
-        let new = load_positional_wasm(new_wasm_path)?;
+        let new = load_wasm_input(new_wasm_path, &remote_config, progress)?;
 
         if !suppressions.rules.is_empty() {
             progress(format!(
@@ -1826,13 +1912,39 @@ fn is_stdin_wasm_path(path: &Path) -> bool {
     path == Path::new("-")
 }
 
-fn load_positional_wasm(path: &Path) -> Result<loader::WasmModule> {
+/// Loads a WASM input that may be `-` for stdin, a local file path, or an
+/// `https://…#sha256=<hex>` remote reference.
+///
+/// This is the single dispatch point shared by the comparison positional
+/// arguments, `extract`, and batch manifest entries, so every WASM input
+/// position gets HTTPS support uniformly.
+fn load_wasm_input(
+    path: &Path,
+    remote_config: &RemoteFetchConfig,
+    progress: &dyn Fn(String),
+) -> Result<loader::WasmModule> {
     if is_stdin_wasm_path(path) {
         let mut stdin = std::io::stdin().lock();
-        Ok(loader::load_wasm_from_stdin(&mut stdin)?)
-    } else {
-        Ok(loader::load_wasm(path)?)
+        return Ok(loader::load_wasm_from_stdin(&mut stdin)?);
     }
+    if let Some(remote) =
+        RemoteRef::parse(&path.to_string_lossy()).map_err(|e| anyhow::anyhow!(e))?
+    {
+        let (module, artifact) = loader::load_wasm_from_url(&remote, remote_config)?;
+        progress(format!(
+            "🌐 Remote input: {} (sha256:{}, cache {}{})",
+            artifact.final_url,
+            artifact.sha256,
+            artifact.cache_status,
+            artifact
+                .media_type
+                .as_deref()
+                .map(|m| format!(", {m}"))
+                .unwrap_or_default()
+        ));
+        return Ok(module);
+    }
+    Ok(loader::load_wasm(path)?)
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]
@@ -1916,6 +2028,13 @@ fn compare_contracts(
     ));
     let mut diff_report = diff::compare(&old_spec, &new_spec);
     diff::compare_env_metadata(
+        old_meta.env_meta.as_ref(),
+        new_meta.env_meta.as_ref(),
+        &mut diff_report,
+    );
+    diff::compare_host_imports(
+        &old_meta.host_imports,
+        &new_meta.host_imports,
         old_meta.env_meta.as_ref(),
         new_meta.env_meta.as_ref(),
         &mut diff_report,

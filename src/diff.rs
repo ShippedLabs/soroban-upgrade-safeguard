@@ -1,6 +1,7 @@
+use crate::capability;
 use crate::category::FindingCategory;
 use crate::mapper::LayoutMapper;
-use crate::parser::ContractEnvMeta;
+use crate::parser::{ContractEnvMeta, ImportedFunction};
 use crate::spec::ContractSpec;
 use serde::{Deserialize, Serialize};
 use stellar_xdr::curr::{
@@ -367,7 +368,13 @@ pub fn classify_finding_axes(
     let mut axes = Vec::new();
 
     match category {
-        "Environment" => {
+        "Environment"
+        | "Host Import Added"
+        | "Host Import Removed"
+        | "Host Import Signature Changed"
+        | "Unknown Host Import"
+        | "Protocol Requirement Raised"
+        | "Protocol Environment Mismatch" => {
             axes.push(CompatibilityAxis::CallAbi);
         }
 
@@ -532,6 +539,238 @@ fn format_env_metadata_change(
         }
         (None, None) => unreachable!("compare_env_metadata filters identical/absent pairs"),
     }
+}
+
+/// Compute the minimum Stellar protocol version implied by the recognized
+/// host capabilities a contract imports, using the [`capability`] registry.
+///
+/// Returns `None` when none of `imports` resolve to a recognized capability
+/// — that is not the same as "protocol 0"; it means there is no basis for a
+/// number, and callers must not invent one. Unrecognized imports never
+/// contribute to this computation.
+pub fn minimum_required_protocol(imports: &[ImportedFunction]) -> Option<u32> {
+    imports
+        .iter()
+        .filter_map(|import| capability::lookup(&import.module, &import.name))
+        .map(|cap| cap.min_protocol)
+        .max()
+}
+
+fn describe_import_signature(import: &ImportedFunction) -> String {
+    match &import.signature {
+        Some(sig) => format!(
+            "({}) -> ({})",
+            sig.params
+                .iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            sig.results
+                .iter()
+                .map(|t| t.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        None => "unresolved".to_string(),
+    }
+}
+
+fn push_unknown_host_import(module: &str, name: &str, added: bool, report: &mut DiffReport) {
+    report.findings.push(Finding {
+        severity: Severity::Warning,
+        axes: Vec::new(),
+        category: FindingCategory::UnknownHostImport.as_str().to_string(),
+        message: format!(
+            "{} import `{module}::{name}` is not present in the host import capability \
+             registry, so its Soroban protocol requirement cannot be determined \
+             automatically. Verify it manually against the SDK or provider that defines it.",
+            if added { "A newly added" } else { "A removed" },
+        ),
+        type_name: None,
+        target: Some(format!("{module}::{name}")),
+        root_target: None,
+    });
+}
+
+/// Compare the host imports of two contract builds and push structured
+/// findings classifying newly required, removed, signature-changed, and
+/// unknown imports, plus protocol-requirement findings cross-checked
+/// against each build's declared `contractenvmetav0` environment metadata.
+///
+/// Unrecognized `(module, name)` import pairs are always surfaced via
+/// [`FindingCategory::UnknownHostImport`] rather than silently classified —
+/// see `docs/capability-registry.md`.
+pub fn compare_host_imports(
+    old_imports: &[ImportedFunction],
+    new_imports: &[ImportedFunction],
+    old_env: Option<&ContractEnvMeta>,
+    new_env: Option<&ContractEnvMeta>,
+    report: &mut DiffReport,
+) {
+    use std::collections::BTreeMap;
+
+    let old_by_key: BTreeMap<(&str, &str), &ImportedFunction> = old_imports
+        .iter()
+        .map(|import| ((import.module.as_str(), import.name.as_str()), import))
+        .collect();
+    let new_by_key: BTreeMap<(&str, &str), &ImportedFunction> = new_imports
+        .iter()
+        .map(|import| ((import.module.as_str(), import.name.as_str()), import))
+        .collect();
+
+    for &(module, name) in new_by_key.keys() {
+        if old_by_key.contains_key(&(module, name)) {
+            continue;
+        }
+        match capability::lookup(module, name) {
+            Some(cap) => {
+                report.findings.push(Finding {
+                    severity: Severity::Warning,
+                    axes: Vec::new(),
+                    category: FindingCategory::HostImportAdded.as_str().to_string(),
+                    message: format!(
+                        "New host import requires the `{}` capability ({module}::{name}, \
+                         available since protocol {}): {}",
+                        cap.capability_id, cap.min_protocol, cap.docs
+                    ),
+                    type_name: None,
+                    target: Some(cap.capability_id.to_string()),
+                    root_target: None,
+                });
+            }
+            None => push_unknown_host_import(module, name, true, report),
+        }
+    }
+
+    for &(module, name) in old_by_key.keys() {
+        if new_by_key.contains_key(&(module, name)) {
+            continue;
+        }
+        match capability::lookup(module, name) {
+            Some(cap) => {
+                report.findings.push(Finding {
+                    severity: Severity::Info,
+                    axes: Vec::new(),
+                    category: FindingCategory::HostImportRemoved.as_str().to_string(),
+                    message: format!(
+                        "The `{}` capability ({module}::{name}) is no longer imported.",
+                        cap.capability_id
+                    ),
+                    type_name: None,
+                    target: Some(cap.capability_id.to_string()),
+                    root_target: None,
+                });
+            }
+            None => push_unknown_host_import(module, name, false, report),
+        }
+    }
+
+    for (&(module, name), new_import) in &new_by_key {
+        let Some(old_import) = old_by_key.get(&(module, name)) else {
+            continue;
+        };
+        let (Some(old_sig), Some(new_sig)) = (&old_import.signature, &new_import.signature) else {
+            // One or both sides could not be resolved against the type
+            // section; never guess at a signature change from that.
+            continue;
+        };
+        if old_sig == new_sig {
+            continue;
+        }
+
+        let recognized = capability::lookup(module, name);
+        let severity = if recognized.is_some() {
+            Severity::Critical
+        } else {
+            Severity::Warning
+        };
+        let target = recognized
+            .map(|cap| cap.capability_id.to_string())
+            .unwrap_or_else(|| format!("{module}::{name}"));
+
+        report.findings.push(Finding {
+            severity,
+            axes: Vec::new(),
+            category: FindingCategory::HostImportSignatureChanged
+                .as_str()
+                .to_string(),
+            message: format!(
+                "Host import `{module}::{name}` signature changed from {} to {}.",
+                describe_import_signature(old_import),
+                describe_import_signature(new_import),
+            ),
+            type_name: None,
+            target: Some(target),
+            root_target: None,
+        });
+    }
+
+    let old_min_protocol = minimum_required_protocol(old_imports);
+    let new_min_protocol = minimum_required_protocol(new_imports);
+
+    if let (Some(old_min), Some(new_min)) = (old_min_protocol, new_min_protocol) {
+        if new_min > old_min {
+            report.findings.push(Finding {
+                severity: Severity::Warning,
+                axes: Vec::new(),
+                category: FindingCategory::ProtocolRequirementRaised
+                    .as_str()
+                    .to_string(),
+                message: format!(
+                    "The upgraded contract now requires Soroban protocol {new_min} or later \
+                     (previously {old_min}), based on the host capabilities it imports. \
+                     Verify the target network has activated protocol {new_min} before deploying."
+                ),
+                type_name: None,
+                target: None,
+                root_target: None,
+            });
+        }
+    }
+
+    check_protocol_environment_mismatch(
+        "old",
+        old_min_protocol,
+        old_env.and_then(ContractEnvMeta::protocol_version),
+        report,
+    );
+    check_protocol_environment_mismatch(
+        "new",
+        new_min_protocol,
+        new_env.and_then(ContractEnvMeta::protocol_version),
+        report,
+    );
+}
+
+fn check_protocol_environment_mismatch(
+    label: &str,
+    computed_min_protocol: Option<u32>,
+    declared_protocol: Option<u32>,
+    report: &mut DiffReport,
+) {
+    let (Some(computed), Some(declared)) = (computed_min_protocol, declared_protocol) else {
+        return;
+    };
+    if computed <= declared {
+        return;
+    }
+
+    report.findings.push(Finding {
+        severity: Severity::Critical,
+        axes: Vec::new(),
+        category: FindingCategory::ProtocolEnvironmentMismatch
+            .as_str()
+            .to_string(),
+        message: format!(
+            "The {label} contract's environment metadata declares protocol {declared}, but it \
+             imports host capabilities that require protocol {computed} or later. This is an \
+             internal inconsistency in the build; verify the toolchain and SDK version used to \
+             compile it."
+        ),
+        type_name: None,
+        target: None,
+        root_target: None,
+    });
 }
 
 /// Helper to detect if a User-Defined Type represents an Event by standard Soroban naming conventions.
@@ -1824,6 +2063,7 @@ fn union_case_bytesn_size_change(
 mod tests {
     use super::*;
     use stellar_xdr::curr::{ScEnvMetaEntry, ScSpecTypeUdt, StringM, VecM};
+    use wasmparser::ValType;
 
     /// Helper: build a minimal ContractSpec with the given structs.
     fn spec_with_structs(structs: Vec<(&str, Vec<(&str, ScSpecTypeDef)>)>) -> ContractSpec {
@@ -2172,6 +2412,248 @@ mod tests {
         let safety = crate::report::SafetyReport::new_with_specs(&report, &empty_spec, &empty_spec);
         assert!(safety.is_safe);
         assert_eq!(safety.critical_count, 0);
+    }
+
+    /// Helper: a host import with no resolvable signature.
+    fn imported(module: &str, name: &str) -> ImportedFunction {
+        ImportedFunction {
+            module: module.to_string(),
+            name: name.to_string(),
+            signature: None,
+        }
+    }
+
+    /// Helper: a host import with a resolved (possibly empty) signature.
+    fn imported_with_signature(
+        module: &str,
+        name: &str,
+        params: Vec<ValType>,
+        results: Vec<ValType>,
+    ) -> ImportedFunction {
+        ImportedFunction {
+            module: module.to_string(),
+            name: name.to_string(),
+            signature: Some(crate::parser::ImportSignature { params, results }),
+        }
+    }
+
+    #[test]
+    fn unrecognized_import_added_is_reported_as_unknown() {
+        let old: Vec<ImportedFunction> = vec![];
+        let new = vec![imported("z", "not_a_real_import")];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        assert_eq!(report.findings.len(), 1);
+        let finding = &report.findings[0];
+        assert_eq!(
+            finding.category,
+            FindingCategory::UnknownHostImport.as_str()
+        );
+        assert_eq!(finding.severity, Severity::Warning);
+        assert_eq!(finding.target.as_deref(), Some("z::not_a_real_import"));
+    }
+
+    #[test]
+    fn unrecognized_import_removed_is_reported_as_unknown() {
+        let old = vec![imported("z", "not_a_real_import")];
+        let new: Vec<ImportedFunction> = vec![];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(
+            report.findings[0].category,
+            FindingCategory::UnknownHostImport.as_str()
+        );
+        assert!(report.findings[0].message.contains("removed"));
+    }
+
+    #[test]
+    fn recognized_import_added_reports_capability_metadata() {
+        let old: Vec<ImportedFunction> = vec![];
+        // "l"/"_" is `put_contract_data`, available since the Soroban
+        // baseline protocol (20).
+        let new = vec![imported("l", "_")];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == FindingCategory::HostImportAdded.as_str())
+            .expect("expected a host-import-added finding");
+        assert_eq!(finding.severity, Severity::Warning);
+        assert_eq!(finding.target.as_deref(), Some("ledger.put_contract_data"));
+    }
+
+    #[test]
+    fn recognized_import_removed_is_info() {
+        let old = vec![imported("l", "_")];
+        let new: Vec<ImportedFunction> = vec![];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == FindingCategory::HostImportRemoved.as_str())
+            .expect("expected a host-import-removed finding");
+        assert_eq!(finding.severity, Severity::Info);
+        assert_eq!(finding.target.as_deref(), Some("ledger.put_contract_data"));
+    }
+
+    #[test]
+    fn no_findings_when_imports_are_unchanged() {
+        let imports = vec![imported("l", "_"), imported("z", "custom")];
+        let mut report = DiffReport::default();
+        compare_host_imports(&imports, &imports, None, None, &mut report);
+        assert!(report.findings.is_empty());
+    }
+
+    #[test]
+    fn signature_change_on_recognized_import_is_critical() {
+        let old = vec![imported_with_signature(
+            "l",
+            "_",
+            vec![ValType::I64],
+            vec![ValType::I64],
+        )];
+        let new = vec![imported_with_signature(
+            "l",
+            "_",
+            vec![ValType::I64, ValType::I64],
+            vec![ValType::I64],
+        )];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == FindingCategory::HostImportSignatureChanged.as_str())
+            .expect("expected a signature-changed finding");
+        assert_eq!(finding.severity, Severity::Critical);
+        assert_eq!(finding.target.as_deref(), Some("ledger.put_contract_data"));
+    }
+
+    #[test]
+    fn signature_change_on_unknown_import_is_warning() {
+        let old = vec![imported_with_signature(
+            "z",
+            "custom",
+            vec![ValType::I64],
+            vec![],
+        )];
+        let new = vec![imported_with_signature(
+            "z",
+            "custom",
+            vec![ValType::I32],
+            vec![],
+        )];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == FindingCategory::HostImportSignatureChanged.as_str())
+            .expect("expected a signature-changed finding");
+        assert_eq!(finding.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn signature_change_is_never_guessed_when_either_side_is_unresolved() {
+        let old = vec![imported("l", "_")];
+        let new = vec![imported_with_signature(
+            "l",
+            "_",
+            vec![ValType::I64],
+            vec![ValType::I64],
+        )];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|f| f.category != FindingCategory::HostImportSignatureChanged.as_str()),
+            "an unresolved signature on either side must not produce a signature-changed finding"
+        );
+    }
+
+    #[test]
+    fn protocol_requirement_raised_across_a_protocol_boundary() {
+        // "l"/"_" (put_contract_data) is available since protocol 20.
+        let old = vec![imported("l", "_")];
+        // "c"/"3" (verify_sig_ecdsa_secp256r1) requires protocol 21+.
+        let new = vec![imported("l", "_"), imported("c", "3")];
+        let mut report = DiffReport::default();
+        compare_host_imports(&old, &new, None, None, &mut report);
+
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == FindingCategory::ProtocolRequirementRaised.as_str())
+            .expect("expected a protocol-requirement-raised finding");
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(finding.message.contains("21"));
+        assert!(finding.message.contains("20"));
+    }
+
+    #[test]
+    fn protocol_requirement_unchanged_produces_no_raised_finding() {
+        let imports = vec![imported("l", "_"), imported("c", "3")];
+        let mut report = DiffReport::default();
+        compare_host_imports(&imports, &imports, None, None, &mut report);
+
+        assert!(report
+            .findings
+            .iter()
+            .all(|f| f.category != FindingCategory::ProtocolRequirementRaised.as_str()));
+    }
+
+    #[test]
+    fn environment_mismatch_flagged_when_declared_protocol_is_too_low() {
+        // The build declares protocol 20 but imports a protocol-21 capability.
+        let new = vec![imported("c", "3")];
+        let new_env = env_meta(20, 0);
+        let mut report = DiffReport::default();
+        compare_host_imports(&[], &new, None, Some(&new_env), &mut report);
+
+        let finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == FindingCategory::ProtocolEnvironmentMismatch.as_str())
+            .expect("expected a protocol-environment-mismatch finding");
+        assert_eq!(finding.severity, Severity::Critical);
+        assert!(finding.message.contains("new"));
+    }
+
+    #[test]
+    fn environment_mismatch_not_flagged_when_declared_protocol_is_sufficient() {
+        let new = vec![imported("c", "3")];
+        let new_env = env_meta(21, 0);
+        let mut report = DiffReport::default();
+        compare_host_imports(&[], &new, None, Some(&new_env), &mut report);
+
+        assert!(report
+            .findings
+            .iter()
+            .all(|f| f.category != FindingCategory::ProtocolEnvironmentMismatch.as_str()));
+    }
+
+    #[test]
+    fn minimum_required_protocol_ignores_unrecognized_imports() {
+        let imports = vec![imported("z", "custom")];
+        assert_eq!(minimum_required_protocol(&imports), None);
+    }
+
+    #[test]
+    fn minimum_required_protocol_is_the_highest_recognized_capability() {
+        let imports = vec![imported("l", "_"), imported("c", "3"), imported("z", "x")];
+        assert_eq!(minimum_required_protocol(&imports), Some(21));
     }
 
     /// Helper: build a minimal ContractSpec with the given functions.

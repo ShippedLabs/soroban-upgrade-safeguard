@@ -21,6 +21,7 @@ pub enum ErrorKind {
     LimitExceeded,
     RpcAuthConfig,
     InvalidHeaderName,
+    RemoteFetch,
 }
 
 /// The canonical error type for the soroban-upgrade-safeguard library.
@@ -45,6 +46,7 @@ pub enum ErrorKind {
 /// | [`Integrity`](Error::Integrity) | An integrity check (hash comparison, magic bytes) failed |
 /// | [`InvalidInput`](Error::InvalidInput) | An argument or input value is semantically invalid |
 /// | [`LimitExceeded`](Error::LimitExceeded) | A resource limit (XDR depth, entry count, WASM size) was exceeded |
+/// | [`RemoteFetch`](Error::RemoteFetch) | Downloading a `https://` input artifact failed (transport, size, redirect, or transport-policy violation) |
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -112,6 +114,11 @@ pub enum Error {
     InvalidHeaderName {
         name: String,
     },
+    RemoteFetch {
+        url: String,
+        details: String,
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    },
 }
 
 impl Error {
@@ -135,16 +142,18 @@ impl Error {
             Error::LimitExceeded { .. } => ErrorKind::LimitExceeded,
             Error::RpcAuthConfig { .. } => ErrorKind::RpcAuthConfig,
             Error::InvalidHeaderName { .. } => ErrorKind::InvalidHeaderName,
+            Error::RemoteFetch { .. } => ErrorKind::RemoteFetch,
         }
     }
 
     /// Returns `true` if the error is likely transient and the operation may
     /// succeed if retried.
     ///
-    /// Currently returns `true` for [`RpcTransport`](Error::RpcTransport) errors
-    /// (network hiccups) and `false` for all other variants.
+    /// Currently returns `true` for [`RpcTransport`](Error::RpcTransport) and
+    /// [`RemoteFetch`](Error::RemoteFetch) errors (network hiccups) and `false`
+    /// for all other variants.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Error::RpcTransport { .. })
+        matches!(self, Error::RpcTransport { .. } | Error::RemoteFetch { .. })
     }
 
     /// Returns `true` if the error is a transient infrastructure issue
@@ -269,6 +278,9 @@ impl fmt::Display for Error {
                 write!(f, "RPC authentication configuration error: {details}")
             }
             Error::InvalidHeaderName { name } => write!(f, "Invalid RPC header name '{name}'"),
+            Error::RemoteFetch { url, details, .. } => {
+                write!(f, "Failed to fetch remote input '{url}': {details}")
+            }
         }
     }
 }
@@ -307,6 +319,9 @@ impl std::error::Error for Error {
                 .as_ref()
                 .map(|s| s.as_ref() as &dyn std::error::Error),
             Error::RpcAuthConfig { .. } | Error::InvalidHeaderName { .. } => None,
+            Error::RemoteFetch { source, .. } => source
+                .as_ref()
+                .map(|s| s.as_ref() as &dyn std::error::Error),
         }
     }
 }

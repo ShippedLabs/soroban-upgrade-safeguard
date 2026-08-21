@@ -77,11 +77,12 @@ The source lives under `src/` and is split into focused modules. Understanding t
 - `suppression.rs` parses `.safeguard.toml` and matches acknowledged findings.
 - `limits.rs` defines the resource limits that protect decoding and type walks from untrusted input.
 - `loader.rs` reads a WASM file from disk and validates that it is a well formed WASM binary.
-- `parser.rs` extracts the Soroban custom sections and decodes the XDR spec entries.
+- `parser.rs` extracts the Soroban custom sections, decodes the XDR spec entries, and records every WASM function import (module, name, resolved signature).
 - `spec.rs` defines `ContractSpec`, the in-memory model that groups functions and user-defined types by name.
 - `storage_schema.rs` loads optional manifests for checking internal storage layouts.
+- `capability.rs` is the versioned registry mapping recognized Soroban host imports to protocol capability metadata; see [Updating the Capability Registry](capability-registry.md).
 - `mapper.rs` turns type definitions into readable signatures and builds the reverse dependency graph used for cascade detection.
-- `diff.rs` holds the comparison logic and the `Finding` and `Severity` types. This is where most detection rules live.
+- `diff.rs` holds the comparison logic and the `Finding` and `Severity` types. This is where most detection rules live, including `compare_host_imports`, which classifies host-import changes against `capability.rs`.
 - `dependency.rs` propagates breaking changes across declared contract dependencies in batch comparisons.
 - `report.rs` aggregates findings into a `SafetyReport` and renders the colored summary.
 

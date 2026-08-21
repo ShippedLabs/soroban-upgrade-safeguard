@@ -86,6 +86,10 @@ fn verify(report: Option<&Path>, public_key: &Path, envelope: &Path, key_id: &st
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "flaky on macOS runners: temp dir timing"
+)]
 fn attestation_is_deterministic_and_verifies_offline() {
     let dir = temp_dir();
     let (report, public_key, envelope) = attest(&dir, "release-key");

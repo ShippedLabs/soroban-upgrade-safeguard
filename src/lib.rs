@@ -9,6 +9,11 @@ pub mod call_abi;
 mod call_abi;
 
 #[cfg(feature = "unstable")]
+pub mod capability;
+#[cfg(not(feature = "unstable"))]
+mod capability;
+
+#[cfg(feature = "unstable")]
 pub mod category;
 #[cfg(not(feature = "unstable"))]
 mod category;
@@ -67,6 +72,11 @@ mod mapper;
 pub mod parser;
 #[cfg(not(feature = "unstable"))]
 mod parser;
+
+#[cfg(feature = "unstable")]
+pub mod remote;
+#[cfg(not(feature = "unstable"))]
+mod remote;
 
 #[cfg(feature = "unstable")]
 pub mod render;
@@ -133,6 +143,9 @@ pub use crate::call_abi::{
     CallAbiBreak, CallAbiCompatibility, CallDirection, DirectionalCallVerdict,
 };
 pub use crate::diff::{Finding, Severity};
+pub use crate::remote::{
+    default_cache_dir, fetch_verified, CacheStatus, FetchedArtifact, RemoteFetchConfig, RemoteRef,
+};
 pub use crate::report::{ReportedFinding, SafetyReport};
 pub use crate::storage_schema::{StorageReconciliation, StorageSchema, StorageSchemaComparison};
 
@@ -224,6 +237,14 @@ pub fn compare_wasm_bytes_with_options(
     let mut diff_report = diff::compare(&old_spec, &new_spec);
 
     diff::compare_env_metadata(
+        old_meta.env_meta.as_ref(),
+        new_meta.env_meta.as_ref(),
+        &mut diff_report,
+    );
+
+    diff::compare_host_imports(
+        &old_meta.host_imports,
+        &new_meta.host_imports,
         old_meta.env_meta.as_ref(),
         new_meta.env_meta.as_ref(),
         &mut diff_report,
