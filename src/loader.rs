@@ -533,3 +533,25 @@ fn fetch_instance_storage_from_rpc_inner(
         })
         .unwrap_or_default())
 }
+
+// ── Retry-aware public API ────────────────────────────────────────────────────
+
+/// Fetch a deployed contract's WASM from an ordered list of RPC endpoints,
+/// retrying transient failures according to `policy`.
+///
+/// Endpoints are tried left-to-right. On a retryable failure (transport error,
+/// HTTP 429, HTTP 503) the engine backs off and moves to the next endpoint.
+/// Non-retryable failures (integrity errors, invalid inputs, malformed
+/// responses) abort immediately.
+///
+/// For the common single-endpoint case use [`EndpointList::single`].
+pub fn fetch_wasm_with_retry(
+    contract_id: &str,
+    endpoints: &crate::rpc_retry::EndpointList,
+    policy: &crate::rpc_retry::RpcResiliencePolicy,
+    sleeper: &dyn crate::rpc_retry::Sleeper,
+) -> Result<WasmModule, Error> {
+    crate::rpc_retry::with_retry(policy, endpoints, sleeper, |url| {
+        fetch_wasm_from_rpc(contract_id, url)
+    })
+}
