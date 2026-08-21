@@ -84,6 +84,11 @@ pub mod rpc;
 mod rpc;
 
 #[cfg(feature = "unstable")]
+pub mod rpc_retry;
+#[cfg(not(feature = "unstable"))]
+mod rpc_retry;
+
+#[cfg(feature = "unstable")]
 pub mod spec;
 #[cfg(not(feature = "unstable"))]
 mod spec;
