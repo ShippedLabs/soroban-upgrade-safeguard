@@ -1332,7 +1332,13 @@ fn collect_wasm_files(root: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
 
             if path.is_dir() {
                 stack.push((path, depth + 1));
-            } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+            } else if path.is_file()
+                && path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.eq_ignore_ascii_case("wasm"))
+                    .unwrap_or(false)
+            {
                 let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
                 files.push((relative, path));
             }

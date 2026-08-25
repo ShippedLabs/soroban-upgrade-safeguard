@@ -1072,3 +1072,107 @@ fn manifest_with_three_colliding_derived_names_disambiguates_all() {
     // total_pairs must equal the number of results
     assert_eq!(json["total_pairs"].as_u64().unwrap(), 3);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case-insensitive extension tests (#179)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn directory_scan_matches_uppercase_wasm_extension() {
+    // Verifies that files named *.WASM (uppercase) are collected the same as
+    // *.wasm.  Before the fix, collect_wasm_files did a case-sensitive compare
+    // and silently skipped uppercase extensions, reporting "No matching .wasm
+    // contract pairs found" even when the directories were correct.
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("uppercase_ext_test");
+    let old_dir = tmp.join("old");
+    let new_dir = tmp.join("new");
+
+    std::fs::create_dir_all(&old_dir).expect("create old dir");
+    std::fs::create_dir_all(&new_dir).expect("create new dir");
+
+    // Copy fixtures using an all-uppercase extension.
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("token.WASM")).expect("copy old");
+    std::fs::copy(wasm("v1.wasm"), new_dir.join("token.WASM")).expect("copy new");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("--old-dir")
+        .arg(&old_dir)
+        .arg("--new-dir")
+        .arg(&new_dir)
+        .args(["--format", "json"])
+        .output()
+        .expect("failed to run binary");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not valid UTF-8");
+    let code = output.status.code().expect("process terminated by signal");
+
+    // The pair must be discovered — a "no matching pairs" error would mean the
+    // extension was still being skipped.
+    assert!(
+        !stderr.contains("No matching .wasm contract pairs found"),
+        "uppercase .WASM files must not be silently skipped, stderr: {stderr}"
+    );
+
+    // The run must exit cleanly (v1 → v1 is a safe upgrade).
+    assert_eq!(code, 0, "clean v1→v1 pair with .WASM extension must exit 0");
+
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("output must be valid JSON");
+
+    let results = json["results"].as_object().expect("results must be an object");
+    assert_eq!(
+        results.len(),
+        1,
+        "exactly one pair must be found for the uppercase .WASM files"
+    );
+    let result_key = results.keys().next().unwrap();
+    assert_eq!(
+        json["results"][result_key]["is_safe"],
+        serde_json::Value::Bool(true),
+        "clean v1→v1 pair must be safe"
+    );
+}
+
+#[test]
+fn directory_scan_mixed_case_extension_is_matched() {
+    // Also covers mixed-case extensions such as .Wasm — any capitalisation must
+    // be accepted alongside canonical .wasm files in the same directory.
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mixedcase_ext_test");
+    let old_dir = tmp.join("old");
+    let new_dir = tmp.join("new");
+
+    std::fs::create_dir_all(&old_dir).expect("create old dir");
+    std::fs::create_dir_all(&new_dir).expect("create new dir");
+
+    // One canonical lowercase file and one mixed-case file in the same dirs.
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("a.wasm")).expect("copy a old");
+    std::fs::copy(wasm("v1.wasm"), new_dir.join("a.wasm")).expect("copy a new");
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("b.Wasm")).expect("copy b old");
+    std::fs::copy(wasm("v1.wasm"), new_dir.join("b.Wasm")).expect("copy b new");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("--old-dir")
+        .arg(&old_dir)
+        .arg("--new-dir")
+        .arg(&new_dir)
+        .args(["--format", "json"])
+        .output()
+        .expect("failed to run binary");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+    let code = output.status.code().expect("process terminated by signal");
+
+    assert_eq!(code, 0, "two clean pairs (mixed extensions) must exit 0");
+
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("output must be valid JSON");
+
+    let results = json["results"].as_object().expect("results must be an object");
+    assert_eq!(
+        results.len(),
+        2,
+        "both .wasm and .Wasm files must be collected; got keys: {:?}",
+        results.keys().collect::<Vec<_>>()
+    );
+}
