@@ -2913,7 +2913,12 @@ fn scan_directories(
     for entry in std::fs::read_dir(old_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+        if path.is_file()
+            && path
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("wasm"))
+        {
             let filename = path.file_name().unwrap();
             let new_path = new_dir.join(filename);
             let name = path.file_stem().and_then(|s| s.to_str()).map(String::from);

@@ -379,6 +379,41 @@ fn batch_directory_scanning_fails_on_breaking_contract() {
 }
 
 #[test]
+fn batch_directory_scanning_accepts_uppercase_wasm_extension() {
+    let tmp_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dir_upper_test");
+    let old_dir = tmp_dir.join("old");
+    let new_dir = tmp_dir.join("new");
+
+    std::fs::create_dir_all(&old_dir).ok();
+    std::fs::create_dir_all(&new_dir).ok();
+
+    // Copy fixtures with uppercase .WASM extensions:
+    // a.WASM: clean (v1 -> v1)
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("a.WASM")).expect("copy");
+    std::fs::copy(wasm("v1.wasm"), new_dir.join("a.WASM")).expect("copy");
+
+    // b.WASM: breaking (v1 -> v2)
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("b.WASM")).expect("copy");
+    std::fs::copy(wasm("v2.wasm"), new_dir.join("b.WASM")).expect("copy");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("--old-dir")
+        .arg(&old_dir)
+        .arg("--new-dir")
+        .arg(&new_dir)
+        .output()
+        .expect("failed to run binary");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+    let code = output.status.code().expect("process terminated by signal");
+
+    assert_eq!(code, 1);
+    assert!(stdout.contains("Overall Status: ❌ FAILED"));
+    assert!(stdout.contains("a: ✅ PASSED"));
+    assert!(stdout.contains("b: ❌ FAILED"));
+}
+
+#[test]
 fn batch_conflicting_options_exit_with_error() {
     // 1. Both manifest and old-dir/new-dir
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
