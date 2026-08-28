@@ -174,6 +174,28 @@ fn output_flag_safe_upgrade_writes_file_and_exits_zero() {
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Report files must end with exactly one trailing newline (issue #475)
+// ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn output_flag_report_files_end_with_exactly_one_trailing_newline() {
+    for (format, ext) in [("json", "json"), ("markdown", "md"), ("text", "txt")] {
+        let out = tmp(&format!("output_flag_trailing_newline.{ext}"));
+        let (_stdout, _stderr, _code, file) =
+            run_with_output("v1.wasm", "v2.wasm", format, Some(&out));
+        let contents = file.expect("output file should exist");
+        assert!(
+            contents.ends_with('\n'),
+            "{format} report must end with a newline"
+        );
+        assert!(
+            !contents.ends_with("\n\n"),
+            "{format} report must not end with multiple newlines"
+        );
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Atomic Writing & Permissions Integration Tests
 // ──────────────────────────────────────────────────────────────────
 

@@ -3428,7 +3428,18 @@ impl<'a> Drop for AtomicWriteCleanup<'a> {
     }
 }
 
+/// Normalize text output to end with exactly one POSIX newline.
+fn ensure_trailing_newline(content: &[u8]) -> Vec<u8> {
+    let mut out = content.to_vec();
+    while out.last() == Some(&b'\n') {
+        out.pop();
+    }
+    out.push(b'\n');
+    out
+}
+
 fn write_atomically(path: &Path, content: &[u8]) -> Result<()> {
+    let content = ensure_trailing_newline(content);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -4730,7 +4741,21 @@ mod tests {
         let path = dir.join("report.json");
         let content = b"{\"safe\": true}";
         write_atomically(&path, content).unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), content);
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"safe\": true}\n");
+    }
+
+    #[test]
+    fn test_write_atomically_normalizes_trailing_newlines() {
+        let dir = scratch("atomic-newline");
+        let path = dir.join("report.txt");
+        for (input, expected) in [
+            (b"no newline".as_slice(), b"no newline\n".as_slice()),
+            (b"one newline\n".as_slice(), b"one newline\n".as_slice()),
+            (b"extra newlines\n\n\n".as_slice(), b"extra newlines\n".as_slice()),
+        ] {
+            write_atomically(&path, input).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), expected);
+        }
     }
 
     #[test]
@@ -4761,7 +4786,7 @@ mod tests {
         let new_content = b"new content";
         write_atomically(&path, new_content).unwrap();
 
-        assert_eq!(std::fs::read(&path).unwrap(), new_content);
+        assert_eq!(std::fs::read(&path).unwrap(), b"new content\n");
         let final_perms = std::fs::metadata(&path).unwrap().permissions();
         assert_eq!(final_perms.mode() & 0o777, 0o400);
     }
