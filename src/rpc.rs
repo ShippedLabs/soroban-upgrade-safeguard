@@ -77,6 +77,10 @@ pub struct RpcProvenance {
 #[derive(Clone)]
 pub struct RpcClientConfig {
     pub url: String,
+    pub endpoints: Vec<String>,
+    pub retry_attempts: u32,
+    pub request_timeout: Duration,
+    pub backoff_bounds: Duration,
     pub headers: Vec<RpcHeader>,
     pub max_snapshot_retries: u32,
     /// When `true`, a JSON-RPC response whose `id` is missing or does not
@@ -91,6 +95,10 @@ impl Default for RpcClientConfig {
     fn default() -> Self {
         Self {
             url: String::new(),
+            endpoints: Vec::new(),
+            retry_attempts: 3,
+            request_timeout: Duration::from_secs(30),
+            backoff_bounds: Duration::from_secs(1),
             headers: Vec::new(),
             max_snapshot_retries: DEFAULT_MAX_SNAPSHOT_RETRIES,
             allow_id_mismatch: false,
@@ -113,7 +121,11 @@ impl RpcClientConfig {
     pub fn new(url: impl Into<String>) -> Result<Self, Error> {
         let url = normalize_url(&url.into())?;
         Ok(Self {
-            url,
+            url: url.clone(),
+            endpoints: vec![url],
+            retry_attempts: 3,
+            request_timeout: Duration::from_secs(30),
+            backoff_bounds: Duration::from_secs(1),
             headers: Vec::new(),
             max_snapshot_retries: DEFAULT_MAX_SNAPSHOT_RETRIES,
             allow_id_mismatch: false,
