@@ -812,7 +812,7 @@ fn fold_pairs(walk: &Walk, cli: &CliSettings) -> Result<Vec<ResolvedPair>> {
 
         if let Some((previous_file, previous_name)) = ids.get(&id) {
             bail!(
-                "Duplicate pair identifier '{}' in the manifest composition.\n  \
+                "Duplicate pair id '{}' in the manifest composition.\n  \
                  first occurrence: pair '{}' in {}\n  \
                  duplicate: pair '{}' in {}\n\
                  Each pair must have a unique identifier. Give one of them an explicit `id` field.",
