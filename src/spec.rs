@@ -20,7 +20,7 @@ use stellar_xdr::curr::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DuplicateDeclaration {
     /// Entry kind: "function", "struct", "enum", "union", or "error_enum".
-    pub kind: &'static str,
+    pub kind: String,
     /// The duplicated declaration name.
     pub name: String,
     /// How many times this name occurs for this kind in `entries`.
@@ -221,7 +221,7 @@ impl ContractSpec {
     ///
     /// Returned in deterministic (kind, then name) order.
     pub fn duplicate_declarations(entries: &[ScSpecEntry]) -> Vec<DuplicateDeclaration> {
-        let mut counts: BTreeMap<(&'static str, String), usize> = BTreeMap::new();
+        let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
         for entry in entries {
             let (kind, name) = match entry {
                 ScSpecEntry::FunctionV0(f) => ("function", f.name.to_string()),
@@ -230,7 +230,7 @@ impl ContractSpec {
                 ScSpecEntry::UdtUnionV0(u) => ("union", u.name.to_string()),
                 ScSpecEntry::UdtErrorEnumV0(e) => ("error_enum", e.name.to_string()),
             };
-            *counts.entry((kind, name)).or_insert(0) += 1;
+            *counts.entry((kind.to_string(), name)).or_insert(0) += 1;
         }
         counts
             .into_iter()
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(
             dups,
             vec![DuplicateDeclaration {
-                kind: "function",
+                kind: "function".to_string(),
                 name: "dup_fn".to_string(),
                 occurrences: 2,
             }]

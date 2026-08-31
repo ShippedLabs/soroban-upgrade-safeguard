@@ -205,6 +205,11 @@ pub mod watch_status;
 #[cfg(not(feature = "unstable"))]
 mod watch_status;
 
+#[cfg(feature = "unstable")]
+pub mod wasm_complexity;
+#[cfg(not(feature = "unstable"))]
+mod wasm_complexity;
+
 // Stable public API exports at the root
 pub use crate::attestation::{
     sign_statement, verify_artifacts, verify_signatures, ArtifactDigest, AttestationSigner,
@@ -314,6 +319,9 @@ pub struct CompareOptions<'a> {
     /// `contracts = [..]` in a `.safeguard.toml` shared across several
     /// contracts. `None` matches only migrations with no `contracts` key.
     pub contract: Option<&'a str>,
+    /// Complexity budgets for the WASM code section. When non-empty the
+    /// profiler is invoked and exceeded entries gate `is_safe`.
+    pub complexity_budget: Option<&'a crate::wasm_complexity::ComplexityBudgetConfig>,
 }
 
 /// Compare two Soroban contract builds supplied as raw WASM byte slices with options.
@@ -398,6 +406,13 @@ pub fn compare_wasm_bytes_with_options(
             options.explain,
             options.strict,
         );
+    }
+
+    // Run the WASM complexity profiler when a budget is configured, or
+    // unconditionally when an empty budget is passed (so the profile still
+    // appears in the report for informational purposes).
+    if let Some(budget) = options.complexity_budget {
+        safety_report.apply_complexity(old_wasm, new_wasm, budget);
     }
 
     Ok(safety_report)

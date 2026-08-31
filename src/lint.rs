@@ -389,9 +389,17 @@ pub fn lint(entries: &[ScSpecEntry], options: &LintOptions<'_>) -> LintReport {
 
 fn lint_duplicate_declarations(entries: &[ScSpecEntry], findings: &mut Vec<LintFinding>) {
     for dup in ContractSpec::duplicate_declarations(entries) {
+        let kind_static: &'static str = match dup.kind.as_str() {
+            "function" => "function",
+            "struct" => "struct",
+            "enum" => "enum",
+            "union" => "union",
+            "error_enum" => "error_enum",
+            _ => "unknown",
+        };
         findings.push(LintFinding::new(
             LintRuleId::DuplicateDeclaration,
-            LintTarget::new(dup.kind, dup.name.clone()),
+            LintTarget::new(kind_static, dup.name.clone()),
             format!(
                 "'{}' is declared {} times as a {}; only the first is kept.",
                 dup.name, dup.occurrences, dup.kind
