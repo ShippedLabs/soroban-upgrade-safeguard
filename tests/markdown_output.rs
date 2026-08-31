@@ -160,4 +160,3 @@ fn markdown_format_stdout_regression_test() {
         "progress diagnostics must go to stderr"
     );
 }
-

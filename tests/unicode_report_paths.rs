@@ -66,11 +66,10 @@ fn json_report_writes_to_unicode_directory() {
         output.display()
     );
 
-    let contents = std::fs::read_to_string(&output)
-        .expect("failed to read report from unicode directory");
+    let contents =
+        std::fs::read_to_string(&output).expect("failed to read report from unicode directory");
 
-    let json: Value =
-        serde_json::from_str(&contents).expect("report must be valid JSON");
+    let json: Value = serde_json::from_str(&contents).expect("report must be valid JSON");
 
     assert!(json.get("is_safe").is_some(), "JSON must have 'is_safe'");
     assert_eq!(json["is_safe"], false);
@@ -104,8 +103,8 @@ fn markdown_report_writes_to_unicode_filename() {
         output.display()
     );
 
-    let contents = std::fs::read_to_string(&output)
-        .expect("failed to read report with unicode filename");
+    let contents =
+        std::fs::read_to_string(&output).expect("failed to read report with unicode filename");
 
     assert!(
         contents.contains("# Soroban Upgrade Safety Report"),
@@ -140,8 +139,8 @@ fn text_report_writes_to_mixed_unicode_path() {
         output.display()
     );
 
-    let contents = std::fs::read_to_string(&output)
-        .expect("failed to read report from mixed unicode path");
+    let contents =
+        std::fs::read_to_string(&output).expect("failed to read report from mixed unicode path");
 
     assert!(
         contents.contains("SOROBAN UPGRADE SAFETY REPORT"),
@@ -164,15 +163,16 @@ fn report_readback_validates_after_unicode_write() {
 
     let run = run_with_output("v1.wasm", "v2.wasm", "json", &output);
 
-    assert_eq!(
-        run.code, 1,
-        "v1->v2 must exit 1, stderr:\n{}",
-        run.stderr
-    );
+    assert_eq!(run.code, 1, "v1->v2 must exit 1, stderr:\n{}", run.stderr);
 
     // Read back and validate the JSON structure
-    let contents = std::fs::read_to_string(&output)
-        .unwrap_or_else(|e| panic!("failed to read back report from {}: {}", output.display(), e));
+    let contents = std::fs::read_to_string(&output).unwrap_or_else(|e| {
+        panic!(
+            "failed to read back report from {}: {}",
+            output.display(),
+            e
+        )
+    });
 
     let json: Value = serde_json::from_str(&contents).unwrap_or_else(|e| {
         panic!(
@@ -211,7 +211,11 @@ fn unicode_path_cleanup_succeeds() {
     for output in &outputs {
         let run = run_with_output("v1.wasm", "v1.wasm", "json", output);
         assert_eq!(run.code, 0, "writes must succeed");
-        assert!(output.exists(), "file must be created: {}", output.display());
+        assert!(
+            output.exists(),
+            "file must be created: {}",
+            output.display()
+        );
     }
 
     // Clean up all files
@@ -226,6 +230,5 @@ fn unicode_path_cleanup_succeeds() {
     }
 
     // Remove unicode directory
-    std::fs::remove_dir(&dir)
-        .unwrap_or_else(|e| panic!("directory cleanup must succeed: {}", e));
+    std::fs::remove_dir(&dir).unwrap_or_else(|e| panic!("directory cleanup must succeed: {}", e));
 }

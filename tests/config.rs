@@ -582,10 +582,22 @@ fn test_partial_file_config_uses_documented_defaults() {
     assert_eq!(resolved.new_dir, None);
     assert_eq!(resolved.suppressions.max_suppressions, None);
     assert_eq!(resolved.suppressions.allow_targetless, None);
-    assert_eq!(resolved.policy.max_xdr_depth, ResourcePolicy::default().max_xdr_depth);
-    assert_eq!(resolved.policy.max_xdr_len, ResourcePolicy::default().max_xdr_len);
-    assert_eq!(resolved.policy.max_entries, ResourcePolicy::default().max_entries);
-    assert_eq!(resolved.policy.max_walk_depth, ResourcePolicy::default().max_walk_depth);
+    assert_eq!(
+        resolved.policy.max_xdr_depth,
+        ResourcePolicy::default().max_xdr_depth
+    );
+    assert_eq!(
+        resolved.policy.max_xdr_len,
+        ResourcePolicy::default().max_xdr_len
+    );
+    assert_eq!(
+        resolved.policy.max_entries,
+        ResourcePolicy::default().max_entries
+    );
+    assert_eq!(
+        resolved.policy.max_walk_depth,
+        ResourcePolicy::default().max_walk_depth
+    );
 
     clear_safeguard_env();
 }
