@@ -185,6 +185,12 @@ pub struct FileConfig {
     /// when `--manifest` selects it.
     #[serde(default)]
     pub pairs: Vec<crate::manifest::RawPair>,
+
+    /// Per-metric complexity budgets for the WASM code section.
+    /// Exceeded budgets always gate `is_safe`, independent of `--strict`.
+    /// See [`crate::wasm_complexity`] for metric names and semantics.
+    #[serde(default, rename = "complexity_budget")]
+    pub complexity_budget: Vec<crate::wasm_complexity::ComplexityBudgetEntryFile>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -213,6 +219,10 @@ pub struct ResolvedConfig {
     /// The selected profile (if any), its inheritance chain, and the origin
     /// of every profile-controlled setting. See [`crate::profile`].
     pub profile: profile::ResolvedProfile,
+    /// Validated complexity budgets parsed from `[[complexity_budget]]` tables
+    /// in the config file. Empty when no config file was loaded or no tables
+    /// were declared.
+    pub complexity_budget: crate::wasm_complexity::ComplexityBudgetConfig,
 }
 
 impl ResolvedConfig {
@@ -459,6 +469,17 @@ impl ResolvedConfig {
             .or_else(|| env_usize("SAFEGUARD_MAX_LIVE_VERSIONS"))
             .or_else(|| file_config.as_ref().and_then(|fc| fc.max_live_versions));
 
+        // Complexity budgets: validate raw entries from the config file.
+        let raw_budgets = file_config
+            .as_ref()
+            .map(|fc| fc.complexity_budget.clone())
+            .unwrap_or_default();
+        let complexity_budget =
+            crate::wasm_complexity::ComplexityBudgetConfig::from_file_entries(raw_budgets)
+                .unwrap_or_else(|_errors| {
+                    crate::wasm_complexity::ComplexityBudgetConfig::default()
+                });
+
         Ok(Self {
             wasm_paths,
             contract_id,
@@ -480,6 +501,7 @@ impl ResolvedConfig {
             max_live_versions,
             gating,
             profile: resolved_profile,
+            complexity_budget,
         })
     }
 

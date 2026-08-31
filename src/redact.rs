@@ -16,10 +16,19 @@ pub const REDACTED_ROOT_LABEL: &str = "<redacted>";
 /// Replace a local path's directory components with [`REDACTED_ROOT_LABEL`],
 /// keeping only the file name.
 pub fn redact_local_path(path: &str) -> String {
+    // Try the OS-native path separator first, then fall back to splitting on
+    // backslash so Windows-style paths are handled correctly on Linux too.
     let file_name = std::path::Path::new(path)
         .file_name()
         .map(|f| f.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string());
+        .filter(|s| !s.contains('\\')) // reject if the OS treated the whole thing as one component
+        .unwrap_or_else(|| {
+            // Fall back: split on backslash and take the last non-empty segment.
+            path.split('\\')
+                .rfind(|s| !s.is_empty())
+                .unwrap_or(path)
+                .to_string()
+        });
     format!("{REDACTED_ROOT_LABEL}/{file_name}")
 }
 
@@ -45,6 +54,9 @@ mod tests {
 
     #[test]
     fn bare_file_name_is_still_labeled() {
-        assert_eq!(redact_local_path("contract.wasm"), "<redacted>/contract.wasm");
+        assert_eq!(
+            redact_local_path("contract.wasm"),
+            "<redacted>/contract.wasm"
+        );
     }
 }

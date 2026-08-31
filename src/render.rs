@@ -126,6 +126,7 @@ impl std::error::Error for RenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             RenderError::Malformed(err) => Some(err),
+            RenderError::EmptyInput => None,
             RenderError::IncompatibleSchema { .. } => None,
         }
     }
@@ -199,6 +200,20 @@ pub struct RenderableReport {
     /// Declared migrations that did not verify, and coverage gaps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub migration_diagnostics: Vec<crate::contract_migration::MigrationDiagnostic>,
+
+    /// Static complexity profile for the old WASM build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_old: Option<crate::wasm_complexity::WasmComplexityProfile>,
+    /// Static complexity profile for the new WASM build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_new: Option<crate::wasm_complexity::WasmComplexityProfile>,
+    /// Delta between the old and new complexity profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_delta: Option<crate::wasm_complexity::WasmComplexityDelta>,
+    /// Complexity budget entries exceeded by the new build. Always gates
+    /// `is_safe` when present.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub complexity_violations: Vec<crate::wasm_complexity::ComplexityViolation>,
 }
 
 fn default_schema_version() -> u32 {
@@ -732,6 +747,39 @@ impl RenderableReport {
             }
         }
 
+        if self.complexity_delta.is_some() {
+            output.push('\n');
+            output.push_str(
+                &"========================================\n"
+                    .bold()
+                    .to_string(),
+            );
+            output.push_str(&"    WASM COMPLEXITY DELTA\n".bold().cyan().to_string());
+            output.push_str(
+                &"========================================\n"
+                    .bold()
+                    .to_string(),
+            );
+            output.push_str(
+                &"(Static analysis only — not an execution-cost estimate)\n"
+                    .dimmed()
+                    .to_string(),
+            );
+            output.push_str(&self.complexity_delta_text());
+            if !self.complexity_violations.is_empty() {
+                output.push('\n');
+                output.push_str(
+                    &"--- Complexity Budget Violations ---\n"
+                        .red()
+                        .bold()
+                        .to_string(),
+                );
+                for v in &self.complexity_violations {
+                    output.push_str(&format!("🔴 {v}\n").red().to_string());
+                }
+            }
+        }
+
         output
     }
 
@@ -948,7 +996,107 @@ impl RenderableReport {
             output.push('\n');
         }
 
+        if self.complexity_delta.is_some() {
+            output.push_str("### 📊 WASM Complexity Delta\n\n");
+            output.push_str("> **Static analysis only** — these counts describe the code section as decoded by the tool. They are not Soroban host gas estimates or execution profiling data.\n\n");
+            output.push_str(&self.complexity_delta_markdown());
+            if !self.complexity_violations.is_empty() {
+                output.push_str("#### 🔴 Complexity Budget Violations\n\n");
+                for v in &self.complexity_violations {
+                    output.push_str(&format!("- {v}\n"));
+                }
+                output.push('\n');
+            }
+        }
+
         output
+    }
+
+    /// Render the complexity delta section as plain text.
+    fn complexity_delta_text(&self) -> String {
+        let mut out = String::new();
+        let delta = match &self.complexity_delta {
+            Some(d) => d,
+            None => return out,
+        };
+
+        let fmt_delta = |d: &crate::wasm_complexity::MetricDelta| -> String {
+            let sign = if d.absolute >= 0 { "+" } else { "" };
+            match d.pct {
+                Some(pct) => format!(
+                    "{} → {} ({}{}, {}{:.2}%)",
+                    d.old, d.new, sign, d.absolute, sign, pct
+                ),
+                None => format!("{} → {} ({}{})", d.old, d.new, sign, d.absolute),
+            }
+        };
+
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "defined_functions:",
+            fmt_delta(&delta.defined_functions)
+        ));
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "total_instructions:",
+            fmt_delta(&delta.total_instructions)
+        ));
+        out.push_str("  Per-family instruction counts:\n");
+        for (family, d) in &delta.by_family {
+            out.push_str(&format!(
+                "    {:<20} {}\n",
+                format!("{family}:"),
+                fmt_delta(d)
+            ));
+        }
+        out
+    }
+
+    /// Render the complexity delta section as Markdown.
+    fn complexity_delta_markdown(&self) -> String {
+        let mut out = String::new();
+        let delta = match &self.complexity_delta {
+            Some(d) => d,
+            None => return out,
+        };
+
+        out.push_str("| Metric | Old | New | Δ Absolute | Δ % |\n");
+        out.push_str("|---|---:|---:|---:|---:|\n");
+
+        let fmt_pct = |pct: Option<f64>| -> String {
+            match pct {
+                Some(p) => format!("{:+.2}%", p),
+                None => "—".to_string(),
+            }
+        };
+        let d = &delta.defined_functions;
+        out.push_str(&format!(
+            "| `defined_functions` | {} | {} | {:+} | {} |\n",
+            d.old,
+            d.new,
+            d.absolute,
+            fmt_pct(d.pct)
+        ));
+        let d = &delta.total_instructions;
+        out.push_str(&format!(
+            "| `total_instructions` | {} | {} | {:+} | {} |\n",
+            d.old,
+            d.new,
+            d.absolute,
+            fmt_pct(d.pct)
+        ));
+        for (family, d) in &delta.by_family {
+            out.push_str(&format!(
+                "| `{}` | {} | {} | {:+} | {} |\n",
+                family,
+                d.old,
+                d.new,
+                d.absolute,
+                fmt_pct(d.pct)
+            ));
+        }
+        out.push('\n');
+        out
     }
 
     fn directional_call_abi_text(&self) -> String {

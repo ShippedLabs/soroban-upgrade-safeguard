@@ -540,14 +540,14 @@ fn batch_directory_ignores_unrelated_files_json() {
     assert_eq!(json["is_safe"], Value::Bool(true), "JSON must report safe");
 
     let results = json["results"]
-        .as_object()
-        .expect("results must be an object");
-    assert!(
-        results.contains_key("a"),
-        "JSON results must contain the valid WASM pair 'a'"
-    );
+        .as_array()
+        .expect("results must be an array");
+    let contract_a = results
+        .iter()
+        .find(|r| r["name"] == "a")
+        .expect("JSON results must contain the valid WASM pair 'a'");
     assert_eq!(
-        results["a"]["is_safe"],
+        contract_a["report"]["is_safe"],
         Value::Bool(true),
         "contract 'a' must be safe"
     );
