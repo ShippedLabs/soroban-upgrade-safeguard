@@ -5,8 +5,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use soroban_upgrade_safeguard::render::RenderableReport;
-
 fn wasm(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -216,9 +214,12 @@ fn render_ignores_unknown_additive_json_fields() {
         code, 1,
         "the stored verdict was a failure, so must the exit be"
     );
-    assert!(rendered.contains("SOROBAN UPGRADE SAFETY REPORT"));
     assert!(
-        rendered.contains("CRITICAL") || rendered.contains("WARNING") || rendered.contains("INFO")
+        rendered.contains("# Soroban Upgrade Safety Report"),
+        "rendered markdown must contain the report heading"
+    );
+    assert!(
+        rendered.contains("Critical") || rendered.contains("Warning") || rendered.contains("Info")
     );
     assert!(
         rendered.contains("Storage Layout Compatibility")
@@ -323,9 +324,12 @@ fn a_missing_report_file_fails_with_a_clear_error() {
 
     assert_ne!(output.status.code(), Some(0));
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("{stderr}{stdout}");
     assert!(
-        stderr.contains("Failed to read report file"),
-        "got: {stderr}"
+        combined.contains("Failed to inspect report path")
+            || combined.contains("Failed to read report file"),
+        "got: {combined}"
     );
 }
 

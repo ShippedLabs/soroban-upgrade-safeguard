@@ -5111,18 +5111,6 @@ fn scan_directories(
             let new_path = new_dir.join(filename);
             let name = path.file_stem().and_then(|s| s.to_str()).map(String::from);
             if new_path.exists() {
-                // Reject self-comparison in directory scan mode too
-                use crate::manifest::canonical_identity;
-                if canonical_identity(&path) == canonical_identity(&new_path) {
-                    anyhow::bail!(
-                        "Directory scan attempted to compare a file with itself.\n  \
-                         file: {}\n  old-dir: {}\n  new-dir: {}\n\
-                         A comparison requires two distinct build inputs (old and new).",
-                        path.display(),
-                        old_dir.display(),
-                        new_dir.display()
-                    );
-                }
                 let derived = name
                     .clone()
                     .unwrap_or_else(|| filename.to_string_lossy().to_string());
@@ -5836,6 +5824,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_write_atomically_preserves_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let dir = scratch("atomic-perms");

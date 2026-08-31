@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use soroban_upgrade_safeguard::diff::{compare, Severity};
 use soroban_upgrade_safeguard::report::SafetyReport;
 use soroban_upgrade_safeguard::spec::ContractSpec;
-use soroban_upgrade_safeguard::{compare_wasm_bytes, compare_wasm_files};
+use soroban_upgrade_safeguard::{
+    compare_wasm_against_interface_lockfile, compare_wasm_bytes, compare_wasm_files,
+};
 use stellar_xdr::curr::{
     ScSpecFunctionV0, ScSpecTypeDef, ScSpecUdtStructFieldV0, ScSpecUdtStructV0, StringM, VecM,
 };

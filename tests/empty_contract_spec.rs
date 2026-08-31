@@ -6,10 +6,14 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn temp_dir(name: &str) -> PathBuf {
-    let path =
-        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("{}-{}", name, std::process::id()));
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("{}-{}-{}", name, std::process::id(), id));
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).expect("failed to create temp dir");
     path
@@ -153,27 +157,64 @@ fn empty_spec_distinguishes_from_valid_nonempty_spec() {
         serde_json::from_str(&run.stdout).expect("output must be valid JSON");
     assert_eq!(json["is_safe"], false);
     assert!(
-        json["findings"].as_array().unwrap().len() > 0,
+        json["total_findings"].as_u64().unwrap_or(0) > 0,
         "comparison must report removed functions"
     );
 }
 
-#[test]
-fn empty_to_nonempty_spec_is_a_valid_upgrade() {
+fn extract_contractspec_bytes() -> Vec<u8> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("wasm");
     let valid_wasm_path = dir.join("v1.wasm");
+    let wasm = std::fs::read(&valid_wasm_path).expect("v1.wasm fixture must exist");
 
+    for payload in wasmparser::Parser::new(0).parse_all(&wasm) {
+        if let wasmparser::Payload::CustomSection(section) = payload.expect("valid wasm payload") {
+            if section.name() == "contractspecv0" {
+                return section.data().to_vec();
+            }
+        }
+    }
+    panic!("v1.wasm must contain contractspecv0 section");
+}
+
+fn wasm_with_custom_section(name: &str, data: &[u8]) -> Vec<u8> {
+    let mut section_content = Vec::new();
+    section_content.push(name.len() as u8);
+    section_content.extend_from_slice(name.as_bytes());
+    section_content.extend_from_slice(data);
+
+    let mut wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+    wasm.push(0); // custom section
+    let mut val = section_content.len();
+    loop {
+        let byte = (val & 0x7f) as u8;
+        val >>= 7;
+        if val == 0 {
+            wasm.push(byte);
+            break;
+        } else {
+            wasm.push(byte | 0x80);
+        }
+    }
+    wasm.extend(section_content);
+    wasm
+}
+
+#[test]
+fn empty_to_nonempty_spec_is_a_valid_upgrade() {
+    let spec_bytes = extract_contractspec_bytes();
     let empty_wasm = minimal_wasm_with_empty_contractspec();
-    let valid_wasm = std::fs::read(&valid_wasm_path).expect("v1.wasm fixture must exist");
+    let nonempty_wasm = wasm_with_custom_section("contractspecv0", &spec_bytes);
 
-    let run = run_comparison(&empty_wasm, &valid_wasm);
+    let run = run_comparison(&empty_wasm, &nonempty_wasm);
 
     // Adding functions to an empty interface is safe
     assert_eq!(
         run.code, 0,
-        "empty -> valid (adding functions) must exit 0, stderr:\n{}",
+        "empty -> valid (adding functions) must exit 0, stdout:\n{}\nstderr:\n{}",
+        run.stdout,
         run.stderr
     );
 

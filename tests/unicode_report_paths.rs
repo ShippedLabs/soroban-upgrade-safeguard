@@ -181,18 +181,18 @@ fn report_readback_validates_after_unicode_write() {
         )
     });
 
-    // Validate report structure
+    // Validate report structure against the current JSON schema.
+    // The top-level keys are is_safe, total_findings, findings_by_category,
+    // counts, and provenance. There is no top-level "old"/"new"/"findings"
+    // array; findings are keyed by category.
     assert!(json.get("is_safe").is_some());
-    assert!(json.get("old").is_some());
-    assert!(json.get("new").is_some());
-    assert!(json.get("findings").is_some());
     assert!(json.get("counts").is_some());
+    assert!(json.get("findings_by_category").is_some());
 
-    let findings = json["findings"].as_array().expect("findings must be array");
-    assert!(
-        findings.len() > 0,
-        "v1->v2 breaking comparison must have findings"
-    );
+    let total = json["total_findings"]
+        .as_u64()
+        .expect("total_findings must be a number");
+    assert!(total > 0, "v1->v2 breaking comparison must have findings");
 }
 
 #[test]

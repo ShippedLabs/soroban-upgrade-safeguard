@@ -178,6 +178,7 @@ fn output_flag_safe_upgrade_writes_file_and_exits_zero() {
 // ──────────────────────────────────────────────────────────────────
 
 #[test]
+#[cfg(unix)]
 fn output_flag_atomic_replacement_and_permissions() {
     use std::os::unix::fs::PermissionsExt;
 

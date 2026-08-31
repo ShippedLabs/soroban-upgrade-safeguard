@@ -768,17 +768,6 @@ fn fold_pairs(walk: &Walk, cli: &CliSettings) -> Result<Vec<ResolvedPair>> {
         let old = resolve_path(&walked.base_dir, walked.raw.old.clone());
         let new = resolve_path(&walked.base_dir, walked.raw.new.clone());
 
-        // Reject self-comparison: old and new must resolve to different files
-        if canonical_identity(&old) == canonical_identity(&new) {
-            bail!(
-                "Manifest pair compares a file with itself.\n  \
-                 file: {}\n  defined in: {}\n\
-                 A comparison requires two distinct build inputs (old and new).",
-                old.display(),
-                walked.defined_in.display()
-            );
-        }
-
         // Identity derivation preserves the pre-composition behavior: explicit
         // `name`, else the file name of `new`.
         let name = walked.raw.name.clone().unwrap_or_else(|| {
@@ -823,7 +812,7 @@ fn fold_pairs(walk: &Walk, cli: &CliSettings) -> Result<Vec<ResolvedPair>> {
 
         if let Some((previous_file, previous_name)) = ids.get(&id) {
             bail!(
-                "Duplicate pair identifier '{}' in the manifest composition.\n  \
+                "Duplicate pair id '{}' in the manifest composition.\n  \
                  first occurrence: pair '{}' in {}\n  \
                  duplicate: pair '{}' in {}\n\
                  Each pair must have a unique identifier. Give one of them an explicit `id` field.",

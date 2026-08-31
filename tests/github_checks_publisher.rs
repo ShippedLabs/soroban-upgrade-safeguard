@@ -38,6 +38,7 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 fn write_temp(suffix: &str, content: &str) -> PathBuf {
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let _ = fs::create_dir_all(&dir);
     let path = dir.join(format!("checks_pub_{id}_{suffix}"));
     fs::write(&path, content).expect("write temp file");
     path
@@ -52,12 +53,22 @@ fn write_report(findings: &serde_json::Value) -> PathBuf {
 /// Run an inline Python3 script with optional extra args; return
 /// (exit_code, stdout, stderr).
 fn python3(script: &str, args: &[&str]) -> (i32, String, String) {
-    let mut cmd = Command::new("python3");
-    cmd.arg("-c").arg(script);
-    for a in args {
-        cmd.arg(a);
-    }
-    let out = cmd.output().expect("python3 must be available on the PATH");
+    let primary = if cfg!(windows) { "python" } else { "python3" };
+    let fallback = if cfg!(windows) { "python3" } else { "python" };
+
+    let run_with = |prog: &str| {
+        let mut cmd = Command::new(prog);
+        cmd.arg("-c").arg(script);
+        for a in args {
+            cmd.arg(a);
+        }
+        cmd.output()
+    };
+
+    let out = run_with(primary)
+        .or_else(|_| run_with(fallback))
+        .expect("python or python3 must be available on the PATH");
+
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),

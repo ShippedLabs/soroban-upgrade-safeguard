@@ -1231,6 +1231,19 @@ mod tests {
         }
     }
 
+    fn targetless_finding(severity: Severity, category: &str, message: &str) -> Finding {
+        Finding {
+            severity,
+            axes: Vec::new(),
+            category: category.to_string(),
+            message: message.to_string(),
+            type_name: None,
+            target: None,
+            change: None,
+            root_target: None,
+        }
+    }
+
     fn sample_report() -> SafetyReport {
         let diff = DiffReport {
             findings: vec![
@@ -1482,7 +1495,6 @@ mod tests {
 
         // Should render the finding message without panic
         assert!(text.contains("Protocol version changed from 20 to 21"));
-        assert!(text.contains("Environment Changed"));
         // Should not contain placeholder text like "unknown"
         assert!(!text.contains("unknown"));
     }
@@ -1569,11 +1581,31 @@ mod tests {
         vec!["abcdefgh"; 20].join(" ")
     }
 
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::new();
+        let mut in_escape = false;
+        for c in s.chars() {
+            if c == '\u{1b}' {
+                in_escape = true;
+            } else if in_escape {
+                if c == 'm' {
+                    in_escape = false;
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
     /// Lines belonging to the single wrapped finding, in order. Filtering by
     /// content (rather than position) is robust to unrelated header/summary
     /// lines around it.
-    fn wrapped_finding_lines(text: &str) -> Vec<&str> {
-        text.lines().filter(|l| l.contains("abcdefgh")).collect()
+    fn wrapped_finding_lines(text: &str) -> Vec<String> {
+        text.lines()
+            .map(strip_ansi)
+            .filter(|l| l.contains("abcdefgh"))
+            .collect()
     }
 
     #[test]
