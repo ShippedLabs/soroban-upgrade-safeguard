@@ -1496,6 +1496,8 @@ mod tests {
 
         // The report must be non-empty and not contain erroneous placeholder text.
         assert!(!text.is_empty());
+        assert!(text.contains("Protocol version changed from 20 to 21"));
+        assert!(text.contains("Environment Changed"));
         assert!(!text.contains("unknown"));
     }
 
@@ -1516,6 +1518,8 @@ mod tests {
 
         // The report must be non-empty and not contain erroneous placeholder text.
         assert!(!markdown.is_empty());
+        assert!(markdown.contains("Protocol version changed from 20 to 21"));
+        assert!(markdown.contains("Environment Changed"));
         assert!(!markdown.contains("unknown"));
     }
 
