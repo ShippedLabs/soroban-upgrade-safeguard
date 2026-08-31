@@ -1319,6 +1319,48 @@ mod tests {
     }
 
     #[test]
+    fn text_renders_targetless_finding_without_panic() {
+        let diff = DiffReport {
+            findings: vec![targetless_finding(
+                Severity::Info,
+                "Environment Changed",
+                "Protocol version changed from 20 to 21",
+            )],
+        };
+        let empty_spec = ContractSpec::default();
+        let report = SafetyReport::new_with_specs(&diff, &empty_spec, &empty_spec);
+
+        let text = report.generate_summary_text(false);
+        
+        // Should render the finding message without panic
+        assert!(text.contains("Protocol version changed from 20 to 21"));
+        assert!(text.contains("Environment Changed"));
+        // Should not contain placeholder text like "unknown"
+        assert!(!text.contains("unknown"));
+    }
+
+    #[test]
+    fn markdown_renders_targetless_finding_without_panic() {
+        let diff = DiffReport {
+            findings: vec![targetless_finding(
+                Severity::Info,
+                "Environment Changed",
+                "Protocol version changed from 20 to 21",
+            )],
+        };
+        let empty_spec = ContractSpec::default();
+        let report = SafetyReport::new_with_specs(&diff, &empty_spec, &empty_spec);
+
+        let markdown = report.generate_summary_markdown();
+        
+        // Should render the finding message without panic
+        assert!(markdown.contains("Protocol version changed from 20 to 21"));
+        assert!(markdown.contains("Environment Changed"));
+        // Should not contain placeholder text like "unknown"
+        assert!(!markdown.contains("unknown"));
+    }
+
+    #[test]
     fn provenance_timestamp_suppressed_when_empty() {
         let live = sample_report();
         let mut renderable = live.to_renderable();
