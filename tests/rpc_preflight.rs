@@ -30,6 +30,37 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
         request.extend_from_slice(&buf[..n]);
     }
 
+    let Some(header_end) = request
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
+    else {
+        return String::new();
+    };
+
+    let headers = String::from_utf8_lossy(&request[..header_end]);
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+
+    let target_len = header_end + content_length;
+    while request.len() < target_len {
+        let n = match stream.read(&mut buf) {
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        if n == 0 {
+            break;
+        }
+        request.extend_from_slice(&buf[..n]);
+    }
+
     String::from_utf8_lossy(&request).into_owned()
 }
 

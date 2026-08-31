@@ -416,7 +416,7 @@ fn no_symlinks_rejects_a_symlink_in_manifest_mode() {
 fn a_symlink_in_manifest_mode_is_recorded_without_no_symlinks() {
     let dir = temp_dir("symlink-manifest-allowed");
     let link = dir.join("new.wasm");
-    symlink(wasm("v1.wasm"), &link).expect("failed to create symlink");
+    symlink(wasm("v3.wasm"), &link).expect("failed to create symlink");
 
     let manifest = dir.join("manifest.toml");
     std::fs::write(
