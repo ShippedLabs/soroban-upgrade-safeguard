@@ -1,0 +1,820 @@
+[
+  {
+    "name": "default_policy_all_pass",
+    "description": "All axes pass under the default policy.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "default_policy_gated_failure",
+    "description": "A storage layout break fails the overall check under the default policy.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Removed",
+        "message": "Field deleted.",
+        "type_name": "Data",
+        "target": "Data.value"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "default_policy_non_gated_warning",
+    "description": "An event indexer change reports warning but does not fail the overall check.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Event Field Removed",
+        "message": "Event field deleted.",
+        "type_name": "TransferEvent",
+        "target": "TransferEvent.amount"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "warning",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "strict_mode_forces_all_gated",
+    "description": "Strict mode gates all axes, causing non-gated axes to fail.",
+    "strict": true,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Event Field Removed",
+        "message": "Event field deleted.",
+        "type_name": "TransferEvent",
+        "target": "TransferEvent.amount"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "failed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "custom_policy_gates_event_indexer",
+    "description": "User gates event indexer, causing event changes to fail overall.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": false,
+      "gate_call_abi": false,
+      "gate_event_indexer": true,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Event Field Removed",
+        "message": "Event field deleted.",
+        "type_name": "TransferEvent",
+        "target": "TransferEvent.amount"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "failed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "custom_policy_tolerates_all",
+    "description": "User disables all gating, making any change acceptable.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": false,
+      "gate_call_abi": false,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Removed",
+        "message": "Field deleted.",
+        "type_name": "Data",
+        "target": "Data.value"
+      },
+      {
+        "category": "Function Removed",
+        "message": "Function deleted.",
+        "type_name": null,
+        "target": "transfer"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "warning",
+      "call_abi": "warning",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "parameter_rename_source_level",
+    "description": "Renaming a parameter only triggers source level warnings.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Parameter Renamed",
+        "message": "Parameter x renamed to y.",
+        "type_name": null,
+        "target": "transfer.x"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "warning"
+    }
+  },
+  {
+    "name": "multi_axis_finding_struct_in_function_parameters",
+    "description": "A struct used in a function parameter registers Call ABI & Storage Layout.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Type Changed",
+        "message": "Field type changed from u32 to u64.",
+        "type_name": "UserData",
+        "target": "UserData.age"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "failed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "multi_axis_finding_event_struct_in_function_parameters",
+    "description": "A struct containing Event and used in functions registers all three axes.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Type Changed",
+        "message": "Field type changed.",
+        "type_name": "TransferEvent",
+        "target": "TransferEvent.amount"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "failed",
+      "event_indexer": "warning",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "suppressed_findings_ignored_by_gating",
+    "description": "Suppressed findings do not fail the gated checks.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Removed",
+        "message": "Field deleted.",
+        "type_name": "Data",
+        "target": "Data.value",
+        "suppressed": true
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "cascading_findings_inherit_gating",
+    "description": "A cascading layout break inherits axes from the root finding.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Type Changed",
+        "message": "Field changed.",
+        "type_name": "Inner",
+        "target": "Inner.val",
+        "root_target": null
+      },
+      {
+        "category": "Cascading Layout Break",
+        "message": "Cascading break.",
+        "type_name": "Outer",
+        "target": "Outer",
+        "root_target": "Inner.val"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "env_changes_affect_call_abi",
+    "description": "Environment metadata changes are classified under Call ABI.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Environment",
+        "message": "Protocol interface version changed.",
+        "type_name": null,
+        "target": null
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "passed",
+      "call_abi": "failed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "error_enum_affects_call_abi",
+    "description": "Error enum modifications affect the Call ABI axis.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Error Enum Case Removed",
+        "message": "Case removed.",
+        "type_name": "ContractError",
+        "target": "ContractError.InvalidAmount"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "passed",
+      "call_abi": "failed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "docs_changes_affect_source_level",
+    "description": "Documentation updates only affect source level.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Documentation Changed",
+        "message": "Doc updated.",
+        "type_name": "Data",
+        "target": "Data.value"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "warning"
+    }
+  },
+  {
+    "name": "mixed_axes_all_gated_passing",
+    "description": "Multiple warnings on non-gated axes, all passing overall.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Event Field Removed",
+        "message": "Event field removed.",
+        "type_name": "TransferEvent",
+        "target": "TransferEvent.amount"
+      },
+      {
+        "category": "Parameter Renamed",
+        "message": "Param renamed.",
+        "type_name": null,
+        "target": "transfer.to"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "warning",
+      "source_level": "warning"
+    }
+  },
+  {
+    "name": "mixed_axes_one_gated_fails",
+    "description": "One gated failure fails the overall run despite warnings on non-gated axes.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Removed",
+        "message": "Field deleted.",
+        "type_name": "Data",
+        "target": "Data.value"
+      },
+      {
+        "category": "Event Field Removed",
+        "message": "Event field removed.",
+        "type_name": "TransferEvent",
+        "target": "TransferEvent.amount"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "passed",
+      "event_indexer": "warning",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "gate_source_level_fails",
+    "description": "Fails overall if source_level is gated and a rename occurs.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": true
+    },
+    "findings": [
+      {
+        "category": "Parameter Renamed",
+        "message": "Param renamed.",
+        "type_name": null,
+        "target": "transfer.to"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "failed"
+    }
+  },
+  {
+    "name": "multiple_failures_across_gated_axes",
+    "description": "Multiple failures on gated axes are tracked individually.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": true,
+      "gate_source_level": true
+    },
+    "findings": [
+      {
+        "category": "Struct Field Removed",
+        "message": "Field deleted.",
+        "type_name": "Data",
+        "target": "Data.value"
+      },
+      {
+        "category": "Function Removed",
+        "message": "Function deleted.",
+        "type_name": null,
+        "target": "transfer"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "failed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "struct_kind_change_impacts_storage_and_abi",
+    "description": "A struct modified to enum affects both ABI and Storage.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Type Kind Changed",
+        "message": "Kind changed.",
+        "type_name": "Beta",
+        "target": "Beta"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "failed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "documentation_changes_ignored_when_source_level_ungated",
+    "description": "Documentation modifications only alert warnings by default.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Function Documentation Changed",
+        "message": "Doc updated.",
+        "type_name": null,
+        "target": "init"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "warning"
+    }
+  },
+  {
+    "name": "enum_removed_affects_storage_and_abi",
+    "description": "Removing an enum used in storage and parameters fails overall.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Enum Removed",
+        "message": "Enum deleted.",
+        "type_name": "Status",
+        "target": "Status"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "failed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "union_case_reordered_affects_storage_and_abi",
+    "description": "Union case reordering affects storage layout and ABI.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Union Case Reordered",
+        "message": "Cases reordered.",
+        "type_name": "Role",
+        "target": "Role.Admin"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "failed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "event_enum_removed_affects_event_indexer",
+    "description": "Removing an enum used in events only triggers Event Indexer warnings.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Event Enum Removed",
+        "message": "Event enum removed.",
+        "type_name": "EventStatus",
+        "target": "EventStatus"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "warning",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "event_enum_case_value_changed",
+    "description": "Modifying value in event enum case triggers Event Indexer warnings.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Event Enum Case Value Changed",
+        "message": "Case value modified.",
+        "type_name": "EventStatus",
+        "target": "EventStatus.Success"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "warning",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "gated_event_indexer_fails_on_event_enum_change",
+    "description": "Fails overall if event_indexer is gated and event enum changes.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": true,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Event Enum Case Removed",
+        "message": "Event enum case removed.",
+        "type_name": "EventStatus",
+        "target": "EventStatus.Failure"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "failed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "all_gating_disabled_gaps_passing",
+    "description": "If all gating is turned off, the check returns Passed overall even on failure types.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": false,
+      "gate_call_abi": false,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Removed",
+        "message": "Field deleted.",
+        "type_name": "Data",
+        "target": "Data.value"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "warning",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "multiple_different_category_findings_mixed",
+    "description": "Mixed critical, warnings, and info across gated and ungated config.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": false,
+      "gate_event_indexer": true,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Struct Field Removed",
+        "message": "Gated failure",
+        "type_name": "Data",
+        "target": "Data.value"
+      },
+      {
+        "category": "Function Removed",
+        "message": "Non-gated warning",
+        "type_name": null,
+        "target": "transfer"
+      },
+      {
+        "category": "Event Field Removed",
+        "message": "Gated failure",
+        "type_name": "TransferEvent",
+        "target": "TransferEvent.amount"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "failed",
+      "call_abi": "warning",
+      "event_indexer": "failed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "documentation_changes_with_strict_mode",
+    "description": "Strict mode gates even documentation changes, causing failed status.",
+    "strict": true,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Function Documentation Changed",
+        "message": "Doc updated.",
+        "type_name": null,
+        "target": "init"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "failed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "failed"
+    }
+  },
+  {
+    "name": "unions_cases_added_call_abi",
+    "description": "Adding a union case is non-breaking, mapping to warnings/pass.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Union Case Inserted",
+        "message": "Case added.",
+        "type_name": "Role",
+        "target": "Role.Viewer"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  },
+  {
+    "name": "error_enum_added_is_non_breaking",
+    "description": "Adding error enum cases only produces warnings/pass.",
+    "strict": false,
+    "policy": {
+      "gate_storage_layout": true,
+      "gate_call_abi": true,
+      "gate_event_indexer": false,
+      "gate_source_level": false
+    },
+    "findings": [
+      {
+        "category": "Error Enum Case Added",
+        "message": "New error code.",
+        "type_name": "ContractError",
+        "target": "ContractError.Timeout"
+      }
+    ],
+    "expected_verdicts": {
+      "overall": "passed",
+      "storage_layout": "passed",
+      "call_abi": "passed",
+      "event_indexer": "passed",
+      "source_level": "passed"
+    }
+  }
+]

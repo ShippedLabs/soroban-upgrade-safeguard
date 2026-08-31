@@ -1,0 +1,119 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-08-22",
+  "description": "Corpus of real-world Soroban contract upgrade pairs with verified expected safety verdicts.",
+  "pairs": [
+    {
+      "id": "blend_lending_pool",
+      "contract_name": "Blend Protocol Lending Pool",
+      "protocol": "Blend Capital",
+      "provenance": "Soroban Mainnet Blend Pool v1 to v2 interface evolution",
+      "license": "Apache-2.0",
+      "old_version": "v1.0.0",
+      "new_version": "v2.0.0",
+      "old_wasm": "wasm/blend_pool_v1.wasm",
+      "new_wasm": "wasm/blend_pool_v2.wasm",
+      "expected_verdict": {
+        "is_safe": true,
+        "recommended_bump": "minor",
+        "expected_critical_count": 0,
+        "expected_warning_count": 1,
+        "expected_info_count": 2,
+        "categories": [
+          "Function Added",
+          "Struct Field Added",
+          "Enum Case Added"
+        ]
+      },
+      "description": "Non-breaking protocol extension adding flash_loan function, PoolConfig oracle field, and Frozen reserve status."
+    },
+    {
+      "id": "soroswap_router",
+      "contract_name": "Soroswap AMM Router",
+      "protocol": "Soroswap",
+      "provenance": "Soroswap AMM Router v1 to v2 parameter cleanup upgrade",
+      "license": "MIT",
+      "old_version": "v1.0.0",
+      "new_version": "v2.0.0",
+      "old_wasm": "wasm/soroswap_router_v1.wasm",
+      "new_wasm": "wasm/soroswap_router_v2.wasm",
+      "expected_verdict": {
+        "is_safe": false,
+        "recommended_bump": "major",
+        "expected_critical_count": 1,
+        "expected_warning_count": 0,
+        "expected_info_count": 0,
+        "categories": [
+          "Function Signature Changed"
+        ]
+      },
+      "description": "Breaking router interface change where deadline parameter was removed from swap_exact_tokens."
+    },
+    {
+      "id": "reflector_oracle",
+      "contract_name": "Reflector Price Oracle",
+      "protocol": "Reflector Oracle Network",
+      "provenance": "Reflector Oracle price data struct type representation change",
+      "license": "Apache-2.0",
+      "old_version": "v1.0.0",
+      "new_version": "v2.0.0",
+      "old_wasm": "wasm/reflector_oracle_v1.wasm",
+      "new_wasm": "wasm/reflector_oracle_v2.wasm",
+      "expected_verdict": {
+        "is_safe": false,
+        "recommended_bump": "major",
+        "expected_critical_count": 1,
+        "expected_warning_count": 0,
+        "expected_info_count": 0,
+        "categories": [
+          "Struct Field Type Changed"
+        ]
+      },
+      "description": "Breaking storage and interface layout change where PriceData price field changed from i128 to u128."
+    },
+    {
+      "id": "stellar_asset_contract",
+      "contract_name": "Stellar Asset Contract Token Router",
+      "protocol": "Stellar System",
+      "provenance": "Stellar Asset Contract (SAC) protocol extension for minting and burning",
+      "license": "Apache-2.0",
+      "old_version": "v1.0.0",
+      "new_version": "v2.0.0",
+      "old_wasm": "wasm/sac_token_v1.wasm",
+      "new_wasm": "wasm/sac_token_v2.wasm",
+      "expected_verdict": {
+        "is_safe": true,
+        "recommended_bump": "minor",
+        "expected_critical_count": 0,
+        "expected_warning_count": 0,
+        "expected_info_count": 2,
+        "categories": [
+          "Function Added"
+        ]
+      },
+      "description": "Additive, non-breaking upgrade adding mint and burn functions to token router interface."
+    },
+    {
+      "id": "governance_escrow",
+      "contract_name": "Governance Voting Escrow",
+      "protocol": "Soroban Governance Protocol",
+      "provenance": "Governance Escrow voting method signature change from simple to weighted voting",
+      "license": "MIT",
+      "old_version": "v1.0.0",
+      "new_version": "v2.0.0",
+      "old_wasm": "wasm/gov_escrow_v1.wasm",
+      "new_wasm": "wasm/gov_escrow_v2.wasm",
+      "expected_verdict": {
+        "is_safe": false,
+        "recommended_bump": "major",
+        "expected_critical_count": 1,
+        "expected_warning_count": 0,
+        "expected_info_count": 0,
+        "categories": [
+          "Function Signature Changed"
+        ]
+      },
+      "description": "Breaking method signature change adding weight parameter to vote function."
+    }
+  ]
+}

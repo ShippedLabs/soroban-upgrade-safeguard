@@ -66,11 +66,10 @@ fn fixture_pair_union_variant_type_change_is_unsafe() {
     let report = compare(&old, &new);
     let safety = SafetyReport::new(&report);
 
-    assert!(!safety.is_safe);
-    assert!(report
-        .findings
-        .iter()
-        .any(|f| { f.severity == Severity::Critical && f.category == "Union Case Type Changed" }));
+    assert!(!safety.is_safe());
+    assert!(report.findings.iter().any(|f| {
+        *f.severity() == Severity::Critical && f.category() == "Union Case Type Changed"
+    }));
 }
 
 #[test]
@@ -100,12 +99,12 @@ fn fixture_pair_new_union_variant_is_info_only() {
     let report = compare(&old, &new);
     let safety = SafetyReport::new(&report);
 
-    assert!(safety.is_safe);
-    assert_eq!(safety.critical_count, 0);
+    assert!(safety.is_safe());
+    assert_eq!(safety.critical_count(), 0);
     assert!(report
         .findings
         .iter()
-        .any(|f| { f.severity == Severity::Info && f.category == "Union Case Added" }));
+        .any(|f| { *f.severity() == Severity::Info && f.category() == "Union Case Added" }));
 }
 
 #[test]
@@ -116,8 +115,8 @@ fn fixture_pair_error_enum_value_change_is_unsafe() {
     let report = compare(&old, &new);
     let safety = SafetyReport::new(&report);
 
-    assert!(!safety.is_safe);
+    assert!(!safety.is_safe());
     assert!(report.findings.iter().any(|f| {
-        f.severity == Severity::Critical && f.category == "Error Enum Case Value Changed"
+        *f.severity() == Severity::Critical && f.category() == "Error Enum Case Value Changed"
     }));
 }

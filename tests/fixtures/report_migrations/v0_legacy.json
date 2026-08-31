@@ -1,0 +1,262 @@
+{
+  "provenance": {
+    "tool_version": "0.1.0",
+    "timestamp": "",
+    "inputs": [
+      "17618edb2d0d99112a446eec51b056ef59d07e2d1ffdbbb0656f48f62e4a4265",
+      "75ac891b458995add52ccc2d24edde3d5494fecdcbc413f0e4aca4e9afc72158"
+    ]
+  },
+  "is_safe": false,
+  "strict": false,
+  "counts": {
+    "critical": 3,
+    "warning": 0,
+    "info": 2
+  },
+  "suppressed_count": 0,
+  "total_findings": 5,
+  "recommended_bump": "major",
+  "old_interface_hash": "17618edb2d0d99112a446eec51b056ef59d07e2d1ffdbbb0656f48f62e4a4265",
+  "new_interface_hash": "75ac891b458995add52ccc2d24edde3d5494fecdcbc413f0e4aca4e9afc72158",
+  "scope": {
+    "exported_interface": false,
+    "env_metadata": false,
+    "storage_schema": "NotAnalyzed",
+    "old_spec_section_count": 0,
+    "new_spec_section_count": 0,
+    "old_duplicate_names": [],
+    "new_duplicate_names": []
+  },
+  "storage_coverage": "interface-only",
+  "findings_by_category": {
+    "Data Segment Changed": [
+      {
+        "rule_id": "data_segment_changed",
+        "severity": "info",
+        "axes": [
+          "runtime_surface"
+        ],
+        "category": "Data Segment Changed",
+        "message": "Data segments changed (segments: 1 [active: 1, passive: 0] -> 1 [active: 1, passive: 0], bytes: 32 -> 16).",
+        "type_name": null,
+        "target": "data_segments",
+        "root_target": null
+      }
+    ],
+    "Event Enum Case Added": [
+      {
+        "rule_id": "event_enum_case_added",
+        "severity": "info",
+        "axes": [
+          "event_indexer"
+        ],
+        "category": "Event Enum Case Added",
+        "message": "Event enum 'StatusEvent': new case 'Archived' (value 4) added.",
+        "type_name": "StatusEvent",
+        "target": "StatusEvent.Archived",
+        "root_target": null
+      }
+    ],
+    "Event Enum Case Value Changed": [
+      {
+        "rule_id": "event_enum_case_value_changed",
+        "severity": "critical",
+        "axes": [
+          "event_indexer"
+        ],
+        "category": "Event Enum Case Value Changed",
+        "message": "Event enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.",
+        "type_name": "StatusEvent",
+        "target": "StatusEvent.Paused",
+        "root_target": null
+      }
+    ],
+    "Function Signature Changed": [
+      {
+        "rule_id": "function_signature_changed",
+        "severity": "critical",
+        "axes": [
+          "call_abi"
+        ],
+        "category": "Function Signature Changed",
+        "message": "Function 'initialize': parameter count changed from 1 to 2.",
+        "type_name": null,
+        "target": "initialize",
+        "root_target": null
+      }
+    ],
+    "Struct Field Removed": [
+      {
+        "rule_id": "struct_field_removed",
+        "severity": "critical",
+        "axes": [
+          "call_abi",
+          "storage_layout"
+        ],
+        "category": "Struct Field Removed",
+        "message": "Struct 'ConfigData': field 'threshold' was removed. Backwards compatibility is broken.",
+        "type_name": "ConfigData",
+        "target": "ConfigData.threshold",
+        "root_target": null
+      }
+    ]
+  },
+  "axis_verdicts": {
+    "storage_layout": "failed",
+    "call_abi": "failed",
+    "event_indexer": "warning",
+    "source_level": "passed",
+    "runtime_surface": "passed"
+  },
+  "gated_axes": [
+    "storage_layout",
+    "call_abi",
+    "runtime_surface"
+  ],
+  "findings_by_axis": {
+    "storage_layout": [
+      {
+        "rule_id": "struct_field_removed",
+        "severity": "critical",
+        "axes": [
+          "call_abi",
+          "storage_layout"
+        ],
+        "category": "Struct Field Removed",
+        "message": "Struct 'ConfigData': field 'threshold' was removed. Backwards compatibility is broken.",
+        "type_name": "ConfigData",
+        "target": "ConfigData.threshold",
+        "root_target": null
+      }
+    ],
+    "call_abi": [
+      {
+        "rule_id": "function_signature_changed",
+        "severity": "critical",
+        "axes": [
+          "call_abi"
+        ],
+        "category": "Function Signature Changed",
+        "message": "Function 'initialize': parameter count changed from 1 to 2.",
+        "type_name": null,
+        "target": "initialize",
+        "root_target": null
+      },
+      {
+        "rule_id": "struct_field_removed",
+        "severity": "critical",
+        "axes": [
+          "call_abi",
+          "storage_layout"
+        ],
+        "category": "Struct Field Removed",
+        "message": "Struct 'ConfigData': field 'threshold' was removed. Backwards compatibility is broken.",
+        "type_name": "ConfigData",
+        "target": "ConfigData.threshold",
+        "root_target": null
+      }
+    ],
+    "event_indexer": [
+      {
+        "rule_id": "event_enum_case_added",
+        "severity": "info",
+        "axes": [
+          "event_indexer"
+        ],
+        "category": "Event Enum Case Added",
+        "message": "Event enum 'StatusEvent': new case 'Archived' (value 4) added.",
+        "type_name": "StatusEvent",
+        "target": "StatusEvent.Archived",
+        "root_target": null
+      },
+      {
+        "rule_id": "event_enum_case_value_changed",
+        "severity": "critical",
+        "axes": [
+          "event_indexer"
+        ],
+        "category": "Event Enum Case Value Changed",
+        "message": "Event enum 'StatusEvent': case 'Paused' value changed from 2 to 3. This breaks data serialization.",
+        "type_name": "StatusEvent",
+        "target": "StatusEvent.Paused",
+        "root_target": null
+      }
+    ],
+    "source_level": [],
+    "runtime_surface": [
+      {
+        "rule_id": "data_segment_changed",
+        "severity": "info",
+        "axes": [
+          "runtime_surface"
+        ],
+        "category": "Data Segment Changed",
+        "message": "Data segments changed (segments: 1 [active: 1, passive: 0] -> 1 [active: 1, passive: 0], bytes: 32 -> 16).",
+        "type_name": null,
+        "target": "data_segments",
+        "root_target": null
+      }
+    ]
+  },
+  "call_abi": {
+    "old_client_to_new_contract": {
+      "direction": "old_client_to_new_contract",
+      "compatible": false,
+      "breaks": [
+        {
+          "function": "execute_action",
+          "path": "function.execute_action.argument[0]",
+          "reason": "the encoded struct fields [\"admin\", \"threshold\"] do not match required fields [\"admin\"]"
+        },
+        {
+          "function": "execute_action",
+          "path": "function.execute_action.argument[1].case[2]",
+          "reason": "the producer may encode enum discriminant 2, which the consumer does not define"
+        },
+        {
+          "function": "initialize",
+          "path": "function.initialize.arguments",
+          "reason": "the client sends 1 positional arguments but the provider requires 2"
+        },
+        {
+          "function": "initialize",
+          "path": "function.initialize.return",
+          "reason": "the provider returns 0 values but the client decodes 1"
+        }
+      ]
+    },
+    "new_client_to_old_contract": {
+      "direction": "new_client_to_old_contract",
+      "compatible": false,
+      "breaks": [
+        {
+          "function": "execute_action",
+          "path": "function.execute_action.argument[0]",
+          "reason": "the encoded struct fields [\"admin\"] do not match required fields [\"admin\", \"threshold\"]"
+        },
+        {
+          "function": "execute_action",
+          "path": "function.execute_action.argument[1].case[3]",
+          "reason": "the producer may encode enum discriminant 3, which the consumer does not define"
+        },
+        {
+          "function": "execute_action",
+          "path": "function.execute_action.argument[1].case[4]",
+          "reason": "the producer may encode enum discriminant 4, which the consumer does not define"
+        },
+        {
+          "function": "initialize",
+          "path": "function.initialize.arguments",
+          "reason": "the client sends 2 positional arguments but the provider requires 1"
+        },
+        {
+          "function": "initialize",
+          "path": "function.initialize.return",
+          "reason": "the provider returns 1 values but the client decodes 0"
+        }
+      ]
+    }
+  },
+  "empirical": false
+}

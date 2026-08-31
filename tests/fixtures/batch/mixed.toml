@@ -1,0 +1,25 @@
+# Relative paths are resolved from this manifest's directory.
+[[pairs]]
+old = "../../wasm/v1.wasm"
+new = "../../wasm/v1.wasm"
+name = "schema-backed"
+old_storage_schema = "schemas/empty.toml"
+new-storage-schema = "schemas/empty.toml"
+
+[[pairs]]
+old = "../../wasm/v1.wasm"
+new = "../../wasm/v1.wasm"
+name = "interface-only"
+
+[[pairs]]
+old = "../../wasm/v1.wasm"
+new = "../../wasm/v1.wasm"
+name = "partial"
+old_storage_schema = "schemas/empty.toml"
+
+[[pairs]]
+old = "../../wasm/v1.wasm"
+new = "../../wasm/v1.wasm"
+name = "invalid"
+old_storage_schema = "schemas/invalid.json"
+new_storage_schema = "schemas/invalid.json"

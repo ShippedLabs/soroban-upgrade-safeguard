@@ -1,0 +1,32 @@
+name: Soroban Upgrade Safety Report
+
+on:
+  pull_request:
+    paths:
+      - 'wasm/**/*.wasm'
+      - 'contracts/**/target/wasm32-unknown-unknown/**/*.wasm'
+
+jobs:
+  safeguard-report:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build soroban-upgrade-safeguard
+        run: cargo build --release
+
+      - name: Add safeguard to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Run Soroban Upgrade Safeguard
+        uses: ./.github/actions/soroban-upgrade-safeguard
+        with:
+          old-wasm: ./wasm/v1.wasm
+          new-wasm: ./wasm/v2.wasm
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --strict --explain

@@ -18,43 +18,55 @@
 #   - enum cases ........... "Enum.case"              e.g. "StatusEvent.Paused"
 #
 # Omit `target` to match only findings that have no target (e.g. "Environment").
-
-max_suppressions = 10
-allow_targetless = false
+#
+# Uncomment to require a non-blank `reason` for suppressions matching selected
+# rule IDs and/or compatibility axes — for findings risky enough that an
+# unexplained suppression isn't reviewable. Omitting this table (the default)
+# leaves `reason` optional everywhere, as above.
+#
+# [require_reason]
+# rule_ids = ["struct_field_removed"]
+# axes     = ["storage_layout"]
 
 [[suppress]]
-category    = "Struct Field Removed"
-target      = "ConfigData.threshold"
-author      = "Alice <alice@example.com>"
-reason      = "Planned storage migration in v2 drops the unused threshold field."
-expiry      = "2026-12-31"
-fingerprint = "8a3f..."
+category = "Struct Field Removed"
+target   = "ConfigData.threshold"
+reason   = "Planned storage migration in v2 drops the unused threshold field."
 
 [[suppress]]
-category    = "Function Signature Changed"
-target      = "initialize"
-author      = "Bob <bob@example.com>"
-reason      = "Re-init is intentional and gated behind the migration admin call."
-expiry      = "2026-12-31"
-fingerprint = "7b2e..."
+category = "Function Signature Changed"
+target   = "initialize"
+reason   = "Re-init is intentional and gated behind the migration admin call."
 
-# ---------------------------------------------------------------------------
-# Resource limits (optional).
-#
-# The WASM and its embedded XDR are treated as untrusted input. These limits
-# bound how much work a single (possibly malicious) contract can cause; an input
-# that exceeds one stops the run with a controlled error and exit code 2 —
-# distinct from exit code 1 (breaking changes) — rather than crashing the gate
-# with an out-of-memory allocation or a stack overflow.
-#
-# Every field is optional; an omitted field keeps the built-in default shown
-# below. Each is independently configurable, and any of them can be overridden
-# for a single run with the matching --max-* CLI flag (flags win over this file).
-# The defaults accept every real mainnet spec — only raise a limit if a
-# legitimate, unusually large contract is rejected.
 
-[limits]
-max_xdr_depth  = 64         # Max XDR nesting depth per entry (stack-overflow guard).
-max_xdr_len    = 33554432   # Max bytes decoded per custom section, 32 MiB (allocation guard).
-max_entries    = 100000     # Max decoded spec entries, summed across all sections.
-max_walk_depth = 128        # Max recursive type-walk depth (equality, rendering, cascades).
+# ─── Named policy profiles (optional) ───────────────────────────────────────
+#
+# Everything above (suppressions, classification data) is shared by every
+# profile. A profile only controls *policy*: gating, severity (`strict`),
+# the suppression budget (`max_suppressions`), resource limits, and output
+# formatting. This lets local dev, PR checks, and release validation share
+# one file instead of duplicating suppressions across three.
+#
+# Select one with `--profile <name>`, or set `default_profile` below so a
+# bare invocation picks one up. `--profile` and `SAFEGUARD_PROFILE` both win
+# over `default_profile`. See `docs/named_policy_profiles.md` for the full
+# precedence rules and provenance format.
+#
+# default_profile = "pr"
+#
+# [profiles.dev]
+# strict = false
+#
+# [profiles.pr]
+# inherits = "dev"   # builds on `dev`; its own fields win on conflict
+# strict   = true
+#
+# [profiles.pr.gating]
+# gate_event_indexer = true
+#
+# [profiles.release]
+# inherits = "pr"
+# format   = "json"
+#
+# [profiles.release.limits]
+# max_xdr_depth = 32

@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --all -- --check
+        entry: bash -c "cargo fmt --all -- --check"
+        language: system
+        types: [file]
+      - id: cargo-clippy
+        name: cargo clippy --all -- -D warnings
+        entry: bash -c "cargo clippy --all -- -D warnings"
+        language: system
+        types: [file]
+      - id: check-cargo-format
+        name: Check cargo fmt consistency
+        entry: bash -c "cargo fmt --all -- --check"
+        language: system
+        types: [file]

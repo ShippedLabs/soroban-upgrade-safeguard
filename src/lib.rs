@@ -4,377 +4,449 @@
 //! Stellar network. It detects breaking changes in storage layout, function
 //! signatures, and event schemas before an upgrade is deployed.
 //!
-//! The crate is split into focused modules that form an analysis pipeline:
-//!
-//! - [`loader`] reads and validates raw WASM binaries from disk.
-//! - [`parser`] extracts the Soroban `contractspecv0` custom section and decodes
-//!   its XDR entries.
-//! - [`spec`] organizes the decoded entries into a [`spec::ContractSpec`].
-//! - [`mapper`] builds type-dependency graphs used for cascade detection.
-//! - [`diff`] compares two specs and produces a list of findings.
-//! - [`report`] aggregates findings into a [`report::SafetyReport`].
-//!
-//! The exported spec only describes a contract's *callable surface*. Storage
-//! compatibility is governed by internal storage-key and value types that need
-//! not appear in it at all, so [`storage_schema`] defines an opt-in manifest in
-//! which a team declares those types for analysis.
-//!
-//! Most callers only need the two top-level helpers, [`compare_wasm_files`] and
-//! [`compare_wasm_bytes`], which run the whole pipeline and return a structured
-//! [`report::SafetyReport`]. The individual modules are public so that more
-//! specialized tools (CI bots, dashboards, custom checks) can reuse any single
-//! stage without shelling out to the CLI binary.
-//!
-//! # Example
-//!
-//! ```no_run
-//! use std::path::Path;
-//!
-//! let report = soroban_upgrade_safeguard::compare_wasm_files(
-//!     Path::new("./wasm/v1.wasm"),
-//!     Path::new("./wasm/v2.wasm"),
-//! )?;
-//!
-//! if !report.is_safe {
-//!     eprintln!("Upgrade is unsafe: {} critical issue(s)", report.critical_count);
-//! }
-//! # Ok::<(), anyhow::Error>(())
-//! ```
+//! A breaking change has two independent axes in the output: whether a human
+//! *acknowledged* it ([`suppression`]) and whether a migration *handles* it
+//! ([`contract_migration`]). They are reported separately and never collapse
+//! into one another.
 
+#[cfg(feature = "unstable")]
+pub mod attestation;
+#[cfg(not(feature = "unstable"))]
+mod attestation;
+
+#[cfg(feature = "unstable")]
+pub mod budget;
+#[cfg(not(feature = "unstable"))]
+mod budget;
+pub mod bundle;
+#[cfg(not(feature = "unstable"))]
+mod bundle;
+
+#[cfg(feature = "unstable")]
+pub mod call_abi;
+#[cfg(not(feature = "unstable"))]
+mod call_abi;
+
+#[cfg(feature = "unstable")]
+pub mod capability;
+#[cfg(not(feature = "unstable"))]
+mod capability;
+
+#[cfg(feature = "unstable")]
+pub mod category;
+#[cfg(not(feature = "unstable"))]
+mod category;
+
+#[cfg(feature = "unstable")]
 pub mod color;
+#[cfg(not(feature = "unstable"))]
+mod color;
+
+#[cfg(feature = "unstable")]
+pub mod config;
+#[cfg(not(feature = "unstable"))]
+mod config;
+
+#[cfg(feature = "unstable")]
+pub mod dependency;
+#[cfg(not(feature = "unstable"))]
+mod dependency;
+
+#[cfg(feature = "unstable")]
 pub mod diff;
-pub mod limits;
+#[cfg(not(feature = "unstable"))]
+mod diff;
+
+#[cfg(feature = "unstable")]
+pub mod empirical;
+#[cfg(not(feature = "unstable"))]
+mod empirical;
+
+#[cfg(feature = "unstable")]
+pub mod error;
+#[cfg(not(feature = "unstable"))]
+mod error;
+
+pub mod interface_hash;
+
+#[cfg(feature = "unstable")]
+pub mod jsonl;
+#[cfg(not(feature = "unstable"))]
+mod jsonl;
+
+#[cfg(feature = "unstable")]
 pub mod loader;
+#[cfg(not(feature = "unstable"))]
+mod loader;
+
+#[cfg(feature = "unstable")]
+pub mod limits;
+#[cfg(not(feature = "unstable"))]
+mod limits;
+
+#[cfg(feature = "unstable")]
+#[cfg(feature = "unstable")]
+pub mod lint;
+#[cfg(not(feature = "unstable"))]
+mod lint;
+
+#[cfg(feature = "unstable")]
+pub mod manifest;
+#[cfg(not(feature = "unstable"))]
+mod manifest;
+
+#[cfg(feature = "unstable")]
 pub mod mapper;
+#[cfg(not(feature = "unstable"))]
+mod mapper;
+
+#[cfg(feature = "unstable")]
+pub mod contract_migration;
+#[cfg(not(feature = "unstable"))]
+mod contract_migration;
+
+#[cfg(feature = "unstable")]
+pub mod migration;
+#[cfg(not(feature = "unstable"))]
+mod migration;
+
+#[cfg(feature = "unstable")]
+pub mod oci;
+#[cfg(not(feature = "unstable"))]
+mod oci;
+
+#[cfg(feature = "unstable")]
 pub mod parser;
+#[cfg(not(feature = "unstable"))]
+mod parser;
+
+#[cfg(feature = "unstable")]
+pub mod preflight;
+#[cfg(not(feature = "unstable"))]
+mod preflight;
+
+#[cfg(feature = "unstable")]
+pub mod profile;
+#[cfg(not(feature = "unstable"))]
+mod profile;
+
+#[cfg(feature = "unstable")]
+pub mod redact;
+#[cfg(not(feature = "unstable"))]
+mod redact;
+
+#[cfg(feature = "unstable")]
+pub mod remote;
+#[cfg(not(feature = "unstable"))]
+mod remote;
+
+#[cfg(feature = "unstable")]
+pub mod render;
+#[cfg(not(feature = "unstable"))]
+mod render;
+
+#[cfg(feature = "unstable")]
 pub mod report;
+#[cfg(not(feature = "unstable"))]
+mod report;
+
+#[cfg(feature = "unstable")]
+pub mod rpc;
+#[cfg(not(feature = "unstable"))]
+mod rpc;
+
+#[cfg(feature = "unstable")]
+pub mod rpc_bundle;
+#[cfg(not(feature = "unstable"))]
+mod rpc_bundle;
+
+#[cfg(feature = "unstable")]
+pub mod rpc_record;
+#[cfg(not(feature = "unstable"))]
+mod rpc_record;
+
+#[cfg(feature = "unstable")]
+pub mod runtime_surface;
+#[cfg(not(feature = "unstable"))]
+mod runtime_surface;
+
+#[cfg(feature = "unstable")]
 pub mod spec;
+#[cfg(not(feature = "unstable"))]
+mod spec;
+
+#[cfg(feature = "unstable")]
+pub mod spec_json;
+#[cfg(not(feature = "unstable"))]
+mod spec_json;
+
+#[cfg(feature = "unstable")]
+pub mod storage_inference;
+#[cfg(not(feature = "unstable"))]
+mod storage_inference;
+
+#[cfg(feature = "unstable")]
 pub mod storage_schema;
+#[cfg(not(feature = "unstable"))]
+mod storage_schema;
+
+#[cfg(feature = "unstable")]
 pub mod suppression;
+#[cfg(not(feature = "unstable"))]
+mod suppression;
+
+#[cfg(feature = "unstable")]
+pub mod lineage;
+#[cfg(not(feature = "unstable"))]
+pub mod lineage;
+
+#[cfg(feature = "unstable")]
+pub mod watch_status;
+#[cfg(not(feature = "unstable"))]
+mod watch_status;
+
+// Stable public API exports at the root
+pub use crate::attestation::{
+    sign_statement, verify_artifacts, verify_signatures, ArtifactDigest, AttestationSigner,
+    DsseEnvelope, Ed25519Signer, InTotoStatementV1, SafeguardPredicateV1, SignatureVerification,
+    VerificationFailure, VerificationFailureKind, VerificationPolicy,
+};
+pub use crate::call_abi::{
+    CallAbiBreak, CallAbiCompatibility, CallDirection, DirectionalCallVerdict,
+};
+pub use crate::diff::{Finding, Severity};
+pub use crate::lineage::{
+    validate_candidate_against_lineage, HistoricalFinding, LineageRecord, LineageStore,
+    LineageValidationReport, LiveStatus, LiveVersionPolicy,
+};
+pub use crate::oci::{
+    OciArtifact, OciArtifactKind, OciFetchConfig, OciReference, OciSelector,
+    MEDIA_TYPE_EXTRACTED_SPEC, MEDIA_TYPE_WASM,
+};
+pub use crate::remote::{
+    default_cache_dir, fetch_verified, CacheStatus, FetchedArtifact, RemoteFetchConfig, RemoteRef,
+};
+pub use crate::report::{ReportedFinding, SafetyReport};
+pub use crate::runtime_surface::{
+    DataSegmentSummary, ElementSegmentSummary, GlobalDeclaration, MemoryDeclaration,
+    RuntimeSurface, TableDeclaration,
+};
+pub use crate::spec_json::{InterfaceLockfile, INTERFACE_LOCKFILE_SCHEMA_VERSION};
+pub use crate::storage_schema::{
+    SchemaFormat, StorageReconciliation, StorageSchema, StorageSchemaComparison,
+};
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::report::SafetyReport;
 use crate::spec::ContractSpec;
 use crate::suppression::SuppressionConfig;
 
-pub use crate::limits::{LimitError, ResourcePolicy};
+/// Infer and reconcile storage use for a single compiled contract.
+pub fn analyze_wasm_storage_schema(
+    wasm: &[u8],
+    schema: &StorageSchema,
+) -> Result<StorageReconciliation> {
+    let metadata =
+        parser::extract_metadata(wasm).context("Failed to analyze storage use in WASM")?;
+    Ok(schema.reconcile(&metadata.storage))
+}
 
-/// Options for the canonical analysis pipeline.
-///
-/// Pass to [`compare_wasm_bytes_with_options`] or
-/// [`compare_wasm_files_with_options`] to control suppression, resource limits,
-/// explain output, and strict mode.
-///
-/// # Suppression
-///
-/// By default (`suppressions: None`) no suppression rules are applied, matching
-/// the previous behavior of [`compare_wasm_bytes`]. Supply a loaded
-/// [`SuppressionConfig`] to have the pipeline apply team-reviewed
-/// acknowledgements, exactly as the CLI does with `.safeguard.toml`.
-///
-/// # Example — library caller with a suppression file
-///
-/// ```no_run
-/// use std::path::Path;
-/// use soroban_upgrade_safeguard::{CompareOptions, compare_wasm_files_with_options};
-/// use soroban_upgrade_safeguard::suppression::SuppressionConfig;
-///
-/// let suppressions = SuppressionConfig::load_from_path(Path::new(".safeguard.toml"))?;
-/// let report = compare_wasm_files_with_options(
-///     Path::new("./v1.wasm"),
-///     Path::new("./v2.wasm"),
-///     &CompareOptions {
-///         suppressions: Some(&suppressions),
-///         ..Default::default()
-///     },
-/// )?;
-/// # Ok::<(), anyhow::Error>(())
-/// ```
-#[derive(Default)]
-pub struct CompareOptions<'a> {
-    /// Resource limits for XDR decoding and type-walk operations.
-    /// Defaults to [`ResourcePolicy::default`].
-    pub policy: Option<&'a ResourcePolicy>,
-    /// Suppression config to apply to findings.
-    /// `None` means no suppressions are applied.
-    pub suppressions: Option<&'a SuppressionConfig>,
-    /// Include remediation guidance in each finding.
-    pub explain: bool,
-    /// Treat `Warning`-severity findings as failures (strict mode).
-    pub strict: bool,
-    /// Declared storage layouts of the old and new builds. When supplied, the
-    /// pipeline additionally diffs these internal storage types through the same
-    /// engine and records that storage was analyzed in the report's scope.
-    ///
-    /// Both sides are required together: a storage layout change is only
-    /// observable as a difference between two snapshots. `None` (the default)
-    /// leaves storage layout unanalyzed and the scope says so plainly.
-    pub storage_schemas: Option<(
-        &'a storage_schema::StorageSchema,
-        &'a storage_schema::StorageSchema,
-    )>,
+/// Infer and reconcile storage use for both sides of an upgrade.
+pub fn compare_wasm_storage_schemas(
+    old_wasm: &[u8],
+    old_schema: &StorageSchema,
+    new_wasm: &[u8],
+    new_schema: &StorageSchema,
+) -> Result<StorageSchemaComparison> {
+    let old = parser::extract_metadata(old_wasm)
+        .context("Failed to analyze storage use in the old WASM")?;
+    let new = parser::extract_metadata(new_wasm)
+        .context("Failed to analyze storage use in the new WASM")?;
+    Ok(storage_schema::compare_storage_schemas(
+        old_schema,
+        &old.storage,
+        new_schema,
+        &new.storage,
+    ))
 }
 
 /// Compare two Soroban contract builds supplied as raw WASM byte slices.
-///
-/// This runs the full analysis pipeline — metadata extraction, spec building,
-/// structural diffing, cascade detection, **and environment-metadata
-/// comparison** — and returns an aggregated [`SafetyReport`].
-///
-/// No suppression rules are applied; findings from `.safeguard.toml` files
-/// are not loaded automatically. Use [`compare_wasm_bytes_with_options`] to
-/// supply a [`SuppressionConfig`] explicitly.
-///
-/// Use [`compare_wasm_files`] to read the builds from disk.
-///
-/// `old_wasm` is the currently deployed (on-chain) contract and `new_wasm` is
-/// the candidate upgrade.
-///
-/// # Errors
-///
-/// Returns an error if either input is not a parseable WASM module or if the
-/// embedded `contractspecv0` section cannot be decoded.
 pub fn compare_wasm_bytes(old_wasm: &[u8], new_wasm: &[u8]) -> Result<SafetyReport> {
-    compare_wasm_bytes_with_options(old_wasm, new_wasm, &CompareOptions::default())
-}
-
-/// Like [`compare_wasm_bytes`], but bounds decoding and every recursive type walk
-/// by an explicit [`ResourcePolicy`].
-///
-/// Untrusted WASM (a file, or bytes fetched over RPC) can declare oversized XDR
-/// lengths or arbitrarily nested types. Threading `policy` through metadata
-/// extraction and the diff makes those inputs fail with a controlled
-/// [`LimitError`] instead of exhausting memory or overflowing the stack.
-///
-/// # Errors
-///
-/// Returns a [`LimitError`] (recoverable via [`anyhow::Error::downcast_ref`]) when
-/// the input exceeds a configured limit, or an ordinary error if either input is
-/// not a parseable WASM module or its `contractspecv0` section cannot be decoded.
-pub fn compare_wasm_bytes_with_policy(
-    old_wasm: &[u8],
-    new_wasm: &[u8],
-    policy: &ResourcePolicy,
-) -> Result<SafetyReport> {
-    compare_wasm_bytes_with_options(
-        old_wasm,
-        new_wasm,
-        &CompareOptions {
-            policy: Some(policy),
-            ..Default::default()
-        },
-    )
-}
-
-/// The single canonical analysis pipeline.
-///
-/// This is the function that both the CLI and all library helpers ultimately
-/// call. It runs every stage in the correct order:
-///
-/// 1. Metadata extraction and spec building for both contracts.
-/// 2. Structural compatibility diff (functions, structs, enums, unions, cascade
-///    detection).
-/// 3. Environment metadata comparison (protocol interface version, etc.).
-/// 4. Suppression application (if a [`SuppressionConfig`] is supplied via
-///    `options`).
-///
-/// Adding a new pipeline stage requires only one change here; the CLI and
-/// every library consumer automatically pick it up.
-///
-/// # Errors
-///
-/// Returns an error if either input is not a parseable WASM module, if the
-/// embedded `contractspecv0` section cannot be decoded, or if a resource limit
-/// from `options.policy` is exceeded.
-pub fn compare_wasm_bytes_with_options(
-    old_wasm: &[u8],
-    new_wasm: &[u8],
-    options: &CompareOptions<'_>,
-) -> Result<SafetyReport> {
-    let default_policy = ResourcePolicy::default();
-    let policy = options.policy.unwrap_or(&default_policy);
-
-    let empty_suppressions = SuppressionConfig::default();
-    let suppressions = options.suppressions.unwrap_or(&empty_suppressions);
-
-    let old_meta = parser::extract_metadata_with_policy(old_wasm, policy)
+    let old_meta = parser::extract_metadata(old_wasm)
         .context("Failed to extract metadata from the old WASM")?;
-    let new_meta = parser::extract_metadata_with_policy(new_wasm, policy)
+    let new_meta = parser::extract_metadata(new_wasm)
         .context("Failed to extract metadata from the new WASM")?;
 
     let old_spec = ContractSpec::from_entries(&old_meta.spec);
     let new_spec = ContractSpec::from_entries(&new_meta.spec);
 
-    let old_spec_summary = old_spec.summary();
-    let new_spec_summary = new_spec.summary();
+    let mut diff_report = diff::compare(&old_spec, &new_spec);
+    diff::compare_runtime_surfaces(
+        &old_meta.runtime_surface,
+        &new_meta.runtime_surface,
+        &mut diff_report,
+    );
 
-    let mut diff_report = diff::compare_with_policy(&old_spec, &new_spec, policy)?;
+    Ok(
+        SafetyReport::new_with_specs(&diff_report, &old_spec, &new_spec)
+            .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash()),
+    )
+}
+
+/// Compare two Soroban contract builds read from WASM files on disk.
+pub fn compare_wasm_files(old_path: &Path, new_path: &Path) -> Result<SafetyReport> {
+    let old = loader::load_wasm(old_path).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let new = loader::load_wasm(new_path).map_err(|e| anyhow::anyhow!("{}", e))?;
+    compare_wasm_bytes(&old.bytes, &new.bytes)
+}
+
+/// Options for the analysis pipeline.
+#[derive(Default)]
+pub struct CompareOptions<'a> {
+    pub suppressions: Option<&'a SuppressionConfig>,
+    pub explain: bool,
+    pub strict: bool,
+    pub storage_schemas: Option<(&'a StorageSchema, &'a StorageSchema)>,
+    pub lineage_store: Option<&'a lineage::LineageStore>,
+    /// The contract's name, used to scope migrations declared with
+    /// `contracts = [..]` in a `.safeguard.toml` shared across several
+    /// contracts. `None` matches only migrations with no `contracts` key.
+    pub contract: Option<&'a str>,
+}
+
+/// Compare two Soroban contract builds supplied as raw WASM byte slices with options.
+pub fn compare_wasm_bytes_with_options(
+    old_wasm: &[u8],
+    new_wasm: &[u8],
+    options: &CompareOptions<'_>,
+) -> Result<SafetyReport> {
+    let empty_suppressions = SuppressionConfig::default();
+    let suppressions = options.suppressions.unwrap_or(&empty_suppressions);
+
+    let old_meta = parser::extract_metadata(old_wasm)
+        .context("Failed to extract metadata from the old WASM")?;
+    let new_meta = parser::extract_metadata(new_wasm)
+        .context("Failed to extract metadata from the new WASM")?;
+
+    let old_spec = ContractSpec::from_entries(&old_meta.spec);
+    let new_spec = ContractSpec::from_entries(&new_meta.spec);
+
+    let mut diff_report = diff::compare(&old_spec, &new_spec);
+
     diff::compare_env_metadata(
         old_meta.env_meta.as_ref(),
         new_meta.env_meta.as_ref(),
         &mut diff_report,
     );
 
-    // The pipeline always compares the exported interface and environment
-    // metadata; storage layout is analyzed only when a schema is supplied for
-    // both builds. The scope records which of those actually held so the verdict
-    // is never read as broader than the analysis behind it.
-    let mut scope = report::AnalysisScope {
-        exported_interface: true,
-        env_metadata: true,
-        storage_schema: report::StorageScopeState::NotAnalyzed,
-    };
+    diff::compare_host_imports(
+        &old_meta.host_imports,
+        &new_meta.host_imports,
+        old_meta.env_meta.as_ref(),
+        new_meta.env_meta.as_ref(),
+        &mut diff_report,
+    );
 
-    if let Some((old_schema, new_schema)) = options.storage_schemas {
-        // A manifest that contradicts its own build is more dangerous than no
-        // manifest, so disagreement stops the run rather than being reported.
-        old_schema.reconcile_with_spec(&old_spec, "old")?;
-        new_schema.reconcile_with_spec(&new_spec, "new")?;
+    diff::compare_runtime_surfaces(
+        &old_meta.runtime_surface,
+        &new_meta.runtime_surface,
+        &mut diff_report,
+    );
 
-        let old_resolved = old_schema.resolve()?;
-        let new_resolved = new_schema.resolve()?;
-
-        let storage_findings = diff::compare_storage_schemas(&old_resolved, &new_resolved);
-        diff_report.findings.extend(storage_findings.findings);
-
-        // Any reference the schema could not resolve is a coverage gap, surfaced
-        // rather than silently absorbed into the verdict.
-        let mut unresolved = old_schema.unresolved_references(Some(&old_spec));
-        unresolved.extend(new_schema.unresolved_references(Some(&new_spec)));
-        unresolved.sort();
-        unresolved.dedup();
-        diff::report_unresolved_storage_references(&unresolved, &mut diff_report);
-
-        scope.storage_schema = report::StorageScopeState::Analyzed {
-            key_types: new_resolved.key_type_count(),
-            value_types: new_resolved.value_type_count(),
-        };
-    }
-
-    let mut safety_report = report::SafetyReport::with_suppressions(
+    let mut safety_report = SafetyReport::with_suppressions_with_specs(
         &diff_report,
         suppressions,
         options.explain,
         options.strict,
+        &old_spec,
+        &new_spec,
+        options.contract,
     );
-    safety_report.old_spec_summary = Some(old_spec_summary);
-    safety_report.new_spec_summary = Some(new_spec_summary);
-    safety_report.scope = scope;
+    safety_report.scope.exported_interface = true;
+    safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.old_spec_summary = Some(old_spec.summary());
+    safety_report.new_spec_summary = Some(new_spec.summary());
+
+    if let Some((old_schema, new_schema)) = options.storage_schemas {
+        let storage_comparison = storage_schema::compare_storage_schemas(
+            old_schema,
+            &old_meta.storage,
+            new_schema,
+            &new_meta.storage,
+        );
+        safety_report.apply_storage_schema_comparison(
+            &storage_comparison,
+            suppressions,
+            options.explain,
+            options.strict,
+        );
+    }
+
+    if let Some(store) = options.lineage_store {
+        let lineage_report = lineage::validate_candidate_against_lineage(
+            new_wasm,
+            &new_spec,
+            store,
+            suppressions,
+            options.strict,
+        )?;
+        safety_report.apply_lineage_report(
+            &lineage_report,
+            suppressions,
+            options.explain,
+            options.strict,
+        );
+    }
 
     Ok(safety_report)
 }
 
-/// Compare two Soroban contract builds read from WASM files on disk.
+/// Compare a Soroban contract build against a serialized interface lockfile.
 ///
-/// The files are validated as WASM binaries (via [`loader::load_wasm`]) before
-/// being analyzed. No suppression rules are applied automatically.
-/// Use [`compare_wasm_files_with_options`] to supply a [`SuppressionConfig`].
-///
-/// `old_path` points at the currently deployed (on-chain) contract and
-/// `new_path` at the candidate upgrade.
-///
-/// # Errors
-///
-/// Returns an error if either file is missing, is not a valid WASM binary, or
-/// if its embedded contract spec cannot be decoded.
-pub fn compare_wasm_files(old_path: &Path, new_path: &Path) -> Result<SafetyReport> {
-    compare_wasm_files_with_options(old_path, new_path, &CompareOptions::default())
-}
-
-/// Like [`compare_wasm_files`], but bounds decoding and every recursive type walk
-/// by an explicit [`ResourcePolicy`]. See [`compare_wasm_bytes_with_policy`].
-pub fn compare_wasm_files_with_policy(
-    old_path: &Path,
-    new_path: &Path,
-    policy: &ResourcePolicy,
+/// Lockfile comparisons intentionally cover only the exported interface. A
+/// lockfile contains no WASM metadata for host imports, runtime surface, or
+/// environment metadata, so those axes are not inferred from the snapshot.
+pub fn compare_wasm_against_interface_lockfile(
+    lockfile_json: &str,
+    new_wasm: &[u8],
+    options: &CompareOptions<'_>,
 ) -> Result<SafetyReport> {
-    compare_wasm_files_with_options(
-        old_path,
-        new_path,
-        &CompareOptions {
-            policy: Some(policy),
-            ..Default::default()
-        },
+    let lockfile = InterfaceLockfile::from_json_str(lockfile_json)
+        .map_err(|error| anyhow::anyhow!("Invalid interface lockfile: {error}"))?;
+    let old_spec = lockfile
+        .to_contract_spec()
+        .map_err(|error| anyhow::anyhow!("Invalid interface lockfile: {error}"))?;
+    let new_meta = parser::extract_metadata(new_wasm)
+        .context("Failed to extract metadata from the candidate WASM")?;
+    let new_spec = ContractSpec::from_entries(&new_meta.spec);
+    let diff_report = diff::compare(&old_spec, &new_spec);
+    let empty_suppressions = SuppressionConfig::default();
+    let suppressions = options.suppressions.unwrap_or(&empty_suppressions);
+    let mut report = SafetyReport::with_suppressions_with_specs(
+        &diff_report,
+        suppressions,
+        options.explain,
+        options.strict,
+        &old_spec,
+        &new_spec,
+        options.contract,
     )
+    .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
+    report.scope.exported_interface = true;
+    report.old_spec_summary = Some(old_spec.summary());
+    report.new_spec_summary = Some(new_spec.summary());
+    Ok(report)
 }
 
-/// Like [`compare_wasm_files`], but accepts the full set of pipeline options.
-///
-/// Loads both WASM files from disk and delegates to [`compare_wasm_bytes_with_options`].
-///
-/// # Errors
-///
-/// Returns an error if either file is missing, is not a valid WASM binary,
-/// if the embedded contract spec cannot be decoded, or if a resource limit
-/// from `options.policy` is exceeded.
+/// Compare two Soroban contract builds read from WASM files on disk with options.
 pub fn compare_wasm_files_with_options(
     old_path: &Path,
     new_path: &Path,
     options: &CompareOptions<'_>,
 ) -> Result<SafetyReport> {
-    let old = loader::load_wasm(old_path)?;
-    let new = loader::load_wasm(new_path)?;
+    let old = loader::load_wasm(old_path).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let new = loader::load_wasm(new_path).map_err(|e| anyhow::anyhow!("{}", e))?;
     compare_wasm_bytes_with_options(&old.bytes, &new.bytes, options)
-}
-
-/// Compare two builds *and* their declared storage layouts.
-///
-/// [`compare_wasm_bytes`] only sees the exported interface, so its report
-/// certifies nothing about storage. This overload additionally diffs the storage
-/// types each build declares, through the same engine and severities, and the
-/// returned report's [`report::AnalysisScope`] records that storage was actually
-/// analyzed.
-///
-/// Both schemas are required: a storage layout change is only observable as a
-/// difference between two snapshots.
-///
-/// # Errors
-///
-/// Returns an error if either WASM cannot be parsed, or if either schema
-/// contradicts its own build's exported spec. A manifest that disagrees with the
-/// contract is rejected rather than trusted, since acting on a wrong declaration
-/// is worse than having none.
-pub fn compare_wasm_bytes_with_storage_schemas(
-    old_wasm: &[u8],
-    new_wasm: &[u8],
-    old_schema: &storage_schema::StorageSchema,
-    new_schema: &storage_schema::StorageSchema,
-) -> Result<SafetyReport> {
-    compare_wasm_bytes_with_options(
-        old_wasm,
-        new_wasm,
-        &CompareOptions {
-            storage_schemas: Some((old_schema, new_schema)),
-            ..Default::default()
-        },
-    )
-}
-
-/// Compare two builds on disk together with their storage-schema manifests.
-///
-/// See [`compare_wasm_bytes_with_storage_schemas`] for what this certifies.
-///
-/// # Errors
-///
-/// Returns an error if any of the four files is missing, unparseable, or if a
-/// schema contradicts its build's exported spec.
-pub fn compare_wasm_files_with_storage_schemas(
-    old_path: &Path,
-    new_path: &Path,
-    old_schema_path: &Path,
-    new_schema_path: &Path,
-) -> Result<SafetyReport> {
-    let old_schema = storage_schema::StorageSchema::load_from_path(old_schema_path)?;
-    let new_schema = storage_schema::StorageSchema::load_from_path(new_schema_path)?;
-    compare_wasm_files_with_options(
-        old_path,
-        new_path,
-        &CompareOptions {
-            storage_schemas: Some((&old_schema, &new_schema)),
-            ..Default::default()
-        },
-    )
 }

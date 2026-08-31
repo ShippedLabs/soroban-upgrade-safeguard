@@ -1,0 +1,29 @@
+{
+  "pairs": [
+    {
+      "old": "../../wasm/v1.wasm",
+      "new": "../../wasm/v1.wasm",
+      "name": "schema-backed",
+      "old-storage-schema": "schemas/empty.json",
+      "new-storage-schema": "schemas/empty.json"
+    },
+    {
+      "old": "../../wasm/v1.wasm",
+      "new": "../../wasm/v1.wasm",
+      "name": "interface-only"
+    },
+    {
+      "old": "../../wasm/v1.wasm",
+      "new": "../../wasm/v1.wasm",
+      "name": "partial",
+      "old_storage_schema": "schemas/empty.json"
+    },
+    {
+      "old": "../../wasm/v1.wasm",
+      "new": "../../wasm/v1.wasm",
+      "name": "invalid",
+      "old_storage_schema": "schemas/invalid.json",
+      "new_storage_schema": "schemas/invalid.json"
+    }
+  ]
+}

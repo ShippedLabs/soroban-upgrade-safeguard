@@ -1,0 +1,86 @@
+# Example 1 – Pull Request check (standard repo, full write access)
+#
+# Runs on every pull request that touches a compiled WASM artifact.
+# Posts a Markdown report as a PR comment and updates it in-place on
+# each new push to the branch.  The job fails if any critical breaking
+# change is detected, blocking the merge until the issue is resolved or
+# explicitly suppressed.
+#
+# Required permissions
+# --------------------
+# pull-requests: write   — so the action can post and update the comment.
+# contents: read         — default; needed to check out the repository.
+#
+# The default GITHUB_TOKEN has both permissions when the workflow runs
+# from a branch inside the same repository.  No additional secrets are
+# required for a standard PR workflow.
+#
+# Artifact path notes
+# -------------------
+# This example assumes compiled WASMs live at wasm/v1.wasm (the deployed
+# baseline) and wasm/v2.wasm (the candidate build).  Adjust the paths to
+# match your repository layout.  Both files must be committed or produced
+# by a prior build step in the same job before the action runs.
+
+name: Soroban Upgrade Safety – PR Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'contracts/**'
+
+jobs:
+  upgrade-safeguard:
+    name: Check upgrade safety
+    runs-on: ubuntu-latest
+
+    permissions:
+      pull-requests: write   # post / update the report comment
+      contents: read         # check out the repo
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build soroban-upgrade-safeguard
+        run: cargo build --release
+
+      - name: Add tool to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      # The action posts a Markdown report as a PR comment and sets the
+      # is_safe output.  --strict treats warnings as failures; remove it
+      # if you want only critical findings to gate the merge.
+      # --explain appends remediation guidance to each finding.
+      - name: Run upgrade safety check
+        id: safeguard
+        uses: ./.github/actions/soroban-upgrade-safeguard
+        with:
+          old-wasm: ./wasm/v1.wasm
+          new-wasm: ./wasm/v2.wasm
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --strict --explain
+
+      # Fail the job explicitly so the PR cannot be merged when unsafe.
+      # The action already exits non-zero on critical findings, but this
+      # step makes the failure reason visible in the job summary.
+      - name: Gate on safety verdict
+        if: steps.safeguard.outputs.is_safe != 'true'
+        run: |
+          echo "::error::Upgrade safety check failed. Review the report comment on this PR."
+          exit 1

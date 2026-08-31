@@ -1,0 +1,143 @@
+name: 'Soroban Upgrade Safeguard'
+description: >-
+  Run soroban-upgrade-safeguard on a pair of WASM files and post the
+  Markdown report as a PR comment, updating it in-place on subsequent pushes.
+
+inputs:
+  old-wasm:
+    description: 'Path to the old (baseline) WASM file'
+    required: true
+  new-wasm:
+    description: 'Path to the new (candidate) WASM file'
+    required: true
+  token:
+    description: >-
+      GitHub token with pull-requests: write permission.
+      Defaults to `${{ github.token }}`.
+    required: false
+    default: ${{ github.token }}
+  args:
+    description: >-
+      Additional CLI arguments passed through to
+      soroban-upgrade-safeguard (e.g. --strict, --explain,
+      --config <PATH>). Use an empty string for none.
+    required: false
+    default: ''
+
+outputs:
+  is_safe:
+    description: 'true when the upgrade is safe, false otherwise'
+    value: ${{ steps.script.outputs.is_safe }}
+  comment_id:
+    description: 'ID of the created/updated PR comment'
+    value: ${{ steps.script.outputs.comment_id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run soroban-upgrade-safeguard and post report
+      id: script
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        # ── Identify the PR ─────────────────────────────────────────────
+        if [[ -z "${GITHUB_REF_NAME:-}" ]]; then
+          echo "❌ Not in a GitHub Actions environment"
+          exit 1
+        fi
+
+        REPO="${GITHUB_REPOSITORY:-}"
+        PR_NUMBER=""
+        # Try to extract PR number from GITHUB_REF (refs/pull/<number>/merge)
+        if [[ "$GITHUB_REF" == refs/pull/*/merge ]]; then
+          PR_NUMBER="${GITHUB_REF#refs/pull/}"
+          PR_NUMBER="${PR_NUMBER%/merge}"
+        elif [[ -n "${GITHUB_EVENT_PATH:-}" ]]; then
+          # Extract from the push / pull_request event payload
+          PR_NUMBER="$(jq -r '.pull_request.number // .issue.number // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+        fi
+
+        if [[ -z "$PR_NUMBER" || "$PR_NUMBER" == "null" ]]; then
+          echo "⚠️  Not running in a pull request context. Cannot post a PR comment."
+          echo "is_safe=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # ── Run the safeguard tool ──────────────────────────────────────
+        TEMP_REPORT="$(mktemp)"
+        TEMP_STDERR="$(mktemp)"
+
+        EXIT_CODE=0
+        soroban-upgrade-safeguard \
+          "${{ inputs.old-wasm }}" \
+          "${{ inputs.new-wasm }}" \
+          --format markdown \
+          ${{ inputs.args }} \
+          > "$TEMP_REPORT" 2>"$TEMP_STDERR" || EXIT_CODE=$?
+
+        IS_SAFE="false"
+        if [[ "$EXIT_CODE" -eq 0 ]]; then
+          IS_SAFE="true"
+        fi
+        echo "is_safe=$IS_SAFE" >> "$GITHUB_OUTPUT"
+
+        # Read the report
+        REPORT_CONTENT="$(cat "$TEMP_REPORT")"
+        rm -f "$TEMP_REPORT" "$TEMP_STDERR"
+
+        # ── Build the comment body ──────────────────────────────────────
+        COMMENT_BODY=$(cat <<-EOF
+        ## 🔍 Soroban Upgrade Safeguard Report
+
+        ${REPORT_CONTENT}
+
+        <!-- soroban-upgrade-safeguard-report -->
+        EOF
+        )
+
+        # ── Check if a previous comment exists ──────────────────────────
+        # The hidden marker lets us find our own comments reliably.
+        SEARCH_MARKER="soroban-upgrade-safeguard-report"
+        EXISTING_COMMENT_ID=""
+
+        COMMENTS_JSON="$(gh api \
+          "/repos/${REPO}/issues/${PR_NUMBER}/comments" \
+          --jq ".[] | select(.body | contains(\"${SEARCH_MARKER}\")) | .id" \
+          2>/dev/null || true)"
+
+        if [[ -n "$COMMENTS_JSON" ]]; then
+          # Take the first matching comment (there should only be one)
+          EXISTING_COMMENT_ID="$(echo "$COMMENTS_JSON" | head -1)"
+        fi
+
+        # ── Create or update the comment ────────────────────────────────
+        if [[ -n "$EXISTING_COMMENT_ID" ]]; then
+          echo "🔄 Updating existing comment #${EXISTING_COMMENT_ID}..."
+          gh api \
+            -X PATCH \
+            "/repos/${REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
+            -f body="$COMMENT_BODY" \
+            --jq '.id' \
+            2>/dev/null || {
+            echo "⚠️  Failed to update comment (permission issue?)."
+            echo "comment_id=" >> "$GITHUB_OUTPUT"
+          }
+          echo "comment_id=${EXISTING_COMMENT_ID}" >> "$GITHUB_OUTPUT"
+        else
+          echo "🆕 Creating new PR comment..."
+          NEW_ID="$(gh api \
+            -X POST \
+            "/repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            -f body="$COMMENT_BODY" \
+            --jq '.id' \
+            2>/dev/null || true)"
+          if [[ -n "$NEW_ID" ]]; then
+            echo "comment_id=${NEW_ID}" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️  Failed to create comment (permission issue?)."
+            echo "comment_id=" >> "$GITHUB_OUTPUT"
+          fi
+        fi

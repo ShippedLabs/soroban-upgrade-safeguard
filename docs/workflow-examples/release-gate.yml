@@ -1,0 +1,97 @@
+# Example 2 – Release gate (tag push, JSON artifact, no PR comment)
+#
+# Runs when a version tag is pushed (e.g. v1.2.0).  Produces a JSON
+# report artifact that can be archived alongside the release, and fails
+# the release pipeline if any critical breaking change is detected.
+#
+# This mode does not post a PR comment because release workflows run
+# on tag push events, not pull_request events.  Instead the report is
+# uploaded as a workflow artifact and its path is printed to the job
+# summary for download.
+#
+# Required permissions
+# --------------------
+# contents: write        — to create the GitHub release (optional step).
+# No pull-requests permission is needed because no comment is posted.
+#
+# Artifact path notes
+# -------------------
+# This example expects the previous release WASM to be checked in at
+# wasm/released.wasm and the new candidate at wasm/candidate.wasm.
+# In a real pipeline, the candidate is typically produced by a build
+# step earlier in the same job; replace the path accordingly.
+#
+# The --expect-bump flag enforces that the change warrants at least a
+# minor version bump.  Adjust or remove it to match your policy.
+
+name: Soroban Upgrade Safety – Release Gate
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  upgrade-safeguard:
+    name: Release upgrade safety check
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # create the GitHub release
+      # pull-requests: write is NOT needed — no PR comment is posted here
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build soroban-upgrade-safeguard
+        run: cargo build --release
+
+      - name: Add tool to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      # Run directly (not via the composite action) so we can control the
+      # output format and artifact destination ourselves.
+      # --format json produces a machine-readable report for archiving.
+      # --expect-bump minor enforces that the diff warrants at least a
+      #   minor version bump; change to 'major' or 'patch' as needed.
+      - name: Run upgrade safety check (JSON output)
+        run: |
+          soroban-upgrade-safeguard \
+            ./wasm/released.wasm \
+            ./wasm/candidate.wasm \
+            --format json \
+            --explain \
+            --expect-bump minor \
+            > safeguard-report.json
+        # Exit code 0 = safe, 1 = critical findings or bump mismatch.
+        # The shell -e flag (set by Actions) surfaces these automatically.
+
+      - name: Upload JSON report as artifact
+        if: always()   # upload even when the check fails, for diagnosis
+        uses: actions/upload-artifact@v4
+        with:
+          name: safeguard-report-${{ github.ref_name }}
+          path: safeguard-report.json
+          retention-days: 90
+
+      - name: Print report summary to job summary
+        if: always()
+        run: |
+          echo "## Soroban Upgrade Safety Report" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat safeguard-report.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

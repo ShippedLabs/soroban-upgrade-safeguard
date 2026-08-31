@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Absolute path to a fixture WASM under `tests/wasm/`.
@@ -15,6 +15,19 @@ fn write_manifest(name: &str, contents: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     std::fs::write(&path, contents).expect("failed to write manifest file");
     path
+}
+
+fn write_file(relative_name: &str, contents: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(relative_name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("failed to create parent directory");
+    }
+    std::fs::write(&path, contents).expect("failed to write file");
+    path
+}
+
+fn portable(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
 }
 
 #[test]
@@ -121,6 +134,10 @@ fn batch_manifest_all_clean_exits_zero() {
         stdout.contains("Overall Status: ✅ PASSED"),
         "Missing passed status"
     );
+    assert!(
+        stdout.contains("interface-only"),
+        "Text output must identify interface-only coverage"
+    );
 }
 
 #[test]
@@ -165,15 +182,165 @@ fn batch_manifest_json_mode_json_output() {
     assert_eq!(json["is_safe"], Value::Bool(false));
     assert_eq!(json["total_pairs"].as_u64().unwrap(), 2);
 
-    // Check results object
     let results = json["results"]
-        .as_object()
-        .expect("results must be an object");
-    assert!(results.contains_key("clean_json"));
-    assert!(results.contains_key("breaking_json"));
+        .as_array()
+        .expect("results must be an ordered array");
+    assert_eq!(results[0]["name"], "clean_json");
+    assert_eq!(results[1]["name"], "breaking_json");
+    assert_eq!(results[0]["report"]["is_safe"], Value::Bool(true));
+    assert_eq!(results[1]["report"]["is_safe"], Value::Bool(false));
+}
 
-    assert_eq!(results["clean_json"]["is_safe"], Value::Bool(true));
-    assert_eq!(results["breaking_json"]["is_safe"], Value::Bool(false));
+#[test]
+fn batch_manifest_mixed_coverage_is_isolated_and_ordered() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mixed");
+    std::fs::create_dir_all(&root).expect("failed to create mixed manifest directory");
+    write_file("mixed/schemas/old.json", r#"{"declarations": []}"#);
+    write_file("mixed/schemas/new.json", r#"{"declarations": []}"#);
+    let invalid_schema = write_file("mixed/schemas/invalid.json", "not valid json");
+    let manifest_path = root.join("manifest.json");
+    let manifest = format!(
+        r#"{{
+            "pairs": [
+                {{"old": "{}", "new": "{}", "name": "interface_first"}},
+                {{"old": "{}", "new": "{}", "name": "schema_second",
+                 "old-storage-schema": "{}", "new-storage-schema": "{}"}},
+                {{"old": "{}", "new": "{}", "name": "invalid_third",
+                 "old_storage_schema": "{}", "new_storage_schema": "{}"}}
+            ]
+        }}"#,
+        portable(&wasm("v1.wasm")),
+        portable(&wasm("v1.wasm")),
+        portable(&wasm("v1.wasm")),
+        portable(&wasm("v1.wasm")),
+        "schemas/old.json",
+        "schemas/new.json",
+        portable(&wasm("v1.wasm")),
+        portable(&wasm("v1.wasm")),
+        portable(&invalid_schema),
+        portable(&invalid_schema),
+    );
+    std::fs::write(&manifest_path, manifest).expect("failed to write mixed manifest");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args([
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("failed to run binary");
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "output must be JSON: {error}\n---stderr---\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    let results = json["results"].as_array().expect("results must be ordered");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0]["name"], "interface_first");
+    assert_eq!(results[0]["coverage"], "interface-only");
+    assert_eq!(results[1]["name"], "schema_second");
+    assert_eq!(results[1]["coverage"], "schema-backed");
+    assert_eq!(results[2]["name"], "invalid_third");
+    assert_eq!(results[2]["coverage"], "error");
+    assert!(results[2]["error"].as_str().unwrap().contains("invalid"));
+}
+
+#[test]
+fn batch_manifest_partial_schema_is_pair_error_without_aborting_next_pair() {
+    let schema = write_file("partial/old.json", r#"{"declarations": []}"#);
+    let manifest = format!(
+        r#"
+        [[pairs]]
+        old = {:?}
+        new = {:?}
+        name = "partial"
+        old_storage_schema = {:?}
+
+        [[pairs]]
+        old = {:?}
+        new = {:?}
+        name = "after_partial"
+        "#,
+        wasm("v1.wasm").display().to_string(),
+        wasm("v1.wasm").display().to_string(),
+        schema.display().to_string(),
+        wasm("v1.wasm").display().to_string(),
+        wasm("v1.wasm").display().to_string(),
+    );
+    let manifest_path = write_manifest("partial_manifest.toml", &manifest);
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args([
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("failed to run binary");
+    let json: Value = serde_json::from_slice(&output.stdout).expect("output must be JSON");
+    let results = json["results"].as_array().expect("results must be ordered");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(results[0]["name"], "partial");
+    assert_eq!(results[0]["coverage"], "error");
+    assert!(results[0]["error"].as_str().unwrap().contains("partial"));
+    assert_eq!(results[1]["name"], "after_partial");
+    assert_eq!(results[1]["coverage"], "interface-only");
+}
+
+#[test]
+fn committed_mixed_manifest_fixture_resolves_relative_paths() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("batch")
+        .join("mixed.toml");
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args(["--manifest", manifest.to_str().unwrap(), "--format", "json"])
+        .output()
+        .expect("failed to run committed fixture");
+    let json: Value = serde_json::from_slice(&output.stdout).expect("output must be JSON");
+    let results = json["results"].as_array().expect("results must be ordered");
+    assert_eq!(results.len(), 4);
+    assert_eq!(results[0]["coverage"], "schema-backed");
+    assert_eq!(results[1]["coverage"], "interface-only");
+    assert_eq!(results[2]["coverage"], "error");
+    assert_eq!(results[3]["coverage"], "error");
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn batch_markdown_output_shows_scope_and_coverage_columns() {
+    let manifest = format!(
+        r#"
+        [[pairs]]
+        old = {:?}
+        new = {:?}
+        name = "markdown_contract"
+        "#,
+        wasm("v1.wasm").to_string_lossy(),
+        wasm("v1.wasm").to_string_lossy(),
+    );
+    let manifest_path = write_manifest("markdown_manifest.toml", &manifest);
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args([
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--format",
+            "markdown",
+        ])
+        .output()
+        .expect("failed to run binary");
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be UTF-8");
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout.contains("| Scope | Coverage |"));
+    assert!(stdout.contains("interface-only"));
 }
 
 #[test]
@@ -193,6 +360,41 @@ fn batch_directory_scanning_fails_on_breaking_contract() {
     // b.wasm: breaking (v1 -> v2)
     std::fs::copy(wasm("v1.wasm"), old_dir.join("b.wasm")).expect("copy");
     std::fs::copy(wasm("v2.wasm"), new_dir.join("b.wasm")).expect("copy");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("--old-dir")
+        .arg(&old_dir)
+        .arg("--new-dir")
+        .arg(&new_dir)
+        .output()
+        .expect("failed to run binary");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+    let code = output.status.code().expect("process terminated by signal");
+
+    assert_eq!(code, 1);
+    assert!(stdout.contains("Overall Status: ❌ FAILED"));
+    assert!(stdout.contains("a: ✅ PASSED"));
+    assert!(stdout.contains("b: ❌ FAILED"));
+}
+
+#[test]
+fn batch_directory_scanning_accepts_uppercase_wasm_extension() {
+    let tmp_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dir_upper_test");
+    let old_dir = tmp_dir.join("old");
+    let new_dir = tmp_dir.join("new");
+
+    std::fs::create_dir_all(&old_dir).ok();
+    std::fs::create_dir_all(&new_dir).ok();
+
+    // Copy fixtures with uppercase .WASM extensions:
+    // a.WASM: clean (v1 -> v1)
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("a.WASM")).expect("copy");
+    std::fs::copy(wasm("v1.wasm"), new_dir.join("a.WASM")).expect("copy");
+
+    // b.WASM: breaking (v1 -> v2)
+    std::fs::copy(wasm("v1.wasm"), old_dir.join("b.WASM")).expect("copy");
+    std::fs::copy(wasm("v2.wasm"), new_dir.join("b.WASM")).expect("copy");
 
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
         .arg("--old-dir")

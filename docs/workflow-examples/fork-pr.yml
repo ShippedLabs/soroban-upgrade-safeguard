@@ -1,0 +1,185 @@
+# Example 3 – Fork pull request (read-only token, artifact hand-off)
+#
+# Pull requests from forks run with a read-only GITHUB_TOKEN.  The token
+# cannot write PR comments, so the composite action's comment step will
+# silently produce no comment_id rather than failing.  This two-job
+# pattern works around that limitation:
+#
+#   Job 1 (check) – runs with the fork's restricted token.
+#     - Builds the tool and runs the safety analysis.
+#     - Saves the report and the PR number as artifacts.
+#     - Does NOT attempt to post a comment.
+#
+#   Job 2 (comment) – triggered by workflow_run on job 1's completion.
+#     - Runs with the base-repo token (pull-requests: write).
+#     - Downloads the artifact and posts the comment on the PR.
+#
+# This is the GitHub-recommended pattern for fork PRs.  See:
+# https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#workflow_run
+#
+# Security note
+# -------------
+# Job 2 runs in the context of the BASE repository, not the fork.  It
+# must never check out or execute code from the pull request.  It only
+# reads the pre-built artifact (the report JSON) uploaded by job 1.
+# The PR number is passed through the artifact, not an environment
+# variable that untrusted code could influence.
+#
+# Required permissions
+# --------------------
+# Job 1  – contents: read (default for fork PRs; no write access granted)
+# Job 2  – pull-requests: write (base-repo context; safe to grant here)
+#
+# Fork limitations
+# ----------------
+# - Job 1 cannot post a comment directly.  The two-job pattern below
+#   is required to get write access in a safe, auditable way.
+# - Secrets (other than GITHUB_TOKEN) are NOT available to fork PR jobs.
+#   Do not reference repository secrets in job 1.
+# - If your repository has "Require approval for all outside collaborators"
+#   enabled, job 1 will wait for a maintainer to approve the run before
+#   any code executes.  This is intentional and desirable.
+
+name: Soroban Upgrade Safety – Fork PR
+
+# ── Job 1: run the analysis ─────────────────────────────────────────────────
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'contracts/**'
+
+jobs:
+  upgrade-safeguard:
+    name: Safety check (fork-safe)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read   # read-only; all that fork PRs allow
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build soroban-upgrade-safeguard
+        run: cargo build --release
+
+      - name: Add tool to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      # Produce a Markdown report to a file; do not try to post it here.
+      # The exit code still gates the job (0 = safe, 1 = breaking changes).
+      - name: Run upgrade safety check
+        run: |
+          soroban-upgrade-safeguard \
+            ./wasm/v1.wasm \
+            ./wasm/v2.wasm \
+            --format markdown \
+            --explain \
+            > safeguard-report.md
+        # set -e is active in Actions; a non-zero exit stops the job here
+        # and marks it failed before the upload step, so a broken upgrade
+        # still blocks the PR even without a comment.
+
+      # Save the report and the PR number so job 2 can comment on the PR.
+      - name: Save PR number for the comment job
+        if: always()
+        run: echo "${{ github.event.number }}" > pr-number.txt
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safeguard-report-pr-${{ github.event.number }}
+          path: |
+            safeguard-report.md
+            pr-number.txt
+          retention-days: 7
+
+---
+# ── Job 2: post the comment (separate workflow file recommended) ─────────────
+#
+# Save this block as a SEPARATE workflow file, e.g.
+# .github/workflows/fork-pr-comment.yml
+# It must be a distinct workflow so it can use workflow_run as its trigger.
+#
+# name: Soroban Upgrade Safety – Post Fork PR Comment
+#
+# on:
+#   workflow_run:
+#     workflows: ["Soroban Upgrade Safety – Fork PR"]
+#     types: [completed]
+#
+# jobs:
+#   post-comment:
+#     name: Post report comment
+#     runs-on: ubuntu-latest
+#     if: github.event.workflow_run.event == 'pull_request'
+#
+#     permissions:
+#       pull-requests: write   # base-repo context; safe to grant here
+#       actions: read          # download artifacts from the triggering run
+#
+#     steps:
+#       - name: Download report artifact
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: safeguard-report-pr-${{ github.event.workflow_run.id }}
+#           github-token: ${{ secrets.GITHUB_TOKEN }}
+#           run-id: ${{ github.event.workflow_run.id }}
+#
+#       - name: Read PR number
+#         id: pr
+#         run: echo "number=$(cat pr-number.txt)" >> "$GITHUB_OUTPUT"
+#
+#       - name: Post or update report comment
+#         uses: actions/github-script@v7
+#         with:
+#           github-token: ${{ secrets.GITHUB_TOKEN }}
+#           script: |
+#             const fs = require('fs');
+#             const body = [
+#               '## Soroban Upgrade Safeguard Report',
+#               '',
+#               fs.readFileSync('safeguard-report.md', 'utf8'),
+#               '',
+#               '<!-- soroban-upgrade-safeguard-report -->',
+#             ].join('\n');
+#
+#             const marker = 'soroban-upgrade-safeguard-report';
+#             const prNumber = parseInt('${{ steps.pr.outputs.number }}', 10);
+#             const { data: comments } = await github.rest.issues.listComments({
+#               owner: context.repo.owner,
+#               repo: context.repo.repo,
+#               issue_number: prNumber,
+#             });
+#             const existing = comments.find(c => c.body.includes(marker));
+#             if (existing) {
+#               await github.rest.issues.updateComment({
+#                 owner: context.repo.owner,
+#                 repo: context.repo.repo,
+#                 comment_id: existing.id,
+#                 body,
+#               });
+#             } else {
+#               await github.rest.issues.createComment({
+#                 owner: context.repo.owner,
+#                 repo: context.repo.repo,
+#                 issue_number: prNumber,
+#                 body,
+#               });
+#             }

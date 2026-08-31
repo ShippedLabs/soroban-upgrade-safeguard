@@ -15,13 +15,14 @@ This document explains what Soroban Upgrade Safeguard does, how it works interna
 9. [Detection Categories](#detection-categories)
 10. [Severity Levels](#severity-levels)
 11. [Cascading Layout Breaks](#cascading-layout-breaks)
-12. [Reading the Report](#reading-the-report)
-13. [Suppressing Known Breaking Changes](#suppressing-known-breaking-changes)
-14. [Resource Limits and Hardening Against Malicious Input](#resource-limits-and-hardening-against-malicious-input)
-15. [Exit Codes and CI Integration](#exit-codes-and-ci-integration)
-16. [Limitations](#limitations)
-17. [Migration Note](#migration-note)
-18. [Frequently Asked Questions](#frequently-asked-questions)
+12. [Spec Entry Integrity and Duplicate Detection](#spec-entry-integrity-and-duplicate-detection)
+13. [Reading the Report](#reading-the-report)
+14. [Suppressing Known Breaking Changes](#suppressing-known-breaking-changes)
+15. [Resource Limits and Hardening Against Malicious Input](#resource-limits-and-hardening-against-malicious-input)
+16. [Exit Codes and CI Integration](#exit-codes-and-ci-integration)
+17. [Limitations](#limitations)
+18. [Migration Note](#migration-note)
+19. [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Overview
 
@@ -74,7 +75,15 @@ Scope:  Exported interface + environment metadata only — storage layout is NOT
 
 ## Installation
 
-Build and install the binary from the repository root:
+For a full breakdown of which Rust toolchain, Soroban protocol metadata version, and report schema version are supported by each release, see the [Release Compatibility Table](compatibility-table.md).
+
+Install the published crate from crates.io:
+
+```bash
+cargo install soroban-upgrade-safeguard
+```
+
+Alternatively, you can build and install the binary from a local checkout of the repository root:
 
 ```bash
 cargo install --path .
@@ -88,7 +97,13 @@ cargo run -- <OLD_WASM> <NEW_WASM>
 
 ## Docker
 
-Build the image from the repository root:
+Pre-built images are published automatically to the GitHub Container Registry (`ghcr.io`) from CI. You can pull a published image directly:
+
+```bash
+docker pull ghcr.io/shippedlabs/soroban-upgrade-safeguard:latest
+```
+
+Alternatively, you can build the image manually from the repository root:
 
 ```bash
 docker build -t soroban-upgrade-safeguard .
@@ -147,6 +162,30 @@ soroban-upgrade-safeguard \
   new.wasm
 ```
 
+#### Authenticated RPC endpoints
+
+Keep credentials outside command lines, configuration files, reports, and CI
+logs. Configure each header as `HEADER_NAME=ENVIRONMENT_VARIABLE`; the tool
+reads the secret only when it sends an RPC request:
+
+```bash
+export SOROBAN_RPC_TOKEN="..."
+soroban-upgrade-safeguard \
+  --contract-id C... \
+  --rpc-url https://provider.example/rpc \
+  --rpc-header Authorization=SOROBAN_RPC_TOKEN \
+  new.wasm
+```
+
+Multiple provider headers are supported by repeating `--rpc-header`. Header
+names are validated, missing or empty environment variables are rejected, and
+secret values are never serialized into reports or debug output. RPC redirects
+are refused for authenticated requests so provider credentials cannot reach a
+different origin. In CI, store the secret in the runner's secret store and
+export it for the step rather than putting it in a workflow argument or file.
+See the [RPC Security Checklist](rpc-security-checklist.md) for the full
+operational rundown.
+
 ### Suppression config
 
 Mount the directory that contains `.safeguard.toml` and point to it with `--config`:
@@ -173,35 +212,458 @@ The image preserves exit code semantics (0 = safe, 1 = critical findings). Use i
 
 ## Command Line Usage
 
-The tool takes exactly two positional arguments: the path to the previous (on-chain) WASM and the path to the new (candidate) WASM.
+The tool supports several invocation modes. It no longer assumes exactly two positional
+arguments; instead use the mode appropriate to your environment:
+
+- Local file comparison (two positional WASM paths):
 
 ```bash
 soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>
 ```
 
-Example:
+- RPC baseline mode (fetch the on-chain baseline; single positional new WASM):
 
 ```bash
-soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
+soroban-upgrade-safeguard --contract-id <ID> --rpc-url <URL> <NEW_WASM>
 ```
 
-The first argument should be the build that is currently deployed on chain. The second argument should be the build you intend to deploy. Order matters: the comparison is directional, because removing a field from the old version is treated differently from adding a field in the new version.
+- Manifest (batch) mode: compare many pairs listed in a manifest file:
 
-Common flags: `--format <text|json|markdown>`, `--explain`, `--strict`, `--config <PATH>`, and the resource-limit overrides `--max-xdr-depth`, `--max-xdr-len`, `--max-entries`, and `--max-walk-depth` (see [Resource Limits](#resource-limits-and-hardening-against-malicious-input)).
+```bash
+soroban-upgrade-safeguard --manifest <MANIFEST_PATH>
+```
+
+A manifest can also compose other manifests (`include`), share settings across
+pairs (`[defaults]`), and override them per pair. See
+[Batch Manifests](batch_manifests.md) for the schema, the precedence rules,
+path resolution, and `--explain-manifest`.
+
+- Directory scan (pair by file stem):
+
+```bash
+soroban-upgrade-safeguard --old-dir <OLD_DIR> --new-dir <NEW_DIR>
+```
+
+- Interface lockfile mode (one candidate WASM):
+
+```bash
+soroban-upgrade-safeguard <NEW_WASM> \
+  --interface-lockfile <LOCKFILE>
+```
+
+- Glob pair mode (pair matches by file stem):
+
+```bash
+soroban-upgrade-safeguard --old-glob '<OLD_PATTERN>' --new-glob '<NEW_PATTERN>'
+```
+
+The first form (two positional paths) remains the simplest for ad-hoc, local checks.
+RPC mode fetches the baseline from chain and verifies it cryptographically; manifest,
+directory, and glob modes run batch comparisons. The full usage strings and options
+match the CLI help output (`--help`) and the `override_usage` in `src/main.rs`.
+
+Common flags: `--format <text|json|markdown|html|github-actions|junit>`, `--explain`, `--strict`, `--expect-bump <patch|minor|major>`, `--config <PATH>`, the resource-limit overrides `--max-xdr-depth`, `--max-xdr-len`, `--max-entries`, and `--max-walk-depth` (see [Resource Limits](#resource-limits-and-hardening-against-malicious-input)), the `https://` input overrides `--remote-max-bytes`, `--remote-timeout-secs`, `--remote-max-redirects`, `--remote-cache-dir`, `--no-remote-cache`, and `--clear-remote-cache` (see [Remote HTTPS inputs](#remote-https-inputs)), and `--no-symlinks` for local paths (see [Local file inputs](#local-file-inputs)).
+
+### Report output destinations
+
+By default a report is printed to stdout in the format chosen by `--format`
+(`text` if `--format` is omitted). `--output` adds an explicit destination and
+can be repeated to emit the same report as several formats/files in one run
+(see [Multiple output formats](../README.md#multiple-output-formats) for
+worked examples):
+
+```bash
+# stdout only, text (the default — no --output needed)
+soroban-upgrade-safeguard old.wasm new.wasm
+
+# format-only destination: still stdout, just a different format
+soroban-upgrade-safeguard old.wasm new.wasm --output json
+
+# FORMAT:PATH: write that format to a file instead of stdout
+soroban-upgrade-safeguard old.wasm new.wasm --output json:report.json
+
+# repeat --output for multiple destinations in one run
+soroban-upgrade-safeguard old.wasm new.wasm \
+  --output json:report.json \
+  --output markdown:report.md
+```
+
+A bare path passed to `--output` (no `FORMAT:` prefix, e.g. `--output
+report.txt`) is a file destination whose format comes from `--format`,
+falling back to `text` if `--format` is also omitted. Any parent directories
+in an `--output` file path that don't already exist are created
+automatically.
+
+Decorative and progress lines (headers, per-file "report written to ..."
+notices, suppression-config diagnostics) are ordinarily printed to stdout
+alongside a `text` report. But whenever stdout would otherwise carry a clean,
+parseable document — because the stdout format is `json`, `markdown`, or
+`github-actions`, or because any `--output` targets a file in addition to
+stdout — progress lines are written to stderr instead, so stdout stays safe
+to pipe or redirect into a file without decorative noise mixed in. `--quiet`
+suppresses these lines entirely, on either stream.
+
+### Directory scan
+
+```bash
+soroban-upgrade-safeguard --old-dir <OLD_DIR> --new-dir <NEW_DIR>
+```
+
+Files are matched by exact filename, with the `.wasm` extension compared
+case-insensitively. Both directories are enumerated, so an artifact on either
+side without a counterpart on the other is accounted for, producing three kinds
+of outcome:
+
+- **Matched** (same filename present in both directories): the pair is
+  compared exactly like a two-build comparison and folded into the batch
+  results.
+- **Old-only** (present in `<OLD_DIR>`, missing from `<NEW_DIR>`): recorded as
+  a Critical `contract-missing-from-new` finding — removing a deployed
+  contract from the new build would break every client that depends on it.
+  This is not merely a warning: it unconditionally sets the batch's overall
+  verdict to unsafe (non-zero exit), the same as any other Critical finding,
+  regardless of `--strict`.
+- **New-only** (present in `<NEW_DIR>` only): reported as a warning naming each
+  unmatched file, but never treated as a comparison pair. There is no old build
+  to judge it against, so it produces no findings, takes no slot in the batch
+  counter, and cannot move the verdict or the exit code. The warning exists
+  because the tool cannot tell an intentionally added contract from a rename
+  applied to only one side, and the second case would otherwise ship a contract
+  nobody checked. It is written to stderr as a diagnostic rather than as
+  progress output, so `--quiet` does not suppress it. If you want every added
+  artifact accounted for as an explicit, verifiable pair instead, list pairs in
+  a [manifest](batch_manifests.md).
+
+  When `<OLD_DIR>` holds no `.wasm` files at all but `<NEW_DIR>` does, the run
+  fails with an error that says so and points at reversed `--old-dir`/`--new-dir`
+  arguments, which is overwhelmingly the cause.
+
+### Local file inputs
+
+A local WASM path is followed transparently whether it is a direct file or a
+symlink — including a chain of several symlinks — so this has always worked
+without any special handling. What was missing was any record of *which* one
+happened: two runs against the same command line could silently analyze
+different bytes if a symlink was repointed in between, with nothing in the
+report to show it.
+
+#### Policy
+
+By default, a symlinked input is followed and the resolution recorded — see
+Provenance below. `--no-symlinks` switches to the stricter policy some
+pipelines need: a local path that is itself a symlink (or resolves through
+one) is rejected outright, before the file is read, rather than silently
+analyzing whatever it happens to point at:
+
+```bash
+soroban-upgrade-safeguard old.wasm new.wasm --no-symlinks
+```
+
+A broken symlink (pointing at a target that no longer exists) or a symlink
+cycle is always an error, regardless of `--no-symlinks` — there is no
+permissive interpretation of a link that cannot actually be followed.
+
+`--no-symlinks` applies to the positional comparison arguments, `extract
+--wasm`, and each `old`/`new` entry in a `--manifest` batch file. It has no
+effect on non-local inputs (`https://`, `oci://`, RPC, stdin), which were
+never symlinks to begin with.
+
+#### Provenance
+
+When an input path is a symlink, the report's provenance block records both
+the path exactly as given and the fully resolved target that was actually
+read and analyzed:
+
+```
+Symlink:  ./current -> /srv/releases/contract-v2.4.1.wasm
+```
+
+The same pair appears as `provenance.symlinks` in JSON output (`requested`/
+`resolved` per entry), empty when neither input was a symlink. Recording
+happens whether or not `--no-symlinks` is set; the flag controls whether a
+symlinked input is *allowed*, not whether the tool notices one.
+
+#### Path display
+
+Every path a report shows — batch JSON's `results[].old`/`new`/
+`old_storage_schema`/`new_storage_schema`, `manifest.pairs[]` and its
+settings' `origin`, `--explain-manifest` output, and the symlink
+`requested`/`resolved` pair above — is normalized to forward slashes before
+it's written, regardless of which platform produced it. A batch run on
+Windows and the same run on Linux or macOS therefore report identical path
+*shapes*, which is what makes a saved JSON report, or a snapshot built from
+one, comparable across the machines that might generate or consume it —
+without that, a report built on Windows would embed `old\v1.wasm` where one
+built elsewhere embeds `old/v1.wasm`, a spurious difference that has nothing
+to do with the comparison itself.
+
+Normalization only ever swaps separators — it never canonicalizes a path or
+makes a relative one absolute, so a report never gains directory structure
+beyond what was actually supplied (a relative input stays exactly as many
+directories long). It also only ever applies to a path *recorded* for a
+report; a diagnostic message for a problem with the path itself (a missing
+file, an unreadable manifest, a broken symlink) still shows the path exactly
+as given, unmodified, since that is what the reader needs to locate the real
+file on their own filesystem.
+
+### Hash-only extraction
+
+```bash
+soroban-upgrade-safeguard extract ./wasm/v1.wasm --hash-only
+```
+
+`extract --hash-only` prints nothing but the interface hash — no surrounding
+JSON report document, just the bare hex digest on its own line. The digest is
+the same order-independent SHA-256 the tool uses everywhere else (lockfiles,
+`--interface-lockfile` checks): it covers the analyzed WASM's exported
+interface — its functions and user-defined types — not the raw WASM bytes,
+so two builds that differ only in compiler version, doc comments, or section
+ordering still hash identically. See [Interface Hash](../src/interface_hash.rs)
+for exactly what is and is not covered.
+
+Because the output is a single line with nothing else on stdout, it's suited
+to capturing directly in a script — for a cache key, or a cheap "did the
+interface change?" check without running a full comparison:
+
+```bash
+hash="$(soroban-upgrade-safeguard extract ./wasm/v1.wasm --hash-only)"
+```
+
+### Interface lockfiles
+
+An interface lockfile pins the exported `contractspecv0` interface in a deterministic,
+version-controlled JSON artifact. Generate one from an approved build:
+
+```bash
+soroban-upgrade-safeguard lockfile ./wasm/v1.wasm \
+  --output ./wasm/contract.interface.lock.json
+```
+
+The command refuses to replace an existing file unless `--force` is provided. Use
+that flag only when the public interface change is intentional:
+
+```bash
+soroban-upgrade-safeguard lockfile ./wasm/v2.wasm \
+  --output ./wasm/contract.interface.lock.json --force
+```
+
+Review the resulting JSON diff as an API change. Named collections are sorted for
+stable diffs, while function parameters, struct fields, and union cases retain
+declaration order because those positions affect compatibility. Documentation is
+kept in the artifact so informational documentation findings remain available.
+The stored interface hash is checked against the structured content when the file
+is loaded, preventing a hand-edited or stale lockfile from silently being trusted.
+
+Run the lockfile check in CI with the candidate build as the only positional input:
+
+```bash
+soroban-upgrade-safeguard ./wasm/candidate.wasm \
+  --interface-lockfile ./wasm/contract.interface.lock.json \
+  --format json
+```
+
+A matching interface exits `0`. Drift exits non-zero and uses the normal diff
+categories, severities, suppression handling, and report formats. Lockfile mode
+deliberately analyzes the exported interface only; it does not compare environment
+metadata, host imports, runtime surface, storage schemas, or empirical storage
+observations. Use a two-build comparison when those dimensions are required.
+
+### Spec JSON input mode
+
+Instead of a WASM binary, either side of a comparison can be supplied as a **contract spec JSON file** using `--old-spec` or `--new-spec`:
+
+```bash
+# Check a candidate WASM against a published spec (old side is spec JSON)
+soroban-upgrade-safeguard --old-spec published-spec.json candidate.wasm
+
+# Spec vs spec (both sides are spec JSON files)
+soroban-upgrade-safeguard --old-spec v1-spec.json --new-spec v2-spec.json
+
+# Spec as the new side only
+soroban-upgrade-safeguard deployed.wasm --new-spec candidate-spec.json
+```
+
+#### Spec JSON file format
+
+The file must be a JSON object with a single `entries` array. Each element is a **base64-encoded `SCSpecEntry` XDR value** — the same encoding used in Stellar RPC responses:
+
+```json
+{
+  "entries": ["AAAAAQAAAA...", "AAAAAQAAAB..."]
+}
+```
+
+To produce this file from a WASM binary with the Stellar CLI:
+
+```bash
+stellar contract inspect --wasm contract.wasm --output xdr-base64-array \
+  | python3 -c "import sys, json; print(json.dumps({'entries': json.load(sys.stdin)}))" \
+  > contract-spec.json
+```
+
+#### Skipped comparisons in spec-only mode
+
+A spec JSON file contains only the `contractspecv0` interface entries. Comparisons that require data from the full WASM binary are skipped when one or both sides is a spec file, and the report records exactly what was skipped:
+
+| Comparison                                 | WASM vs WASM | Spec vs WASM / WASM vs Spec | Spec vs Spec |
+| :----------------------------------------- | :----------: | :-------------------------: | :----------: |
+| Exported interface (functions, types)      |      ✅      |             ✅              |      ✅      |
+| Environment metadata (`contractenvmetav0`) |      ✅      |         ⚠️ skipped          |  ⚠️ skipped  |
+| Build metadata (`contractmetav0`)          |      ✅      |         ⚠️ skipped          |  ⚠️ skipped  |
+| Export section (binary vs spec agreement)  |      ✅      |         ⚠️ skipped          |  ⚠️ skipped  |
+| Import section (host-function diff)        |      ✅      |         ⚠️ skipped          |  ⚠️ skipped  |
+
+Skipped comparisons are reported as "not available" in the analysis scope rather than silently ignored, so the verdict is never read as broader than what actually ran. The exported interface comparison — the primary safety gate — always runs regardless of input mode.
+
+`--old-spec` cannot be combined with `--contract-id` (RPC already fetches the full WASM).
+
+### Building from source with `--old-crate` / `--new-crate`
+
+Instead of pointing at a pre-built WASM artifact, either side of a comparison can be a **local Cargo crate directory**. The tool builds it automatically and feeds the result into the analysis pipeline:
+
+```bash
+# Build the new side from source; compare against a deployed on-chain contract
+soroban-upgrade-safeguard \
+  --contract-id CDEPLOYED... \
+  --rpc-url https://soroban-mainnet.stellar.org \
+  --new-crate ./contracts/my_contract
+
+# Build both sides from source (useful when iterating across two branches)
+soroban-upgrade-safeguard \
+  --old-crate ./contracts/v1 \
+  --new-crate ./contracts/v2
+
+# Build the new side from source; old side is a saved WASM artifact
+soroban-upgrade-safeguard deployed.wasm --new-crate ./contracts/my_contract
+```
+
+Pass a path to a directory containing `Cargo.toml`. The tool runs:
+
+```text
+cargo build --target wasm32-unknown-unknown --release --locked
+```
+
+inside that directory, locates the produced `.wasm` artifact via `cargo metadata`, and loads it through the normal validation path. Nothing downstream is aware that the bytes came from a build rather than a file.
+
+#### Toolchain requirements
+
+| Requirement                                   | How to satisfy                                   |
+| :-------------------------------------------- | :----------------------------------------------- |
+| **Cargo** on `$PATH`                          | Install Rust via [rustup.rs](https://rustup.rs)  |
+| **`wasm32-unknown-unknown` target** installed | `rustup target add wasm32-unknown-unknown`       |
+| **`crate-type = ["cdylib"]`** in `[lib]`      | Required for Cargo to produce a `.wasm` artifact |
+
+Both requirements are checked before the build starts. A missing target produces a clear error with the exact `rustup` command to run rather than a cryptic rustc error.
+
+#### CI notes
+
+- Cargo's dependency downloads run on first use. Subsequent runs are fast if the Cargo cache is warm.
+- `--locked` is set automatically, so the build respects the crate's `Cargo.lock` and is reproducible.
+- The build always targets `--release` so the Soroban SDK emits the `contractspecv0` custom section that this tool reads.
+- `--old-crate` cannot be combined with `--contract-id` or `--old-spec`. `--new-crate` cannot be combined with `--new-spec`.
+
+### Remote HTTPS inputs
+
+Anywhere the CLI accepts a local WASM path — the positional comparison arguments, `extract`, and each entry in a `--manifest` batch file — it also accepts an `https://` URL, so a release pipeline that publishes immutable build artifacts to object storage does not need a separate download-and-verify step before running the tool. The same resolver backs `--old-storage-schema` / `--new-storage-schema` on `attest` and `verify-attestation`, since a storage-schema manifest is itself just a JSON/TOML spec file read from a path.
+
+```bash
+# Compare a local build against a published release artifact.
+soroban-upgrade-safeguard old.wasm \
+  "https://releases.example.com/v2/contract.wasm#sha256=3b1a2c9e4d5f60718293847566172839405162738495061728394051627384"
+
+# Both sides published, in a batch manifest (pairs.old / pairs.new accept the
+# same https://…#sha256=<hex> syntax as any other path field).
+soroban-upgrade-safeguard --manifest pairs.toml
+```
+
+#### Reference syntax
+
+A remote reference is an `https://` URL followed by a `#sha256=<hex>` fragment naming the digest the downloaded bytes must match:
+
+```text
+https://cdn.example.com/releases/v2/contract.wasm#sha256=<64 lowercase or uppercase hex characters>
+```
+
+The fragment is never sent to the server (URL fragments are client-side only), which is what makes it a safe place to pin an expected digest onto a bare URL without a second flag per input position. The digest is **mandatory** — a `https://` URL with no `#sha256=` fragment, or a fragment that isn't exactly 64 hex characters, is rejected before any network request is made.
+
+#### Transport policy
+
+Every remote fetch is HTTPS-only, on every hop:
+
+- The initial request must be `https://`; the fetch is refused before connecting otherwise.
+- A redirect that would downgrade to plain `http://` is rejected — capped, in either case, by `--remote-max-redirects` (default 5).
+- No `Authorization` or `Cookie` header is ever forwarded to a redirected request, including a same-origin one.
+- The response body is capped at `--remote-max-bytes` (default 64 MiB), enforced by bounding how many bytes are read from the stream rather than trusting a `Content-Length` header a server could omit or misstate.
+- The whole request is bounded by `--remote-timeout-secs` (default 30).
+- After download, the SHA-256 of the bytes is compared against the reference's expected digest; a mismatch is reported as an integrity failure and the bytes are discarded rather than analyzed.
+
+#### Caching
+
+Because every reference names its own digest, a verified download is cached content-addressed and can be served again without re-fetching, with no risk of staleness — the reference itself changes if the artifact does. The cache lives under `--remote-cache-dir` (default: a `soroban-upgrade-safeguard/remote-cache` directory under the OS temp dir, or the path in `SOROBAN_SAFEGUARD_REMOTE_CACHE` if set). `--no-remote-cache` bypasses both reading and writing the cache for a single run without deleting anything already cached; `--clear-remote-cache` deletes the whole cache directory and exits.
+
+#### Provenance
+
+A remote fetch prints a line naming the final (post-redirect) URL, the verified digest, the cache status (`hit`, `miss`, or `bypassed`), and the response's `Content-Type`, so a CI log always identifies exactly which bytes were analyzed — not just the URL that was requested.
+
+### OCI registry inputs
+
+Anywhere the CLI accepts a local WASM path — the positional comparison arguments, `extract`, and each entry in a `--manifest` batch file — it also accepts an `oci://` reference, so a release pipeline that publishes contract artifacts to an OCI-compatible registry (alongside container images and supply-chain metadata) does not need a separate pull-and-verify step before running the tool. The same resolver backs `--old-storage-schema` / `--new-storage-schema` on `attest` and `verify-attestation`, selecting the extracted-spec media type instead of the WASM one.
+
+```bash
+# Compare a local build against an artifact published to a registry.
+soroban-upgrade-safeguard old.wasm \
+  "oci://ghcr.io/example/contracts@sha256:3b1a2c9e4d5f60718293847566172839405162738495061728394051627384"
+
+# Both sides published, in a batch manifest (pairs.old / pairs.new accept the
+# same oci://<registry>/<repository>@sha256:<hex> syntax as any other path field).
+soroban-upgrade-safeguard --manifest pairs.toml
+```
+
+#### Reference syntax
+
+An OCI reference names a registry host, a repository path, and either a pinned digest or a tag:
+
+```text
+oci://ghcr.io/example/contracts@sha256:<64 lowercase or uppercase hex characters>   (pinned, no opt-in needed)
+oci://ghcr.io/example/contracts:v1.2.3                                              (tag, requires --allow-oci-tags)
+```
+
+A digest reference is immutable by construction — the manifest bytes are verified against that digest before anything downstream is trusted, exactly like the `https://` fragment above. A tag names something that can be repointed at any time, so it is rejected before any network request unless `--allow-oci-tags` is passed; when it is, the resolved manifest digest is still computed locally (never trusted from a response header) and printed, so the reference can be pinned afterward.
+
+#### Manifest and layer selection
+
+The tool requests an OCI (or Docker v2) image manifest and selects the one layer whose `mediaType` matches the artifact being resolved: `application/vnd.soroban.contract.wasm.v1` or the generic `application/wasm` for a WASM comparison input, `application/vnd.soroban.extracted-spec.v1+json` for a storage-schema input. A multi-manifest image index is rejected with a clear error rather than guessing a platform — a Soroban contract artifact is not a multi-platform image.
+
+#### Authentication
+
+Every request is first attempted anonymously. A `401` response carrying a `WWW-Authenticate` challenge is handled automatically:
+
+- **Bearer** — the tool exchanges the challenge for a token at the advertised realm, optionally authenticating that token request with credentials resolved from the standard Docker credential store.
+- **Basic** — the same resolved credentials are sent directly.
+
+Credential resolution follows `docker login`/`docker pull` exactly: a plaintext `auths` entry in `~/.docker/config.json` (or `$DOCKER_CONFIG/config.json`) is tried first, then a per-registry `credHelpers` entry, then the global `credsStore` — each credential helper is invoked as `docker-credential-<helper> get`. There are no separate credential flags; logging in with `docker login <registry>` before running the tool is sufficient.
+
+#### Caching
+
+Every fetch is keyed by the resolved _layer_ digest (not the manifest digest), so a verified blob is cached content-addressed and can be served again without re-fetching. The cache lives under `--oci-cache-dir` (default: a `soroban-upgrade-safeguard/oci-cache` directory under the OS temp dir, or the path in `SOROBAN_SAFEGUARD_OCI_CACHE` if set). `--no-oci-cache` bypasses both reading and writing the cache for a single run; `--clear-oci-cache` deletes the whole cache directory and exits. The manifest itself is still fetched on every run (its digest is what determines the layer to check the cache for), but the potentially much larger blob download is skipped on a cache hit.
+
+#### Provenance
+
+An OCI fetch prints a line naming the registry, repository, resolved layer digest, manifest digest, resolved tag (if any), cache status, and media type, so a CI log always identifies exactly which bytes — and which registry state — were analyzed.
 
 ## How the Analysis Works
 
 The analysis runs as a short pipeline. Each stage lives in its own module under `src/`.
 
-1. **Load and validate (`loader.rs`).** Each file is read from disk and checked for the WASM magic header. The tool then walks every WASM payload to confirm the binary is structurally well formed before any deeper work happens. A corrupt or non-WASM file fails fast with a clear message.
+1. **Load and validate (`loader.rs`).** Each file is read from disk and checked for the WASM magic header. The tool accepts both binary WASM (`.wasm`) and WebAssembly Text format (`.wat`). A `.wat` file is detected by its extension or by the absence of the `\0asm` magic bytes, assembled to binary using the `wat` crate, and then validated identically to a binary input — nothing downstream is aware of the distinction. A malformed `.wat` produces a clear assembly error naming the file and the parse problem. The tool then walks every WASM payload to confirm the binary is structurally well formed before any deeper work happens. A corrupt or non-WASM file fails fast with a clear message that names the byte offset the underlying WASM parser reported for the malformed payload (e.g. `WASM validation error at byte offset 42: ...`), so a corrupt binary can be inspected directly with a hex editor rather than only reported as "malformed." The offset is available both in that human-readable message and programmatically, via `Error::byte_offset()` on the structured error — `None` for failures that have no meaningful position (a bad magic-byte check that never reaches the parser, for instance).
 
    When the baseline is fetched from an RPC endpoint (`--contract-id` / `--rpc-url`), the loader applies a **zero-trust pipeline**: the URL is validated for transport security (HTTPS required unless `--allow-http-local` is set), the RPC response entries are checked for matching ledger keys, and the SHA-256 hash of the fetched bytecode is verified against the on-chain contract instance hash. An optional `--expected-wasm-hash` flag provides additional hash pinning.
 
-2. **Extract metadata (`parser.rs`).** The Soroban SDK stores the contract interface in custom WASM sections. The parser scans for the `contractspecv0` section and decodes the concatenated XDR `ScSpecEntry` objects it contains. The `contractenvmetav0` section is captured as well for completeness.
+2. **Extract metadata (`parser.rs`).** The Soroban SDK stores the contract interface in custom WASM sections. The parser scans for the `contractspecv0` section and decodes the concatenated XDR `ScSpecEntry` objects it contains. The `contractenvmetav0` section is decoded too, and environment metadata differences are compared as part of the analysis. Protocol interface version changes are reported as `Warning`; other environment metadata changes are reported as `Info`. The parser also walks the WASM type and import sections to record every function import as an `ImportedFunction` — a `(module, name)` pair plus its resolved parameter/result types, when resolvable. See [Host Imports and Protocol Capabilities](#host-imports-and-protocol-capabilities).
 
 3. **Build the spec model (`spec.rs`).** Decoded entries are sorted into a `ContractSpec`, which groups functions, structs, enums, unions, and error enums into separate maps keyed by name. This gives the comparison stage fast lookups by type name.
 
-4. **Compare (`diff.rs`).** The old and new specs are compared item by item. Functions, structs, and enums are matched by name and then examined for the specific breaking changes described below. Every difference becomes a `Finding` with a severity and a category.
+4. **Compare (`diff.rs`).** The old and new specs are compared item by item. Functions, structs, and enums are matched by name and then examined for the specific breaking changes described below. Every difference becomes a `Finding` with a severity and a category. `compare_host_imports` separately classifies host-import changes against the [capability registry](capability-registry.md).
 
 5. **Map dependencies (`mapper.rs`).** A `LayoutMapper` builds a reverse dependency graph over user-defined types. This is what lets the tool understand that a change to a small shared type can break every larger type that embeds it.
 
@@ -230,6 +692,48 @@ soroban-upgrade-safeguard ./on-chain.wasm ./candidate.wasm \
 ```
 
 Both flags are required together. Supplying only one is an error, because a single snapshot cannot show a change. Keep the manifest versioned next to your contract and update it in the same commit that changes a storage type.
+
+#### Schemas in batch manifests
+
+Each `[[pairs]]` entry may provide its own `old_storage_schema` and
+`new_storage_schema` fields. Schema-backed and interface-only comparisons can
+therefore coexist in one batch:
+
+```toml
+[[pairs]]
+old = "artifacts/token_v1.wasm"
+new = "artifacts/token_v2.wasm"
+name = "token"
+old_storage_schema = "schemas/token_v1.json"
+new_storage_schema = "schemas/token_v2.json"
+
+[[pairs]]
+old = "artifacts/oracle_v1.wasm"
+new = "artifacts/oracle_v2.wasm"
+name = "oracle"
+```
+
+The equivalent JSON fields may use ergonomic hyphenated names:
+
+```json
+{
+  "pairs": [
+    {
+      "old": "artifacts/token_v1.wasm",
+      "new": "artifacts/token_v2.wasm",
+      "name": "token",
+      "old-storage-schema": "schemas/token_v1.json",
+      "new-storage-schema": "schemas/token_v2.json"
+    }
+  ]
+}
+```
+
+Schema paths resolve relative to the manifest file that declares the pair,
+just like `old` and `new`. Both schema fields are required together. A partial,
+missing, or invalid schema is a pair-level error: it fails the batch verdict,
+but unrelated pairs continue to run. Directory scan mode remains
+interface-only because it has no schema discovery step.
 
 ### Manifest format
 
@@ -286,15 +790,15 @@ kind = "enum"
 
 Type strings use the same Rust-like spelling the report prints, so a type named in a finding can be pasted straight back into a manifest.
 
-| Spelling | Meaning |
-| :--- | :--- |
-| `bool`, `u32`, `i32`, `u64`, `i64`, `u128`, `i128`, `u256`, `i256` | scalars |
-| `Bytes`, `String`, `Symbol`, `Address`, `Timepoint`, `Duration` | built-ins |
-| `Val`, `Error`, `()` | raw value, error, void |
-| `Option<T>`, `Vec<T>`, `Map<K, V>`, `Result<T, E>` | containers |
-| `BytesN<32>` | fixed-length bytes |
-| `(Address, u32)` | tuple |
-| `PositionState` | a user-defined type, exported or declared in the manifest |
+| Spelling                                                           | Meaning                                                   |
+| :----------------------------------------------------------------- | :-------------------------------------------------------- |
+| `bool`, `u32`, `i32`, `u64`, `i64`, `u128`, `i128`, `u256`, `i256` | scalars                                                   |
+| `Bytes`, `String`, `Symbol`, `Address`, `Timepoint`, `Duration`    | built-ins                                                 |
+| `Val`, `Error`, `()`                                               | raw value, error, void                                    |
+| `Option<T>`, `Vec<T>`, `Map<K, V>`, `Result<T, E>`                 | containers                                                |
+| `BytesN<32>`                                                       | fixed-length bytes                                        |
+| `(Address, u32)`                                                   | tuple                                                     |
+| `PositionState`                                                    | a user-defined type, exported or declared in the manifest |
 
 ### Validation and reconciliation
 
@@ -339,7 +843,9 @@ Storage findings count toward `is_safe` and therefore toward the exit code, so a
 
 Coverage is bounded by what you declare. A storage type you forget to declare is not analyzed, and the report does not pretend otherwise. If a declaration references a type that is neither declared in the manifest nor exported by the contract, that dangling reference is reported as an informational finding rather than quietly skipped.
 
-Storage schemas apply to a single contract pair and are refused in batch mode, since one manifest cannot describe several different contracts.
+In batch output, each pair reports `schema-backed`, `interface-only`, or
+`error` coverage. A passing interface-only pair certifies only its exported
+interface and environment metadata; it must not be read as storage verified.
 
 ## Detection Categories
 
@@ -370,9 +876,211 @@ The comparison stage looks for the following classes of change.
 - **Enum Case Value Changed.** A variant kept its name but its integer value changed, which breaks serialization. Critical.
 - **Enum Case Added.** A new variant. Informational.
 
+### Unions
+
+- **Union Removed.** A union present in the old build is missing. Any stored values using this union become invalid. Critical.
+- **Union Case Removed.** A union case disappeared, breaking positional discriminants and layout compatibility. Critical.
+- **Union Case Reordered.** A case moved position; unions serialize by positional discriminant, so reordering breaks layout. Critical.
+- **Union Case Type Changed.** A case's payload type changed (non-numeric or multi-value change). Critical.
+- **Union Case Type Widened.** A numeric widening of a case payload (e.g. `i32` → `i64`). Warning.
+- **Union Case Type Narrowed.** A numeric narrowing of a case payload. Critical.
+- **Union Case Type Signedness Changed.** A numeric signedness change in a case payload. Critical.
+- **Union Case Added.** A new case appended to the union. Informational.
+- **Union Added.** A new union type in the new build. Informational.
+- **Union Documentation Changed.** Doc-string changes for a union. Informational.
+
+### Error Enums
+
+- **Error Enum Removed.** An error enum present in the old build is missing. Clients matching on these error codes will break. Critical.
+- **Error Enum Case Removed.** A case was removed from an error enum. Critical.
+- **Error Enum Case Value Changed.** A case's numeric value changed, breaking error-code compatibility. Critical.
+- **Error Enum Case Added.** A new error enum case was added. Informational.
+- **Error Enum Added.** A new error enum type in the new build. Informational.
+- **Error Enum Documentation Changed.** Doc-string changes for an error enum. Informational.
+
+### Type Renames
+
+Types are compared by structure, not only by name, so renaming a type is recognized as a rename instead of being reported as an unrelated removal plus addition. See [Type Identity](#type-identity) for how the matching works and what it deliberately refuses to match.
+
+- **Type Renamed.** The old type was matched to a new one with an identical layout. Stored data stays compatible; only client-side type names need updating. Informational.
+- **Type Renamed With Changes.** The old type was matched to a new one whose layout also changed. The rename itself is a warning, and the actual breaking changes are reported alongside it as ordinary field- or case-level findings.
+
 ### Events
 
-Soroban does not mark event types explicitly in the spec, so the tool uses a naming heuristic: any user-defined type whose name contains the word `event` (case insensitive) is treated as an event type. When such a type changes, the same struct and enum checks apply but the findings are labeled with event-specific categories such as **Event Schema Removed** or **Event Enum Case Value Changed**. This matters because off-chain indexers and subscribers depend on a stable event shape, and a change that is merely awkward for storage can be fully breaking for an indexer.
+Soroban's `contractspecv0` carries no marker that says "this type is an event", so the tool cannot infer it from the spec. Instead you declare it, in the `[classification]` table of `.safeguard.toml`. See [Type Classification](#type-classification).
+
+Classification affects only the **wording** of a finding and the remediation advice attached to it — a type classified as an event gets guidance about off-chain indexers and subscribers, because a change that is merely awkward for storage can be fully breaking for an indexer. It never affects the finding's `category`.
+
+### Host Imports and Protocol Capabilities
+
+A WASM import that a contract did not need before can raise the minimum Stellar protocol version the target network must support, independently of anything visible in the exported spec. `diff::compare_host_imports` classifies these changes using the versioned registry in `src/capability.rs`, which maps recognized `(module, name)` host-import wire codes (e.g. `("l", "_")` is `put_contract_data`) to a capability id, a capability group, and the protocol version at which the capability became available. See [Updating the Capability Registry](capability-registry.md) for what the registry is generated from and how to refresh it, and [`capability-reference.md`](capability-reference.md) for the full generated list.
+
+- **Host Import Added.** The new build imports a recognized capability the old build did not. Warning — verify the target network has activated the required protocol.
+- **Host Import Removed.** A recognized capability the old build imported is no longer imported. Informational.
+- **Host Import Signature Changed.** The same `(module, name)` import appears on both sides but its resolved parameter/result types differ. Critical for a recognized capability (this should never legitimately happen and likely indicates a toolchain problem), Warning for an unrecognized one. Never reported when either side's type index could not be resolved — a missing signature is not evidence of a change.
+- **Unknown Host Import.** The import's `(module, name)` pair is not in the registry. Its protocol requirement is deliberately left unset rather than guessed; the finding exists purely so the import stays visible. Warning.
+- **Protocol Requirement Raised.** The highest `min_protocol` among the new build's recognized imports exceeds the old build's. Warning, and only computed when both sides have at least one recognized import to compare.
+- **Protocol Environment Mismatch.** A single build's own `contractenvmetav0` protocol version is lower than the minimum protocol implied by its own recognized imports — an internal inconsistency in how the binary was produced. Critical.
+
+## Type Identity
+
+A contract spec identifies every user-defined type by name, but a name is not an identity. Two questions have to be kept apart:
+
+- **Is this the same type as before?** — a _structural_ question.
+- **What kind of thing is it?** — a _semantic_ question, covered in [Type Classification](#type-classification).
+
+### Why name matching alone is not enough
+
+Matching purely on name gets two cases wrong, in opposite directions.
+
+- **Renames are false breaks.** Renaming `Config` to `Settings` without touching a single field produces "Struct Removed" plus "Struct Added" — two findings, one of them critical, for a change that is byte-for-byte compatible on chain.
+- **Swaps are false matches.** If `Config` is deleted and an unrelated new type happens to be called `Config`, name matching reports only the field-level differences between two types that have nothing to do with each other, quietly treating a full replacement as an edit.
+
+### How matching actually works
+
+Types that exist under the same name in both specs are compared in place, exactly as before. The types left over — present only in the old spec, or only in the new one — are then matched against each other structurally, per kind (structs to structs, enums to enums, and so on; a struct is never matched to an enum).
+
+Each type gets a **fingerprint**: a canonical string built from its members and their types, with the type's own name excluded. Matching then proceeds in two tiers:
+
+1. **Identical fingerprint.** The layouts are the same, so this is a pure rename. Reported as **Type Renamed** (Info) — no migration needed.
+2. **Similar member sets.** Otherwise the candidates are scored by [Jaccard similarity](https://en.wikipedia.org/wiki/Jaccard_index) over their member keys (name and type together). A pair must score at least `0.5` — more than half their members in common — to be considered a rename at all. Reported as **Type Renamed With Changes** (Warning), followed by the ordinary field- or case-level findings describing what actually changed.
+
+Anything not matched under those rules is reported as a plain removal and a plain addition, which is the conservative outcome: an unmatched removal stays critical.
+
+The matching is **deterministic** — candidates are iterated in sorted order and ties are broken by the lexicographically smaller new name, so the same pair of specs always produces the same output — and **bounded**, at one comparison per (removed, added) pair within a kind.
+
+### What it deliberately does not do
+
+- A removed type and an added type that share fewer than half their members are **not** matched. A rewrite is a rewrite.
+- Each type participates in at most one rename. When several candidates are plausible, the best-scoring one wins and the rest fall back to removal/addition.
+- Two unrelated types with coincidentally identical layouts (say, two distinct `struct Wrapper { value: u32 }`) can be matched. This is unavoidable — they are indistinguishable in the spec — and harmless: the finding is informational and the layouts really are compatible.
+- Names are compared case-sensitively. `Config` and `config` are different names; if both exist, they are separate types.
+
+## Type Classification
+
+Classification answers the second question: what kind of thing a type is. Today that means one distinction — is it an **event**, consumed by off-chain indexers and subscribers, or an ordinary **storage/interface** type?
+
+Nothing in `contractspecv0` records this. The tool used to guess from the name, treating any type whose name contained `event` as an event type. That guess is wrong in both directions: `PreventList` and `EventCounterCache` are not events, and a genuine `Transfer` event is not caught.
+
+So it is configured explicitly, in `.safeguard.toml`:
+
+```toml
+[classification]
+# Genuine events, by exact type name. Names need not contain "event".
+events = ["Transfer", "LedgerEvent", "PriceUpdate"]
+
+# Types to keep as ordinary storage. Takes precedence over everything below.
+storage = ["PreventList", "EventCounterCache"]
+
+# Opt-in fallback: treat any name containing "event" (case-insensitive) as an
+# event. Off by default.
+name_heuristic = false
+```
+
+Resolution precedence, first match wins:
+
+1. listed in `storage` → storage
+2. listed in `events` → event (declared)
+3. `name_heuristic = true` and the name contains `event` → event (heuristic)
+4. otherwise → storage
+
+With no `[classification]` section, **nothing is treated as an event**. The tool makes no claim it cannot back up.
+
+### Classification never affects the suppression key
+
+This is the important property. A finding's `category` describes structure only — `Struct Field Removed`, `Enum Case Value Changed` — and never encodes classification. Event-ness is reported separately, in the finding's `classification` field:
+
+```json
+{
+  "severity": "critical",
+  "category": "Enum Case Value Changed",
+  "target": "StatusEvent.Paused",
+  "type_name": "StatusEvent",
+  "classification": { "class": "event", "heuristic": false }
+}
+```
+
+Because the suppression key (`category` + `target`) contains no classification, editing `[classification]` cannot move a finding out from under an existing suppression rule, and cannot pull an unrelated one under it. Reclassifying a type changes how a finding reads, never whether it fails the run.
+
+When a classification came from the opt-in heuristic rather than a declaration, the report says so in the finding message and sets `"heuristic": true`, so a reviewer can always tell a guess from a fact.
+
+### Category compatibility
+
+Earlier versions folded the event guess into the category string itself. Those names are no longer emitted, but suppression configs that use them keep working — each is mapped onto its structural replacement:
+
+| Pre-1.0 category                | Stable category             |
+| :------------------------------ | :-------------------------- |
+| `Event Definition Removed`      | `Struct Removed`            |
+| `Event Field Removed`           | `Struct Field Removed`      |
+| `Event Field Reordered`         | `Struct Field Reordered`    |
+| `Event Field Type Changed`      | `Struct Field Type Changed` |
+| `Event Enum Removed`            | `Enum Removed`              |
+| `Event Enum Case Removed`       | `Enum Case Removed`         |
+| `Event Enum Case Value Changed` | `Enum Case Value Changed`   |
+| `Event Enum Case Added`         | `Enum Case Added`           |
+
+New rules should use the stable names. `Error Enum …` categories are unrelated to events and were never remapped.
+
+> **Full reference**: The [Finding Category Reference](finding-categories.md) page
+> documents every category with its exact suppression string, default severity,
+> trigger description, and detailed remediation guidance.
+
+## Rule Registry
+
+Every detection rule has a stable `rule_id` that is independent of the human
+readable category label. The table below lists the registered rules, their
+severity, and the guidance used when `--explain` is enabled.
+
+| rule_id                          | Label                          | Severity | Guidance                                                                                     |
+| :------------------------------- | :----------------------------- | :------- | :------------------------------------------------------------------------------------------- |
+| `environment`                    | Environment                    | Info     | Verify the target network supports the new protocol version and adjust tooling as needed.    |
+| `function_removed`               | Function Removed               | Critical | Restore the function or deprecate it in client integrations.                                 |
+| `function_documentation_changed` | Function Documentation Changed | Info     | Keep downstream consumers aware of the updated docs and behavior.                            |
+| `function_added`                 | Function Added                 | Info     | Inform integrations about the new function.                                                  |
+| `function_signature_changed`     | Function Signature Changed     | Critical | Update call sites and tests to match the new parameter structure.                            |
+| `parameter_renamed`              | Parameter Renamed              | Warning  | Update named-argument integrations to use the new parameter name.                            |
+| `parameter_reordered`            | Parameter Reordered            | Critical | Restore the original parameter order.                                                        |
+| `parameter_type_changed`         | Parameter Type Changed         | Critical | Update caller arguments and SDKs to use the new type.                                        |
+| `return_type_changed`            | Return Type Changed            | Critical | Update caller expectations and SDKs to the new return type.                                  |
+| `event_definition_removed`       | Event Definition Removed       | Critical | Update or remove downstream event consumers.                                                 |
+| `struct_removed`                 | Struct Removed                 | Critical | Restore the struct or migrate any stored data that depends on it.                            |
+| `struct_documentation_changed`   | Struct Documentation Changed   | Info     | Keep documentation aligned with the intended struct usage.                                   |
+| `struct_added`                   | Struct Added                   | Info     | Inform consumers about the new struct.                                                       |
+| `struct_field_removed`           | Struct Field Removed           | Critical | Restore the field or perform a storage migration.                                            |
+| `event_field_removed`            | Event Field Removed            | Critical | Update indexers and consumers that expect the removed field.                                 |
+| `struct_field_reordered`         | Struct Field Reordered         | Critical | Restore the original field order.                                                            |
+| `event_field_reordered`          | Event Field Reordered          | Critical | Update consumers to handle the new field ordering.                                           |
+| `struct_field_type_changed`      | Struct Field Type Changed      | Critical | Revert the type change or migrate existing data.                                             |
+| `event_field_type_changed`       | Event Field Type Changed       | Critical | Update event consumers to handle the new field type.                                         |
+| `struct_field_added`             | Struct Field Added             | Warning  | Ensure consumers and storage migrations handle the new field.                                |
+| `event_enum_removed`             | Event Enum Removed             | Critical | Restore the enum or update downstream event consumers.                                       |
+| `enum_removed`                   | Enum Removed                   | Critical | Restore the enum or migrate any stored data that uses it.                                    |
+| `enum_documentation_changed`     | Enum Documentation Changed     | Info     | Ensure the updated docs are clear for consumers.                                             |
+| `enum_added`                     | Enum Added                     | Info     | Inform consumers about the new enum type.                                                    |
+| `enum_case_removed`              | Enum Case Removed              | Critical | Restore the case or migrate data that depends on it.                                         |
+| `event_enum_case_removed`        | Event Enum Case Removed        | Critical | Restore the case or update event consumers.                                                  |
+| `enum_case_value_changed`        | Enum Case Value Changed        | Critical | Revert the value change to preserve serialization compatibility.                             |
+| `event_enum_case_value_changed`  | Event Enum Case Value Changed  | Critical | Revert the change or update event consumers.                                                 |
+| `enum_case_added`                | Enum Case Added                | Info     | Ensure consumers can handle the new case.                                                    |
+| `event_enum_case_added`          | Event Enum Case Added          | Info     | Update consumers to handle the new event enum case.                                          |
+| `union_removed`                  | Union Removed                  | Critical | Restore the union or migrate data that uses it.                                              |
+| `union_added`                    | Union Added                    | Info     | Inform consumers about the new union type.                                                   |
+| `union_case_removed`             | Union Case Removed             | Critical | Restore the case or migrate existing data.                                                   |
+| `union_case_reordered`           | Union Case Reordered           | Critical | Restore the original case order.                                                             |
+| `union_case_type_changed`        | Union Case Type Changed        | Critical | Revert the type change or migrate data.                                                      |
+| `union_case_added`               | Union Case Added               | Info     | Ensure consumers can handle the new union case.                                              |
+| `error_enum_removed`             | Error Enum Removed             | Critical | Restore the error enum or update clients.                                                    |
+| `error_enum_added`               | Error Enum Added               | Info     | Inform client integrations about the new error enum.                                         |
+| `error_enum_case_removed`        | Error Enum Case Removed        | Critical | Restore the case or update client error handling.                                            |
+| `error_enum_case_value_changed`  | Error Enum Case Value Changed  | Critical | Revert the value change to preserve error-code compatibility.                                |
+| `error_enum_case_added`          | Error Enum Case Added          | Info     | Ensure clients can handle the new error case.                                                |
+| `cascading_layout_break`         | Cascading Layout Break         | Critical | Resolve the underlying layout break in the referenced type.                                  |
+| `host_import_added`              | Host Import Added              | Warning  | Verify the target network has activated the required protocol before deploying.              |
+| `host_import_removed`            | Host Import Removed            | Info     | No action typically required.                                                                |
+| `host_import_signature_changed`  | Host Import Signature Changed  | Warning  | Investigate why the same import now resolves to a different function type.                   |
+| `unknown_host_import`            | Unknown Host Import            | Warning  | Verify the import's requirement manually; consider proposing it for the capability registry. |
+| `protocol_requirement_raised`    | Protocol Requirement Raised    | Warning  | Confirm the target network has activated the reported protocol before deploying.             |
+| `protocol_environment_mismatch`  | Protocol Environment Mismatch  | Critical | Rebuild with a matching SDK/toolchain version.                                               |
 
 ## Severity Levels
 
@@ -388,9 +1096,65 @@ The most subtle failures come from shared types. Suppose a small struct named `M
 
 To catch this, `mapper.rs` builds a reverse dependency graph: for each user-defined type, it records which other types embed it. After the direct comparison finds the set of types with critical changes, `diff.rs` walks that graph outward and marks every dependent type as broken too, transitively. These appear in the report under the **Cascading Layout Break** category, naming both the affected parent type and the underlying modified type that caused the break. Cyclic type references are handled safely so the walk always terminates.
 
+## Spec Entry Integrity and Duplicate Detection
+
+WASM binaries are permitted to carry more than one custom section with the same name. The Soroban toolchain typically emits a single `contractspecv0` section, but a crafted or malformed build can contain multiple. The parser concatenates entries from all `contractspecv0` sections in order, and then `spec.rs` checks for duplicate names within each kind (function, struct, enum, union, error enum).
+
+### Why duplicates are a soundness problem
+
+If two sections define the same type name differently, the analysis model contains the first definition it encountered. Any subsequent conflicting definition is discarded from the model. This creates a gap: the definition the tool analyzes may not be the one the contract actually uses. An attacker who controls section ordering can steer the tool to analyze a benign definition while the real, breaking one is ignored. The upgrade appears safe; in production it corrupts data.
+
+### Detection policy
+
+The tool compares every pair of definitions that share a name and kind using their serialized XDR bytes:
+
+- **Conflicting duplicates** (same name, different bytes) produce a **`Spec Entry Conflict`** finding at `Critical` severity. The run is marked `is_safe: false` and exits with code 1. This is true regardless of which side carries the duplicate (old or new) and regardless of whether `--compat-duplicates` is set.
+
+- **Identical duplicates** (same name, byte-identical bytes) produce a **`Spec Entry Duplicate`** finding. The severity depends on the mode:
+  - **Default mode**: `Warning`. The WASM is non-canonical and the condition is suspicious.
+  - **Compat mode** (`--compat-duplicates`): `Info`. Legitimate toolchains that historically emit split sections with identical entries can set this flag to suppress the warning without hiding genuine conflicts.
+
+The first encountered definition is always the one used for comparison. The policy is deterministic and independent of `HashMap` iteration order.
+
+### JSON fields
+
+The `scope` object in JSON output always reflects the duplicate status:
+
+```json
+{
+  "scope": {
+    "old_spec_section_count": 2,
+    "new_spec_section_count": 1,
+    "old_duplicate_names": ["Ledger"],
+    "new_duplicate_names": []
+  }
+}
+```
+
+`old_spec_section_count` and `new_spec_section_count` give the raw number of `contractspecv0` sections found in each binary. `old_duplicate_names` and `new_duplicate_names` list every entry name that appeared more than once (across all kinds), sorted for stable output. These fields are always present; the name lists are omitted from JSON when empty.
+
+### Compat mode
+
+Some older SDK versions emit two `contractspecv0` sections with identical entries. To handle those WASMs without failing, pass `--compat-duplicates`:
+
+```bash
+soroban-upgrade-safeguard old.wasm new.wasm --compat-duplicates
+```
+
+In compat mode, identical duplicates become informational and no longer cause a `Warning`. Conflicting duplicates remain `Critical` regardless — a difference in definitions cannot be safely ignored in any mode.
+
+### Coverage
+
+Duplicate detection covers all five spec entry kinds: functions, structs, enums, unions, and error enums. Provenance (which section each entry came from, zero-indexed) is tracked through decoding and reported in every finding message and in the `scope` JSON so an operator can identify exactly which sections are involved.
+
 ## Zero-Trust RPC Baseline Retrieval
 
 When using `--contract-id` and `--rpc-url` to fetch the on-chain baseline, the tool implements a **zero-trust pipeline** that protects against malicious or compromised RPC endpoints:
+
+For an operational checklist covering endpoint trust, HTTPS, expected-hash
+pinning, credential handling, and report retention — with guarantees
+distinguished from operator assumptions — see the
+[RPC Security Checklist](rpc-security-checklist.md).
 
 ### Cryptographic Hash Verification
 
@@ -424,10 +1188,10 @@ The optional `--expected-wasm-hash <HEX>` flag lets callers pin the expected on-
 
 ### IntegrityError Types
 
-| Error | Cause |
-|-------|-------|
+| Error                          | Cause                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------ |
 | `IntegrityError[HashMismatch]` | The SHA-256 of the fetched bytecode does not match the hash in the contract instance entry |
-| `IntegrityError[KeyMismatch]` | The ledger key in the RPC response does not match the requested key |
+| `IntegrityError[KeyMismatch]`  | The ledger key in the RPC response does not match the requested key                        |
 
 ### Report Metadata
 
@@ -454,6 +1218,85 @@ Example JSON excerpt:
 }
 ```
 
+## JSON Schema
+
+The JSON output is the integration surface for dashboards, bots, and other
+tooling, so its shape is published as a JSON Schema (Draft 2020-12) under
+[`schema/`](../schema):
+
+- [`schema/report.schema.json`](../schema/report.schema.json) — the single-pair
+  document (`--format json` on a contract pair).
+- [`schema/batch-report.schema.json`](../schema/batch-report.schema.json) — the
+  batch document (`--manifest`, `--old-dir`/`--new-dir`, or `--old-glob`/`--new-glob` with `--format json`),
+  whose top level differs from the single-pair shape and embeds a single-pair
+  report per contract under `results`.
+
+Both schemas are **derived from the Rust output types**, not hand-written, so
+they cannot silently drift from what the tool emits: `tests/schema_validation.rs`
+regenerates them from the types and validates real emitted output — including a
+run with suppressed findings and one produced with `--explain` — against the
+committed files, failing if they diverge. Conditionally omitted fields
+(`suppressed`, `suppression_reason`, `remediation`, the duplicate-name lists, …)
+are marked optional, and the enumerated fields (the `counts` severities and
+`recommended_bump`) are constrained to their allowed values.
+
+To regenerate the committed schema after intentionally changing an output type:
+
+```bash
+UPDATE_SCHEMA=1 cargo test --test schema_validation schemas_match_the_types
+```
+
+### Stability
+
+The crate is pre-1.0 (`0.x`). While it remains pre-1.0 the JSON shape may still
+change between minor versions, but such changes will be **additive wherever
+possible** — new optional fields rather than renamed or removed ones — and any
+breaking change to the shape will be called out in the release notes. Consumers
+should ignore unknown fields so additive changes do not break them. A firmer
+"additive changes only within a major version" guarantee is intended once the
+crate reaches 1.0.
+
+For the full field-level compatibility contract — which fields are stable,
+additive, conditional, or deprecated, how to handle unknown fields, and how to
+handle unsupported future versions — see the
+[Report Schema Compatibility Policy](report_schema_compatibility.md).
+
+### Rendering a saved report
+
+`render` turns a previously saved JSON report back into a human-readable
+document, without needing the original WASM files. It accepts a report in
+either of two forms — a path to a saved JSON file, or `-` to read the JSON
+from stdin:
+
+```bash
+# From a saved file
+soroban-upgrade-safeguard render report.json --format markdown
+
+# From stdin, piped straight from a comparison run
+soroban-upgrade-safeguard ./old.wasm ./new.wasm --format json \
+  | soroban-upgrade-safeguard render - --format text
+```
+
+Any argument other than `-` is read as a file path. The only supported
+target formats are `text` (the default, colored human-readable output) and
+`markdown` (suitable for PR descriptions and comments) — `json` is not a
+valid `--format` for `render`, since re-rendering a saved JSON document as
+JSON would just be a no-op copy.
+
+### Upgrading an older saved report
+
+A saved JSON report is a durable artifact, and `render` only reads
+[`REPORT_SCHEMA_VERSION`](../src/render.rs) directly. When a schema change
+does need an older report migrated forward, use `upgrade-report`:
+
+```bash
+soroban-upgrade-safeguard upgrade-report old_report.json --output upgraded.json
+```
+
+See [Report Schema Migrations](report_migrations.md) for the full versioning
+scheme, what a migration preserves, and how the migration history embedded
+in the upgraded document is structured.
+
 ## Reading the Report
 
 A run prints a header for each loaded contract with a one line summary of how many functions, structs, enums, unions, and error enums it contains. It then prints the safety report.
@@ -479,31 +1322,103 @@ can point at a different file with `--config <PATH>`:
 soroban-upgrade-safeguard ./on-chain.wasm ./candidate.wasm --config .safeguard.toml
 ```
 
-If no `--config` is given and `.safeguard.toml` is absent, nothing is
-suppressed and the tool behaves exactly as it always has. If you pass
-`--config` explicitly and the file is missing or malformed, that is a hard
-error rather than a silent no-op, so a typo never quietly disables suppression.
+When `--config` is not given, the `SOROBAN_SAFEGUARD_CONFIG` environment
+variable is used instead if set — handy for CI systems that would rather
+configure a path once (e.g. in a workflow's `env:` block) than repeat
+`--config` on every invocation:
 
-Each `[[suppress]]` entry acknowledges exactly one finding using the secure, content-bound format:
+```bash
+export SOROBAN_SAFEGUARD_CONFIG=/config/.safeguard.toml
+soroban-upgrade-safeguard ./on-chain.wasm ./candidate.wasm
+```
+
+An explicit `--config` flag always takes precedence over the environment
+variable. Whichever source resolved a path is echoed back as a diagnostic
+(`Suppression config: <path> (source: ...)`) so a run's logs make clear where
+the config came from; in `--manifest` mode the same information is available
+per pair via `--explain-manifest`, where the config setting's `origin` is
+`cli`, `env`, `built-in`, or the manifest file that set it.
+
+If neither `--config` nor `SOROBAN_SAFEGUARD_CONFIG` is given and
+`.safeguard.toml` is absent, nothing is suppressed and the tool behaves
+exactly as it always has. If you pass `--config` explicitly, or
+`SOROBAN_SAFEGUARD_CONFIG` names a path, and that file is missing or
+malformed, that is a hard error rather than a silent no-op, so a typo never
+quietly disables suppression — the same way it always has for `--config`.
+Only the auto-discovered `.safeguard.toml` default stays optional: if it
+simply isn't there, the tool proceeds with no suppressions.
+
+#### Searching parent directories
+
+Running the tool from a workspace subdirectory — a monorepo package, a
+service's own folder — means the current directory usually doesn't have a
+`.safeguard.toml` of its own even when the repository root does, so the
+plain current-directory check above misses it. `--search-parent-config` is
+an **opt-in** ancestor search for exactly that case: only when the flag is
+passed does the tool look above the current directory at all.
+
+```bash
+cd services/api  # no .safeguard.toml here; the repo root has one
+soroban-upgrade-safeguard old.wasm new.wasm --search-parent-config
+```
+
+The search walks upward from the current directory and stops at the first
+of two boundaries:
+
+- **The workspace root** — the first ancestor directory containing a `.git`
+  entry (a directory for a normal checkout, or a file for a worktree or
+  submodule). This directory is itself still searched before the walk
+  stops.
+- **The filesystem root**, if no `.git` is ever found.
+
+A `.safeguard.toml` above that boundary is never picked up, no matter how
+far up the search would otherwise be allowed to go — the point is to find
+"the repository's config," not every config anywhere above the current
+directory.
+
+**More than one candidate along the way is a hard error, not a guess.**
+If two ancestor directories each have their own `.safeguard.toml`, the tool
+cannot know which one you meant, and silently picking the nearest would make
+the effective config depend on exactly which subdirectory you happened to
+run from — the kind of ambiguity this option exists to resolve, not
+reproduce one level up. The error lists every candidate found; pass
+`--config` explicitly to choose one.
+
+`--search-parent-config` is the lowest-priority source: `--config`, then
+`SOROBAN_SAFEGUARD_CONFIG`, then the current directory, all still win over
+it, and it conflicts with `--no-config` at the flag-parsing level (searching
+for a config while also saying not to load one is contradictory). Whichever
+file it finds is echoed in the same `Suppression config: <path> (source:
+--search-parent-config)` diagnostic described above, and in `--manifest`
+mode's `--explain-manifest` output the same way the current-directory
+default is.
+
+Each `[[suppress]]` entry acknowledges exactly one finding. The stable key is
+`rule_id`, and the legacy `category` field is still accepted as a compatibility
+alias for older configs:
 
 ```toml
-max_suppressions = 10
-allow_targetless = false
+[[suppress]]
+rule_id = "struct_field_removed"
+target  = "ConfigData.threshold"
+reason  = "Planned storage migration in v2 drops the unused threshold field."
 
 [[suppress]]
-category    = "Struct Field Removed"
-target      = "ConfigData.threshold"
-author      = "Alice <alice@example.com>"
-reason      = "Planned storage migration in v2 drops the unused threshold field."
-expiry      = "2026-12-31"
-fingerprint = "8a3f..." # SHA-256 hex fingerprint
+rule_id = "function_signature_changed"
+target  = "initialize"
+reason  = "Re-init is intentional and gated behind the migration admin call."
 ```
 
 A ready-to-copy template lives at [`.safeguard.example.toml`](../.safeguard.example.toml).
 
 ### How matching works
 
-Matching is **exact**: a rule applies only when its `category`, `target`, and `fingerprint` equal the finding's values:
+Matching is **exact**: a rule applies only when both its stable `rule_id` and
+its `target` equal the finding's own values. This strictness keeps a suppression
+from over-applying to a sibling field, enum case, or parameter. A rule that
+omits `target` matches only findings that themselves have no target (for
+example `Environment` changes). Legacy configs that still use `category` are
+mapped to the same rule id automatically, so existing suppressions keep working.
 
 - **Category & Target**: matched verbatim.
 - **Fingerprint**: calculated as the SHA-256 hex hash of:
@@ -512,12 +1427,47 @@ Matching is **exact**: a rule applies only when its `category`, `target`, and `f
 - **Expiry**: evaluated against the current system date (`YYYY-MM-DD`). Expired rules trigger a hard failure during config loading.
 - **Targetless Wildcards**: omitting `target` matches only targetless findings (e.g., `Environment`). This requires explicit opt-in (`allow_targetless = true`) and is capped at a ceiling of 3 rules.
 
+### Requiring a reason for risky suppressions
+
+`reason` is optional by default. For findings risky enough that an
+unexplained suppression isn't reviewable, an optional `[require_reason]`
+table names the rule IDs and/or compatibility axes that must carry a
+non-blank `reason`:
+
+```toml
+[require_reason]
+rule_ids = ["struct_field_removed"]
+axes     = ["storage_layout"]
+
+[[suppress]]
+rule_id = "struct_field_removed"
+target  = "ConfigData.threshold"
+reason  = "Planned storage migration in v2 drops the unused threshold field."
+```
+
+A config that omits `[require_reason]` (or leaves both lists empty) behaves
+exactly as before. When present, a rule matching by rule ID or by classified
+axis whose `reason` is missing or whitespace-only is rejected as a hard load
+error, naming the offending rule's position in the config — enforced on every
+normal run, not only under `--validate-config`. Axis matching is evaluated
+statically (without a specific contract pair's diff context): exact for most
+categories, but struct/enum/union field- and case-level categories are only
+guaranteed to match the `storage_layout` axis this way; use `rule_ids` for
+precise per-category coverage.
+
 ### Legacy Format & Migration
 
 For backwards compatibility, old-format rules (lacking `author`, `expiry`, or `fingerprint`) will trigger a warning on `stderr` during execution for one release before becoming a hard error. To migrate an old rule:
+
 1. Run `soroban-upgrade-safeguard` with `--format json`.
 2. Copy the finding's `category` and `target`.
 3. Add `author`, `reason`, `expiry` (`YYYY-MM-DD`), and compute or copy the `fingerprint`.
+
+`category` is always **structural** — it describes what changed in the shape of
+the contract and nothing else. In particular it never encodes whether a type is
+an event, so editing `[classification]` can never change which findings a rule
+matches. Configs written against the older event-flavored category names still
+work; see [Category compatibility](#category-compatibility) for the mapping.
 
 ### What suppression does and does not change
 
@@ -537,12 +1487,12 @@ be crashed on demand is a gate that can be bypassed.
 A single resource policy is threaded through every decode and every recursive type
 walk. Four limits, each independently configurable:
 
-| Limit | Default | Bounds |
-| :--- | :--- | :--- |
-| `max_xdr_depth` | 64 | XDR recursion depth per entry. Guards against stack overflow at decode time. |
-| `max_xdr_len` | 33554432 (32 MiB) | Bytes decoded per custom section — shared across every entry in the section, so it also caps the total decoded bytes. Guards against oversized-length allocations. |
-| `max_entries` | 100000 | Decoded spec entries, **summed across all `contractspecv0` sections** (a module may carry more than one). Env-metadata entries are budgeted separately. |
-| `max_walk_depth` | 128 | Recursion depth for the type walkers — structural equality, finding-message rendering, and cascade detection — which operate on already-decoded types. |
+| Limit            | Default           | Bounds                                                                                                                                                             |
+| :--------------- | :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `max_xdr_depth`  | 64                | XDR recursion depth per entry. Guards against stack overflow at decode time.                                                                                       |
+| `max_xdr_len`    | 33554432 (32 MiB) | Bytes decoded per custom section — shared across every entry in the section, so it also caps the total decoded bytes. Guards against oversized-length allocations. |
+| `max_entries`    | 100000            | Decoded spec entries, **summed across all `contractspecv0` sections** (a module may carry more than one). Env-metadata entries are budgeted separately.            |
+| `max_walk_depth` | 128               | Recursion depth for the type walkers — structural equality, finding-message rendering, and cascade detection — which operate on already-decoded types.             |
 
 The distinction between `max_xdr_len` (a **per-section byte cap**) and `max_entries`
 (a **cross-section count cap**) matters: many individually valid sections cannot be
@@ -572,6 +1522,24 @@ soroban-upgrade-safeguard old.wasm new.wasm --max-xdr-depth 128 --max-walk-depth
 The defaults accept every fixture and a representative corpus of real mainnet specs.
 Raise a limit only if a legitimate, unusually large contract is rejected.
 
+### Named policy profiles
+
+A single `.safeguard.toml` can also declare named policy variants -- gating,
+`strict`, `max_suppressions`, `[limits]`, and output formatting -- that share
+one file's suppressions and classification data:
+
+```toml
+[profiles.pr]
+strict = true
+```
+
+```bash
+soroban-upgrade-safeguard old.wasm new.wasm --profile pr
+```
+
+See [Named Policy Profiles](named_policy_profiles.md) for the schema,
+inheritance, precedence, and provenance.
+
 ### Behavior when a limit is exceeded
 
 An input that exceeds a limit is rejected with a controlled, typed error and the CLI
@@ -589,7 +1557,7 @@ limit, else `1` if any pair had breaking changes, else `0`.
 The tool is designed to drop into a continuous integration pipeline.
 
 - Exit code `0`: no critical findings. The upgrade is considered safe to deploy.
-- Exit code `1`: at least one critical finding, or a fatal error such as a missing or malformed WASM file.
+- Exit code `1`: at least one critical finding, a failed `--expect-bump` gate, or a fatal error such as a missing or malformed WASM file.
 - Exit code `2`: a resource limit was exceeded on untrusted input (see [Resource Limits](#resource-limits-and-hardening-against-malicious-input)). Raise the relevant limit to proceed.
 
 Because the process exits non-zero on critical findings, you can gate a deployment job on it directly:
@@ -619,9 +1587,9 @@ This release changes the wording of the verdict and adds a new optional input. N
 
 The status line is now explicit about the scope it covers.
 
-| Before | After |
-| :--- | :--- |
-| `✅ PASSED (No breaking changes detected)` | `✅ PASSED (No exported-interface breaking changes)` |
+| Before                                           | After                                                      |
+| :----------------------------------------------- | :--------------------------------------------------------- |
+| `✅ PASSED (No breaking changes detected)`       | `✅ PASSED (No exported-interface breaking changes)`       |
 | `❌ FAILED (Critical breaking changes detected)` | `❌ FAILED (Exported-interface breaking changes detected)` |
 
 When a storage schema is supplied, the passing wording widens to `✅ PASSED (No exported-interface or declared-storage breaks)`.
@@ -653,6 +1621,28 @@ If your pipeline treats `is_safe: true` as "storage compatible", check `scope.st
 
 `--old-storage-schema` and `--new-storage-schema` are optional. Omitting them reproduces the previous behavior exactly, now with honest scope reporting. Adopting them is incremental: declare your storage-key types and the internal types you serialize into storage, starting with the ones holding value-bearing data. Partial coverage is genuinely useful, and the report always states how far it reached. See [Storage Schema Analysis](#storage-schema-analysis) for the format.
 
+## Real-World Contract Upgrade Validation Corpus
+
+To ensure the analyzer's safety claims hold against real-world smart contracts rather than just hand-crafted toy fixtures, a validation corpus of real-world contract upgrade pairs is included in `tests/real_world_corpus/`.
+
+This corpus includes upgrade pairs drawn from real mainnet Soroban protocols:
+
+- **Blend Protocol**: Lending pool contract evolution (v1 -> v2).
+- **Soroswap DEX**: AMM Router contract interface cleanup.
+- **Reflector Price Oracle**: Price data struct representation upgrade.
+- **Stellar Asset Contract**: Token router method extension (mint & burn).
+- **Governance Protocol**: Voting escrow parameter update.
+
+### Opt-In Corpus Testing
+
+Corpus validation runs as an opt-in integration test suite:
+
+```bash
+cargo test --test real_world_corpus -- --ignored
+```
+
+Each pair is checked against expected verdicts specified in `manifest.json`, asserting exact safety verdicts, recommended SemVer bumps, critical finding counts, and finding categories. See [`tests/real_world_corpus/README.md`](../tests/real_world_corpus/README.md) for full provenance and maintenance details.
+
 ## Frequently Asked Questions
 
 **Does the tool need access to the Stellar network?**
@@ -665,7 +1655,7 @@ It works on any WASM that embeds a standard `contractspecv0` custom section. If 
 Appending a field does not move existing fields, so old data still deserializes for the fields that were already there. The new field, however, has no stored value in old entries, so you need a migration or a default. The tool flags this so you remember to handle it. Note that appending to a declared storage **key** is Critical rather than a warning, because it changes the address of every entry.
 
 **What counts as a safe upgrade?**
-Any run that finishes with zero critical findings, *within the scope that was analyzed*. Warnings and info findings are worth reviewing but do not block deployment. Read [What a Passing Verdict Guarantees](#what-a-passing-verdict-guarantees) before treating a pass as storage compatibility.
+Any run that finishes with zero critical findings, _within the scope that was analyzed_. Warnings and info findings are worth reviewing but do not block deployment. Read [What a Passing Verdict Guarantees](#what-a-passing-verdict-guarantees) before treating a pass as storage compatibility.
 
 **Does a green run mean my upgrade is storage safe?**
 Not on its own. By default the tool analyzes only the exported interface, and it says so in the report. Storage layout is analyzed only when you supply a [storage schema](#storage-schema-analysis), and then only for the types you declared.

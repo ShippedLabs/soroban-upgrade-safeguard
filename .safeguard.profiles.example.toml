@@ -1,0 +1,47 @@
+# Example named-policy-profiles config for Soroban Upgrade Safeguard.
+#
+# Demonstrates `[profiles.<name>]`: named policy variants that share one
+# file's suppressions and classification data. See `docs/named_policy_profiles.md`
+# for the schema, precedence rules, and provenance format.
+#
+# Copy this alongside (or merge into) your `.safeguard.toml`, then select a
+# profile with `--profile <name>` or leave `default_profile` below to pick
+# one up automatically.
+
+# Applied when no profile is selected, and is the foundation every profile
+# below builds on.
+strict = false
+default_profile = "dev"
+
+[[suppress]]
+category = "Struct Field Removed"
+target   = "ConfigData.threshold"
+reason   = "Planned storage migration in v2 drops the unused threshold field."
+
+# Local development: relaxed, human-readable output.
+[profiles.dev]
+format = "text"
+
+# Pull request checks: build on `dev`, but fail the run on any Warning or
+# Critical finding, and gate on event-indexer changes too.
+[profiles.pr]
+inherits = "dev"
+strict   = true
+
+[profiles.pr.gating]
+gate_event_indexer = true
+
+# Release candidate: build on `pr`, emit machine-readable JSON, and tighten
+# the XDR decode depth limit.
+[profiles.release]
+inherits = "pr"
+format   = "json"
+
+[profiles.release.limits]
+max_xdr_depth = 32
+
+# Emergency validation: build on `release` but relax the suppression budget
+# so a hotfix isn't blocked by an unrelated, already-reviewed suppression cap.
+[profiles.emergency]
+inherits         = "release"
+max_suppressions = 50

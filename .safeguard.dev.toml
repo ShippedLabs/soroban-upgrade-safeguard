@@ -1,0 +1,87 @@
+# Local development profile for Soroban Upgrade Safeguard contributors.
+#
+# This file is OPT-IN: it is named `.safeguard.dev.toml` (not `.safeguard.toml`)
+# on purpose, so a clean checkout never auto-loads it and CI behavior is never
+# affected by contributor-local choices. Use it by passing
+# `--config .safeguard.dev.toml` explicitly, or by copying it to `.safeguard.toml`
+# on your machine only (`.safeguard.toml` is already gitignore'd).
+#
+# Goals of this profile:
+#   * Deterministic output suitable for `diff` against golden fixtures.
+#   * Repository-relative paths to the checked-in fixtures — no machine-specific
+#     locations, no credentials or secrets.
+#   * Relaxed severity for local iteration: `--strict` is never set here; enable
+#     it manually on the command line or select the `pr` profile below.
+#
+# Examples (run from the repository root):
+#
+#   # Compare the two in-repo v1/v2 test fixtures (the smoke-test pair).
+#   cargo run -- --config .safeguard.dev.toml \
+#       tests/fixtures/v1.wasm tests/fixtures/v2.wasm
+#
+#   # Render the same pair as JSON (e.g. to diff against a stored golden).
+#   cargo run -- --config .safeguard.dev.toml \
+#       --profile pr --format json \
+#       tests/fixtures/v1.wasm tests/fixtures/v2.wasm
+#
+#   # Run the batch manifest declared below (iterates the three fixture pairs).
+#   cargo run -- --config .safeguard.dev.toml --manifest .safeguard.dev.toml
+
+strict        = false
+explain       = true
+format        = "text"
+no_color      = false
+default_profile = "dev"
+
+# ─── Batch manifest (contract pairs) ────────────────────────────────────────
+#
+# The config loader also accepts manifest fields at the root of the config
+# file, so `--manifest .safeguard.dev.toml` iterates the three checked-in
+# fixture pairs. Each path is resolved against the directory that contains
+# this file (the repo root).
+
+[[pairs]]
+old  = "tests/wasm/v1.wasm"
+new  = "tests/wasm/v2.wasm"
+name = "fixture_v1_to_v2"
+
+[[pairs]]
+old  = "tests/wasm/v2.wasm"
+new  = "tests/wasm/v3.wasm"
+name = "fixture_v2_to_v3"
+
+[[pairs]]
+old  = "tests/wasm/v1.wasm"
+new  = "tests/wasm/v3.wasm"
+name = "fixture_v1_to_v3"
+
+# ─── Named policy profiles ──────────────────────────────────────────────────
+#
+# `dev` (default, above) — human-readable, non-failing local iteration.
+# `pr`                — build on `dev`, but `strict = true` plus event-indexer
+#                       gating, matching the bar a PR gate would enforce.
+# `golden`            — build on `pr`, JSON output, no color, no timestamp-like
+#                       behavior in the profile layer (byte-stable output for
+#                       diffing against stored fixtures).
+
+[profiles.dev]
+format  = "text"
+explain = true
+
+[profiles.pr]
+inherits = "dev"
+strict   = true
+
+[profiles.pr.gating]
+gate_event_indexer = true
+
+[profiles.golden]
+inherits = "pr"
+format   = "json"
+no_color = true
+
+[profiles.golden.limits]
+max_xdr_depth = 64
+max_xdr_len   = 16777216
+max_entries   = 10240
+max_walk_depth = 512

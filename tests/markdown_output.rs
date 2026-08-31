@@ -39,13 +39,16 @@ fn markdown_breaking_upgrade_reports_critical_and_exits_one() {
         "Missing title"
     );
     assert!(
-        stdout.contains("## Status: ❌ FAILED (Exported-interface breaking changes detected)"),
+        stdout.contains("## Status: ❌ FAILED (Critical breaking changes detected)"),
         "Missing status"
     );
     assert!(
         stdout.contains("### Summary Table"),
         "Missing summary table heading"
     );
+    assert!(stdout.contains("### Directional Call ABI"));
+    assert!(stdout.contains("Old client → new contract"));
+    assert!(stdout.contains("New client → old contract"));
     assert!(
         stdout.contains("| Finding Severity | Count |"),
         "Missing table columns"
@@ -93,7 +96,7 @@ fn markdown_identical_upgrade_is_safe_and_exits_zero() {
         "Missing title"
     );
     assert!(
-        stdout.contains("## Status: ✅ PASSED (No exported-interface breaking changes)"),
+        stdout.contains("## Status: ✅ PASSED (No breaking changes detected)"),
         "Missing status"
     );
     assert!(
@@ -113,5 +116,47 @@ fn markdown_identical_upgrade_is_safe_and_exits_zero() {
     assert!(
         stderr.contains("🔍 Soroban Upgrade Safeguard"),
         "Decorative progress should be in stderr"
+    );
+}
+
+#[test]
+fn markdown_format_stdout_regression_test() {
+    let (code, stdout, stderr) = run_markdown("v1.wasm", "v2.wasm");
+
+    // Emits Markdown to stdout when no output path is provided
+    assert_eq!(code, 1, "breaking upgrade must exit 1");
+    assert!(
+        stdout.contains("# Soroban Upgrade Safety Report"),
+        "stdout must contain report heading"
+    );
+
+    // Report heading and verdict are present in the document
+    assert!(
+        stdout.contains("## Status: ❌ FAILED (Critical breaking changes detected)"),
+        "stdout must contain report verdict"
+    );
+    assert!(
+        stdout.contains("### Compatibility Verdicts"),
+        "stdout must contain compatibility verdicts"
+    );
+
+    // Progress or diagnostic lines are kept off stdout for clean Markdown output
+    assert!(
+        !stdout.contains("🔍 Soroban Upgrade Safeguard"),
+        "stdout must not contain progress banners"
+    );
+    assert!(
+        !stdout.contains("Comparing"),
+        "stdout must not contain progress status lines"
+    );
+    assert!(
+        !stdout.contains("Loaded"),
+        "stdout must not contain loader diagnostic lines"
+    );
+
+    // Progress or diagnostic lines are routed to stderr
+    assert!(
+        stderr.contains("🔍 Soroban Upgrade Safeguard"),
+        "progress diagnostics must go to stderr"
     );
 }

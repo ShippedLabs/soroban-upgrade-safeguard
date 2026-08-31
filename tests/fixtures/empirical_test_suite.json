@@ -1,0 +1,537 @@
+[
+  {
+    "name": "u32_valid",
+    "description": "Valid u32 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVzM192YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAAq"
+  },
+  {
+    "name": "u32_invalid",
+    "description": "Invalid u32 storage entry containing a boolean",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVzM19pbnZhbGlkAAAAAAMAAAAAAAAAAAAAAAEAAAACAAAAAQ=="
+  },
+  {
+    "name": "i32_valid",
+    "description": "Valid i32 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGlzM192YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAAKAAAAKg=="
+  },
+  {
+    "name": "u64_valid",
+    "description": "Valid u64 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVzNl92YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAAFAAAAAAAAAAo="
+  },
+  {
+    "name": "i64_valid",
+    "description": "Valid i64 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGlzNl92YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAAGAAAAAAAAAAo="
+  },
+  {
+    "name": "bool_valid_true",
+    "description": "Valid boolean true storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVzM192YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAACAAAAAQ=="
+  },
+  {
+    "name": "bool_valid_false",
+    "description": "Valid boolean false storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVzM192YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAACAAAAAA=="
+  },
+  {
+    "name": "void_valid",
+    "description": "Valid void storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZvaWRfdmFsaWQAAAADAAAAAAAAAAAAAAABAAAAAAAAAAA="
+  },
+  {
+    "name": "symbol_valid",
+    "description": "Valid symbol storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN5bWJvbF92YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAANAAAACXRlc3Rfc3lt"
+  },
+  {
+    "name": "string_valid",
+    "description": "Valid string storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN0cmluZ192YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAAMAAAACXRlc3Rfc3Ry"
+  },
+  {
+    "name": "bytes_valid",
+    "description": "Valid byte vector storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGJ5dGVzX3ZhbGlkAAAAAAMAAAAAAAAAAAAAAAEAAAALAAAABXRlc3Q="
+  },
+  {
+    "name": "address_valid_contract",
+    "description": "Valid contract address storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGFkZHJlc3NfdmFsaWQAAAADAAAAAAAAAAAAAAABAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  {
+    "name": "option_some_u32",
+    "description": "Valid Option::Some(u32)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lAAAAAAMAAAAAAAAAAAAAAAEAAAAq"
+  },
+  {
+    "name": "option_none",
+    "description": "Valid Option::None (Void)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9ub25lAAAAAAMAAAAAAAAAAAAAAABAAAAAAAAAAA="
+  },
+  {
+    "name": "struct_valid_map",
+    "description": "Valid struct mapping { field_a: 42, field_b: 100 }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN0cnVjdF9tYXAAAAADAAAAAAAAAAAAAAABAAAADAAAAAIAAAANAAAACGZpZWxkX2EAAAAAEAAAACoAAAANAAAACGZpZWxkX2IAAAAAEAAAAAUAAAAAAAAAZA=="
+  },
+  {
+    "name": "struct_invalid_map",
+    "description": "Invalid struct mapping with field_a type mismatch (string instead of u32)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN0cnVjdF9tYXAAAAADAAAAAAAAAAAAAAABAAAADAAAAAIAAAANAAAACGZpZWxkX2EAAAAAEAAAAAwAAAAEdGVzdAAAAA0AAAAIZmllbGRfYgAAAAAQAAAABQAAAAAAAAAZQ=="
+  },
+  {
+    "name": "struct_valid_vec",
+    "description": "Valid tuple struct representing [42, 100]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN0cnVjdF92ZWMAAAAAAAMAAAAAAAAAAAAAAAEAAAALAAAAAgAAAAQAAAAqAAAABQAAAAAAAAAZQ=="
+  },
+  {
+    "name": "enum_valid_symbol",
+    "description": "Valid enum variant represented as Symbol",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVudW1fc3ltYm9sAAAAAAMAAAAAAAAAAAAAAAEAAAANAAAAB1ZhcmlhbnQ="
+  },
+  {
+    "name": "enum_valid_u32",
+    "description": "Valid enum variant represented as u32 value",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVudW1fdTMyAAAAAAMAAAAAAAAAAAAAAAEAAAAq"
+  },
+  {
+    "name": "union_valid_void",
+    "description": "Valid void union variant represented as Symbol",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVuaW9uX3ZvaWRfAAAADAAAAAAAAAAAAAAABAAAADQAAAAdWYXJpYW50"
+  },
+  {
+    "name": "union_valid_tuple",
+    "description": "Valid tuple union variant represented as Vec [Variant, 42, 100]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVuaW9uX3R1cGxlAAAAAAMAAAAAAAAAAAAAAAEAAAALAAAAAwAAAA0AAAAHVmFyaWFudAAAAAQAAAAqAAAABQAAAAAAAAAZQ=="
+  },
+  {
+    "name": "vec_u32_valid",
+    "description": "Valid vector of u32 [1, 2, 3]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY191MzIAAAADAAAAAAAAAAAAAAABAAAACwAAAAMAAAAEAAAAAQAAAAQAAAACAAAABAAAAAM="
+  },
+  {
+    "name": "map_symbol_u32_valid",
+    "description": "Valid map of Symbol -> u32 { key1: 10, key2: 20 }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG1hcF9zeW1fdTMyAAAAAAMAAAAAAAAAAAAAAAEAAAADAAAAAgAAAA0AAAAEa2V5MQAAAAAEAAAACgAAAA0AAAAEa2V5MgAAAAAEAAAAFA=="
+  },
+  {
+    "name": "u128_valid",
+    "description": "Valid u128 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVzMTI4X3ZhbGlkAAAADAAAAAAAAAAAAAAABAAAAAUAAAAAAAAADw=="
+  },
+  {
+    "name": "i128_valid",
+    "description": "Valid i128 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGlzMTI4X3ZhbGlkAAAADAAAAAAAAAAAAAAABAAAAGYAAAAAAAAADw=="
+  },
+  {
+    "name": "tuple_valid",
+    "description": "Valid tuple mapping (u32, bool)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHR1cGxlX3ZhbGlkAAAADAAAAAAAAAAAAAAABAAAACwAAAAIAAAAEAAAAKgAAAAIAAAAB"
+  },
+  {
+    "name": "bytesn_valid",
+    "description": "Valid BytesN(4)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGJ5dGVzbl92YWxpZAAAAAMAAAAAAAAAAAAAAAEAAAALAAAABHRlc3Q="
+  },
+  {
+    "name": "result_ok_valid",
+    "description": "Valid Result::Ok(u32)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9vawAAAAMAAAAAAAAAAAAAAAEAAAAq"
+  },
+  {
+    "name": "result_err_valid",
+    "description": "Valid Result::Err(Error)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9lcnIAAAADAAAAAAAAAAAAAAABAAAAAgAAAAE="
+  },
+  {
+    "name": "nested_vec_valid",
+    "description": "Valid nested vector [[1], [2]]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG5lc3RlZF92ZWMAAAADAAAAAAAAAAAAAAABAAAACwAAAAMAAAALAAAAAQAAAAQAAAABAAAACwAAAAEAAAAEAAAAAg=="
+  },
+  {
+    "name": "nested_map_valid",
+    "description": "Valid nested map { key: { inner_key: 42 } }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG5lc3RlZF9tYXAAAAADAAAAAAAAAAAAAAABAAAADAAAAAEAAAANAAAAC25lc3RlZF9tYXAAAAAADAAAAAEAAAANAAAACWlubmVyX2tleQAAAAAEAAAAKg=="
+  },
+  {
+    "name": "empty_vec_valid",
+    "description": "Valid empty vector",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVtcHR5X3ZlYwAAAAMAAAAAAAAAAAAAAABAAAACwAAAAAAAAAA"
+  },
+  {
+    "name": "empty_map_valid",
+    "description": "Valid empty map",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVtcHR5X21hcAAAAAMAAAAAAAAAAAAAAABAAAADAAAAAAAAAAA="
+  },
+  {
+    "name": "symbol_empty",
+    "description": "Valid empty symbol",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN5bWJvbF9lbXB0eQAAAAMAAAAAAAAAAAAAAAEAAAANAAAAAAAAAAA="
+  },
+  {
+    "name": "string_empty",
+    "description": "Valid empty string",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN0cmluZ19lbXB0eQAAAAMAAAAAAAAAAAAAAAEAAAAMAAAAAAAAAAA="
+  },
+  {
+    "name": "bytes_empty",
+    "description": "Valid empty bytes",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGJ5dGVzX2VtcHR5AAAAAAMAAAAAAAAAAAAAAAEAAAALAAAAAAAAAAA="
+  },
+  {
+    "name": "address_contract_zero",
+    "description": "Valid contract address zero",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGFkZHJlc3NfemVybwAAAAMAAAAAAAAAAAAAAABAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  {
+    "name": "address_account_zero",
+    "description": "Valid account address zero",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGFkZHJlc3NfYWNjb3VudAAAAAMAAAAAAAAAAAAAAABAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  {
+    "name": "option_some_bool",
+    "description": "Valid Option::Some(bool)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX2Jvb2wAAAADAAAAAAAAAAAAAAABAAAAAgAAAAE="
+  },
+  {
+    "name": "option_some_string",
+    "description": "Valid Option::Some(string)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3N0cmluZwAAAAMAAAAAAAAAAAAAAAEAAAAMAAAABXRlc3Q="
+  },
+  {
+    "name": "option_some_symbol",
+    "description": "Valid Option::Some(symbol)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3N5bWJvbAAAAAMAAAAAAAAAAAAAAAEAAAANAAAABXRlc3Q="
+  },
+  {
+    "name": "option_some_bytes",
+    "description": "Valid Option::Some(bytes)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX2J5dGVzAAAAAAMAAAAAAAAAAAAAAAEAAAALAAAABXRlc3Q="
+  },
+  {
+    "name": "option_some_address",
+    "description": "Valid Option::Some(address)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX2FkZHJlc3MAAAADAAAAAAAAAAAAAAABAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  {
+    "name": "struct_valid_empty",
+    "description": "Valid struct mapping with no fields (empty struct)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN0cnVjdF9lbXB0eQAAAAMAAAAAAAAAAAAAAABAAAADAAAAAAAAAAA="
+  },
+  {
+    "name": "enum_variant_two",
+    "description": "Valid enum variant represented as Symbol variant 2",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVudW1fc3ltYm9sXzIAAAADAAAAAAAAAAAAAAABAAAADQAAAAlWYXJpYW50Mg=="
+  },
+  {
+    "name": "enum_value_two",
+    "description": "Valid enum variant represented as u32 value 2",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVudW1fdTMyXzIAAAADAAAAAAAAAAAAAAABAAAABAAAAAI="
+  },
+  {
+    "name": "union_variant_two",
+    "description": "Valid void union variant represented as Symbol variant 2",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVuaW9uX3ZvaWRfMgAAAADAAAAAAAAAAAAAAABAAAADQAAAAlWYXJpYW50Mg=="
+  },
+  {
+    "name": "union_tuple_two",
+    "description": "Valid tuple union variant represented as Vec [Variant2, 42]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVuaW9uX3R1cGxlXzIAAAADAAAAAAAAAAAAAAABAAAACwAAAAIAAAANAAAAlWYXJpYW50MgAAAAQAAAAq"
+  },
+  {
+    "name": "vec_i32_valid",
+    "description": "Valid vector of i32 [1, 2, 3]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY19pMzIAAAADAAAAAAAAAAAAAAABAAAACwAAAAMAAAAGAAAAAQAAAAYAAAACAAAABgAAAAM="
+  },
+  {
+    "name": "map_string_string_valid",
+    "description": "Valid map of String -> String { key: val }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG1hcF9zdHJfIHN0cgAAAAMAAAAAAAAAAAAAAAEAAAADAAAAAQAAAAwAAAAHa2V5X3N0cgAAAAwAAAAHa2V5X3ZhbA=="
+  },
+  {
+    "name": "u256_valid",
+    "description": "Valid u256 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVzMjU2X3ZhbGlkAAAADAAAAAAAAAAAAAAABAAAAAkAAAAAAAAADw=="
+  },
+  {
+    "name": "i256_valid",
+    "description": "Valid i256 storage entry",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGlzMjU2X3ZhbGlkAAAADAAAAAAAAAAAAAAABAAAAGoAAAAAAAAADw=="
+  },
+  {
+    "name": "tuple_three_valid",
+    "description": "Valid tuple mapping (u32, bool, Symbol)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHR1cGxlXzNfdmFsaWQAAAADAAAAAAAAAAAAAAABAAAACwAAAAMAAAAEAAAAKgAAAAIAAAABAAAADQAAAAV0ZXN0"
+  },
+  {
+    "name": "bytesn_8_valid",
+    "description": "Valid BytesN(8)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGJ5dGVzbl84X3ZhbGlkAAAADAAAAAAAAAAAAAAABAAAACwAAAAgAAAABAgMEBQYH"
+  },
+  {
+    "name": "result_ok_bool",
+    "description": "Valid Result::Ok(bool)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19ib29sAAAADAAAAAAAAAAAAAAABAAAAAIAAAAE="
+  },
+  {
+    "name": "result_err_code",
+    "description": "Valid Result::Err(Error(2))",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9lcnJfY29kZQAAAAMAAAAAAAAAAAAAAABAAAACAAAAAI="
+  },
+  {
+    "name": "nested_vec_3_valid",
+    "description": "Valid nested vector [[[1]]]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG5lc3RlZF92ZWNfMwAAAAMAAAAAAAAAAAAAAABAAAACwAAAAEAAAALAAAAAQAAAAsAAAABAAAABAAAAAE="
+  },
+  {
+    "name": "nested_map_3_valid",
+    "description": "Valid nested map { k: { k2: { k3: 42 } } }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG5lc3RlZF9tYXBfMwAAAAMAAAAAAAAAAAAAAABAAAADAAAAAEAAAANAAAABGtleTEAAAAADAAAAAEAAAANAAAABGtleTIAAAAADAAAAAEAAAANAAAABGtleTMAAAAAEAAAAKg=="
+  },
+  {
+    "name": "option_some_u64",
+    "description": "Valid Option::Some(u64)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3U2NAAAAAMAAAAAAAAAAAAAAABAAAAFAAAAAAAAAAo="
+  },
+  {
+    "name": "option_some_i64",
+    "description": "Valid Option::Some(i64)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX2k2NAAAAAMAAAAAAAAAAAAAAABAAAAGAAAAAAAAAAo="
+  },
+  {
+    "name": "option_some_u128",
+    "description": "Valid Option::Some(u128)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3UxMjgAAAADAAAAAAAAAAAAAAABAAAABQAAAAAAAAAP"
+  },
+  {
+    "name": "option_some_i128",
+    "description": "Valid Option::Some(i128)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX2kxMjgAAAADAAAAAAAAAAAAAAABAAAAGYAAAAAAAAAP"
+  },
+  {
+    "name": "option_some_u256",
+    "description": "Valid Option::Some(u256)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3UyNTYAAAADAAAAAAAAAAAAAAABAAAAAkAAAAAAAAAP"
+  },
+  {
+    "name": "option_some_i256",
+    "description": "Valid Option::Some(i256)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX2kyNTYAAAADAAAAAAAAAAAAAAABAAAAGoAAAAAAAAAP"
+  },
+  {
+    "name": "option_some_tuple",
+    "description": "Valid Option::Some(tuple)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3R1cGxlAAAADAAAAAAAAAAAAAAABAAAACwAAAAIAAAAEAAAAKgAAAAIAAAAB"
+  },
+  {
+    "name": "option_some_vec",
+    "description": "Valid Option::Some(vec)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3ZlYwAAAAMAAAAAAAAAAAAAAABAAAACwAAAAMAAAAEAAAAAQAAAAQAAAACAAAABAAAAAM="
+  },
+  {
+    "name": "option_some_map",
+    "description": "Valid Option::Some(map)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX21hcAAAAAMAAAAAAAAAAAAAAABAAAADAAAAAgAAAA0AAAAEa2V5MQAAAAAEAAAACgAAAA0AAAAEa2V5MgAAAAAEAAAAFA=="
+  },
+  {
+    "name": "result_ok_string",
+    "description": "Valid Result::Ok(string)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19zdHJpbmcAAAADAAAAAAAAAAAAAAABAAAADAAAAAV0ZXN0"
+  },
+  {
+    "name": "result_ok_symbol",
+    "description": "Valid Result::Ok(symbol)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19zeW1ib2wAAAADAAAAAAAAAAAAAAABAAAADQAAAAV0ZXN0"
+  },
+  {
+    "name": "result_ok_bytes",
+    "description": "Valid Result::Ok(bytes)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19ieXRlcwAAAAMAAAAAAAAAAAAAAABAAAALAAAABXRlc3Q="
+  },
+  {
+    "name": "result_ok_address",
+    "description": "Valid Result::Ok(address)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19hZGRyZXNzAAAADAAAAAAAAAAAAAAABAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  {
+    "name": "result_ok_tuple",
+    "description": "Valid Result::Ok(tuple)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va190dXBsZQAAAAMAAAAAAAAAAAAAAABAAAACwAAAAIAAAAEAAAAKgAAAAIAAAAB"
+  },
+  {
+    "name": "result_ok_vec",
+    "description": "Valid Result::Ok(vec)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va192ZWMAAAADAAAAAAAAAAAAAAABAAAACwAAAAMAAAAEAAAAAQAAAAQAAAACAAAABAAAAAM="
+  },
+  {
+    "name": "result_ok_map",
+    "description": "Valid Result::Ok(map)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19tYXAAAAADAAAAAAAAAAAAAAABAAAADAAAAAgAAAA0AAAAEa2V5MQAAAAAEAAAACgAAAA0AAAAEa2V5MgAAAAAEAAAAFA=="
+  },
+  {
+    "name": "result_err_code_three",
+    "description": "Valid Result::Err(Error(3))",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9lcnJfMwAAAAMAAAAAAAAAAAAAAABAAAACAAAAAM="
+  },
+  {
+    "name": "struct_valid_nested",
+    "description": "Valid struct mapping containing nested struct",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHN0cnVjdF9uZXN0ZWQAAAADAAAAAAAAAAAAAAABAAAADAAAAAEAAAANAAAAB25lc3RlZAAAAAAMAAAAAgAAAA0AAAAIZmllbGRfYQAAAAAQAAAAKgAAAA0AAAAIZmllbGRfYgAAAAAQAAAABQAAAAAAAAAZQA=="
+  },
+  {
+    "name": "enum_variant_three",
+    "description": "Valid enum variant represented as Symbol variant 3",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVudW1fc3ltYm9sXzMAAAADAAAAAAAAAAAAAAABAAAADQAAAAlWYXJpYW50Mw=="
+  },
+  {
+    "name": "enum_value_three",
+    "description": "Valid enum variant represented as u32 value 3",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGVudW1fdTMyXzMAAAADAAAAAAAAAAAAAAABAAAABAAAAAM="
+  },
+  {
+    "name": "union_variant_three",
+    "description": "Valid void union variant represented as Symbol variant 3",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVuaW9uX3ZvaWRfMwAAAADAAAAAAAAAAAAAAABAAAADQAAAAlWYXJpYW50Mw=="
+  },
+  {
+    "name": "union_tuple_three",
+    "description": "Valid tuple union variant represented as Vec [Variant3, 42, 100]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHVuaW9uX3R1cGxlXzMAAAADAAAAAAAAAAAAAAABAAAACwAAAAMAAAANAAAAlWYXJpYW50MwAAAAQAAAAqAAAABQAAAAAAAAAZQA=="
+  },
+  {
+    "name": "vec_u64_valid",
+    "description": "Valid vector of u64 [1, 2, 3]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY191NjQAAAADAAAAAAAAAAAAAAABAAAACwAAAAMAAAAFAAAAAAAAAAEAAAAFAAAAAAAAAAIAAAAFAAAAAAAAAAM="
+  },
+  {
+    "name": "map_address_u32_valid",
+    "description": "Valid map of Address -> u32",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG1hcF9hZGRyX3UzMgAAAAMAAAAAAAAAAAAAAABAAAADAAAAAEAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAABAAAAAo="
+  },
+  {
+    "name": "bytesn_16_valid",
+    "description": "Valid BytesN(16)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGJ5dGVzbl8xNl92YWxpZAAAAAMAAAAAAAAAAAAAAABAAAACwAAAABAAAAAQAgMEBQYHCAkKCwwNDg8="
+  },
+  {
+    "name": "bytesn_32_valid",
+    "description": "Valid BytesN(32)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGJ5dGVzbl8zMl92YWxpZAAAAAMAAAAAAAAAAAAAAABAAAACwAAAACAAAAAQAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f"
+  },
+  {
+    "name": "timepoint_valid",
+    "description": "Valid timepoint",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHRpbWVwb2ludF92YWxpZAAAAAMAAAAAAAAAAAAAAABAAAAIAAAAAAAAAAo="
+  },
+  {
+    "name": "duration_valid",
+    "description": "Valid duration",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAGR1cmF0aW9uX3ZhbGlkAAAADAAAAAAAAAAAAAAABAAAAAkAAAAAAAAACg=="
+  },
+  {
+    "name": "vec_bool_valid",
+    "description": "Valid vector of bool [true, false]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY19ib29sAAAADAAAAAAAAAAAAAAABAAAACwAAAAIAAAACAAAAAQAAAAIAAAAA"
+  },
+  {
+    "name": "vec_string_valid",
+    "description": "Valid vector of string [a, b]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY19zdHJpbmcAAAADAAAAAAAAAAAAAAABAAAACwAAAAIAAAAMAAAAAQBhAAAADAAAAAEAYg=="
+  },
+  {
+    "name": "vec_symbol_valid",
+    "description": "Valid vector of symbol [a, b]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY19zeW1ib2wAAAADAAAAAAAAAAAAAAABAAAACwAAAAIAAAANAAAAAQBhAAAADQAAAAEAYg=="
+  },
+  {
+    "name": "vec_bytes_valid",
+    "description": "Valid vector of bytes [ [1], [2] ]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY19ieXRlcwAAAAMAAAAAAAAAAAAAAABAAAACwAAAAIAAAALAAAAAQABAAAALAAAAAEAAg=="
+  },
+  {
+    "name": "vec_address_valid",
+    "description": "Valid vector of address [contract, contract]",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHZlY19hZGRyZXNzAAAADAAAAAAAAAAAAAAABAAAACwAAAAIAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAADwAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  {
+    "name": "map_u32_u32_valid",
+    "description": "Valid map of u32 -> u32 { 1: 10, 2: 20 }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG1hcF91MzJfdTMyAAAAAAMAAAAAAAAAAAAAAABAAAADAAAAAgAAAAEAAAAAQAAAAQAAAAKAAAABAAAAAIAAAAEAAAAFA=="
+  },
+  {
+    "name": "map_u64_u64_valid",
+    "description": "Valid map of u64 -> u64 { 1: 10, 2: 20 }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG1hcF91NjRfdTY0AAAAAAMAAAAAAAAAAAAAAABAAAADAAAAAgAAAAFAAAAAAAAAAEAAAAFAAAAAAAAAAoAAAAFAAAAAAAAAAIAAAAFAAAAAAAAABQ="
+  },
+  {
+    "name": "map_i32_i32_valid",
+    "description": "Valid map of i32 -> i32 { 1: 10, 2: 20 }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG1hcF9pMzJfaTMyAAAAAAMAAAAAAAAAAAAAAABAAAADAAAAAgAAAAGAAAAAQAAAAYAAAAKAAAABgAAAAIAAAAGAAAAFA=="
+  },
+  {
+    "name": "map_i64_i64_valid",
+    "description": "Valid map of i64 -> i64 { 1: 10, 2: 20 }",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG1hcF9pNjRfaTY0AAAAAAMAAAAAAAAAAAAAAABAAAADAAAAAgAAAAGAAAAAAAAAAEAAAAGAAAAAAAAAAoAAAAGAAAAAAAAAAIAAAAGAAAAAAAAABQ="
+  },
+  {
+    "name": "result_ok_u64",
+    "description": "Valid Result::Ok(u64)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va191NjQAAAADAAAAAAAAAAAAAAABAAAABQAAAAAAAAAo"
+  },
+  {
+    "name": "result_ok_i64",
+    "description": "Valid Result::Ok(i64)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19pNjQAAAADAAAAAAAAAAAAAAABAAAAGAAAAAAAAAAo"
+  },
+  {
+    "name": "result_ok_u128",
+    "description": "Valid Result::Ok(u128)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va191MTI4AAAADAAAAAAAAAAAAAAABAAAAAUAAAAAAAAADw=="
+  },
+  {
+    "name": "result_ok_i128",
+    "description": "Valid Result::Ok(i128)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19pMTI4AAAADAAAAAAAAAAAAAAABAAAAGYAAAAAAAAADw=="
+  },
+  {
+    "name": "result_ok_u256",
+    "description": "Valid Result::Ok(u256)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va191MjU2AAAADAAAAAAAAAAAAAAABAAAAAkAAAAAAAAADw=="
+  },
+  {
+    "name": "result_ok_i256",
+    "description": "Valid Result::Ok(i256)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9va19pMjU2AAAADAAAAAAAAAAAAAAABAAAAGoAAAAAAAAADw=="
+  },
+  {
+    "name": "result_err_code_four",
+    "description": "Valid Result::Err(Error(4))",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9lcnJfNAAAAAMAAAAAAAAAAAAAAABAAAACAAAABA="
+  },
+  {
+    "name": "result_err_code_five",
+    "description": "Valid Result::Err(Error(5))",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAHJlc3VsdF9lcnJfNQAAAAMAAAAAAAAAAAAAAABAAAACAAAABQ="
+  },
+  {
+    "name": "option_some_timepoint",
+    "description": "Valid Option::Some(timepoint)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3RpbWVwb2ludAAAAAMAAAAAAAAAAAAAAABAAAAIAAAAAAAAAAo="
+  },
+  {
+    "name": "option_some_duration",
+    "description": "Valid Option::Some(duration)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX2R1cmF0aW9uAAAADAAAAAAAAAAAAAAABAAAAAkAAAAAAAAACg=="
+  },
+  {
+    "name": "option_some_void",
+    "description": "Valid Option::Some(void)",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX3ZvaWQAAAADAAAAAAAAAAAAAAABAAAAAAAAAAA="
+  },
+  {
+    "name": "option_some_option",
+    "description": "Valid Option::Some(Option::Some(u32))",
+    "xdr": "AAAAEAAAAAAAAAAAAAAAAAAAAG9wdGlvbl9zb21lX29wdGlvbgAAAAMAAAAAAAAAAAAAAABAAAAq"
+  }
+]
