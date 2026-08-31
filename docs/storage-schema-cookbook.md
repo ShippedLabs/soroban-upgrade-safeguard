@@ -26,7 +26,8 @@ to account for, not a definition of your types' fields:
       "operation": "set",
       "durability": "instance",
       "key_type": "DataKey::Admin",
-      "value_type": "Address"
+      "value_type": "Address",
+      "namespace": "v1"
     }
   ]
 }
@@ -40,6 +41,7 @@ to account for, not a definition of your types' fields:
 | `durability` | no       | One of `instance`, `persistent`, `temporary`. Omit to match any durability. |
 | `key_type`   | no       | The key's type, spelled the same way the tool prints types elsewhere (see below). |
 | `value_type` | no       | The value's type, same spelling convention.                              |
+| `namespace`  | no       | The logical namespace or key-domain prefix used by this storage entry. Used for cross-version comparison only (see [Durability and namespace changes](#recipe-6--durability-and-namespace-changes-across-versions)). |
 
 `key_type`/`value_type` are free-form type-spelling strings, not embedded
 field definitions — the schema records *what* is stored under a key, not the
@@ -272,6 +274,124 @@ the gate on regardless of policy, or acknowledge a specific mismatch in
 `.safeguard.toml` the same way you would any other finding — see
 [Suppressing Known Breaking Changes](documentation.md#suppressing-known-breaking-changes).
 
+## Recipe 6 — durability and namespace changes across versions
+
+When you compare two schemas with `--old-storage-schema`/`--new-storage-schema`,
+the tool performs a *cross-schema comparison*: it matches declarations by `name`
+across the old and new schemas and flags any `durability` or `namespace` change.
+These changes are invisible to the per-side reconciliation because they require
+knowing what the same key *used to* be declared as.
+
+### Durability change
+
+Moving a key from `persistent` to `temporary` (or any other tier) causes reads
+and writes to target a different ledger bucket. Existing entries stored under
+the old durability are no longer reached, and the new contract starts reading
+(and writing) an empty entry.
+
+**Old schema** (`old.json`):
+
+```json
+{
+  "declarations": [
+    { "name": "counter", "operation": "set", "durability": "persistent" }
+  ]
+}
+```
+
+**New schema** (`new.json`):
+
+```json
+{
+  "declarations": [
+    { "name": "counter", "operation": "set", "durability": "temporary" }
+  ]
+}
+```
+
+```bash
+soroban-upgrade-safeguard old.wasm new.wasm \
+  --old-storage-schema old.json \
+  --new-storage-schema new.json \
+  --strict
+```
+
+```
+Storage Durability Changed  counter (persistent → temporary)  CRITICAL
+```
+
+The consequence message explains the operational impact:
+
+> Data that was retained indefinitely will now expire; existing entries become
+> unreachable once their TTL elapses.
+
+To acknowledge the change intentionally:
+
+```toml
+# .safeguard.toml
+[[suppress]]
+category = "Storage Durability Changed"
+target   = "counter (persistent → temporary)"
+reason   = "Intentional migration: balances now expire after TTL."
+```
+
+### Namespace change
+
+The `namespace` field records a logical key-domain prefix used by the contract
+when building a ledger key for this entry. If the prefix changes — or is added
+or removed — reads and writes are redirected to a different ledger entry, and
+any data stored under the old namespace is effectively orphaned.
+
+**Old schema** (`old.json`):
+
+```json
+{
+  "declarations": [
+    { "name": "balance", "operation": "set", "durability": "persistent", "namespace": "v1" }
+  ]
+}
+```
+
+**New schema** (`new.json`):
+
+```json
+{
+  "declarations": [
+    { "name": "balance", "operation": "set", "durability": "persistent", "namespace": "v2" }
+  ]
+}
+```
+
+```
+Storage Namespace Changed  balance ('v1' → 'v2')  CRITICAL
+```
+
+To suppress a planned namespace migration:
+
+```toml
+[[suppress]]
+category = "Storage Namespace Changed"
+target   = "balance ('v1' → 'v2')"
+reason   = "Planned namespace bump for the v2 storage layout migration."
+```
+
+### Severity rationale
+
+Both finding categories are **Critical** by default:
+
+| Change | Consequence |
+|--------|-------------|
+| `persistent` → `temporary` | On-chain data expires and becomes unreachable |
+| `persistent` → `instance` | Old persistent entry is no longer read; data orphaned |
+| `temporary` → `persistent` | New persistent entry is separate from any expired temp entry |
+| `temporary` → `instance` | Old temporary entry is no longer read |
+| `instance` → any other | Old instance-scoped entry is no longer read |
+| namespace changed | Ledger key changes; old entry is unreachable under new key |
+
+Any of these break the upgrade invariant that the new contract can read the
+data the old contract wrote. They must be resolved by a data migration, a
+schema rollback, or an explicit suppression that acknowledges the breakage.
+
 ## Quick reference
 
 | You want to show...        | Do this                                                                 |
@@ -281,3 +401,5 @@ the gate on regardless of policy, or acknowledge a specific mismatch in
 | An optional stored field    | `Option<T>` as the `value_type`, distinct from plain `T`.                   |
 | Only part of the surface    | Declare only what you've reviewed; expect `MissingDeclaration` for the rest until you catch up. |
 | A stale/removed declaration | Delete it, or expect `UnobservedDeclaration` to flag it.                    |
+| A logical key prefix        | Set `namespace` on the declaration; changes between versions are flagged as `Storage Namespace Changed`. |
+| Cross-version durability    | Set `durability` on both old and new declarations; changes are flagged as `Storage Durability Changed`. |
