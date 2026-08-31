@@ -212,10 +212,18 @@ fn render_ignores_unknown_additive_json_fields() {
 
     let (rendered, code) = render(&unknown.to_string(), &["--format", "markdown"]);
 
-    assert_eq!(code, 1, "the stored verdict was a failure, so must the exit be");
+    assert_eq!(
+        code, 1,
+        "the stored verdict was a failure, so must the exit be"
+    );
     assert!(rendered.contains("SOROBAN UPGRADE SAFETY REPORT"));
-    assert!(rendered.contains("CRITICAL") || rendered.contains("WARNING") || rendered.contains("INFO"));
-    assert!(rendered.contains("Storage Layout Compatibility") || rendered.contains("Call ABI Compatibility"));
+    assert!(
+        rendered.contains("CRITICAL") || rendered.contains("WARNING") || rendered.contains("INFO")
+    );
+    assert!(
+        rendered.contains("Storage Layout Compatibility")
+            || rendered.contains("Call ABI Compatibility")
+    );
 }
 
 #[test]
@@ -387,4 +395,3 @@ fn empty_report_rendering_regression_test() {
         "no placeholder finding rows in markdown output"
     );
 }
-

@@ -1086,7 +1086,10 @@ fn run_extract(args: &ExtractArgs) -> Result<()> {
     let contract_spec = spec::ContractSpec::from_entries(&metadata.spec);
 
     if args.hash_only {
-        return write_extract_output(args.output.as_deref(), &contract_spec.interface_hash().to_string());
+        return write_extract_output(
+            args.output.as_deref(),
+            &contract_spec.interface_hash().to_string(),
+        );
     }
 
     let mut extracted = ExtractedSpec::new(&build.path, &metadata, &contract_spec);
@@ -1106,7 +1109,10 @@ fn run_extract(args: &ExtractArgs) -> Result<()> {
             object.remove("scope");
         }
     }
-    write_extract_output(args.output.as_deref(), &serde_json::to_string_pretty(&value)?)
+    write_extract_output(
+        args.output.as_deref(),
+        &serde_json::to_string_pretty(&value)?,
+    )
 }
 
 /// Print `content` to stdout, or write it atomically to `path` when given —
@@ -1641,9 +1647,8 @@ fn run_stream(args: &StreamArgs) -> Result<()> {
 /// Re-render a stored JSON report as text or Markdown.
 fn run_render(args: &RenderArgs) -> Result<()> {
     if args.report != Path::new("-") {
-        let metadata = std::fs::metadata(&args.report).with_context(|| {
-            format!("Failed to inspect report path: {}", args.report.display())
-        })?;
+        let metadata = std::fs::metadata(&args.report)
+            .with_context(|| format!("Failed to inspect report path: {}", args.report.display()))?;
 
         if metadata.is_dir() {
             anyhow::bail!(
@@ -2716,12 +2721,7 @@ fn compare_batch_pair(
     let pair_suppressions = match suppressions_for_pair(settings, config_cache) {
         Ok(suppressions) => suppressions,
         Err(e) => {
-            let enriched_error = format!(
-                "pair '{}' (id: {}): {}",
-                contract_name,
-                contract_id,
-                e
-            );
+            let enriched_error = format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
             progress(format!(
                 "  ⚠️  Failed to load suppression config for '{}': {}",
                 contract_name,
@@ -2809,12 +2809,8 @@ fn compare_batch_pair(
                     report.with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
                 }
                 Err(e) => {
-                    let enriched_error = format!(
-                        "pair '{}' (id: {}): {}",
-                        contract_name,
-                        contract_id,
-                        e
-                    );
+                    let enriched_error =
+                        format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
                     pair_error = Some(enriched_error.clone());
                     progress(format!(
                         "  ⚠️  Comparison failed for '{}': {}",
@@ -2832,12 +2828,7 @@ fn compare_batch_pair(
             }
         }
         (Err(e), _) | (_, Err(e)) => {
-            let enriched_error = format!(
-                "pair '{}' (id: {}): {}",
-                contract_name,
-                contract_id,
-                e
-            );
+            let enriched_error = format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
             pair_error = Some(enriched_error.clone());
             progress(format!(
                 "  ⚠️  Failed to load contract files for '{}': {}",
@@ -5313,7 +5304,7 @@ fn scan_directories(
             let new_has_files = std::fs::read_dir(new_dir)?
                 .filter_map(|e| e.ok())
                 .any(|e| e.path().is_file());
-            
+
             if !old_has_files && !new_has_files {
                 anyhow::bail!(
                     "Both batch directories are empty.\n  \

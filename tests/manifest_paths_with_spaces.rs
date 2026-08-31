@@ -77,10 +77,8 @@ fn toml_manifest_resolves_paths_with_spaces() {
     std::fs::create_dir_all(&artifacts_dir).expect("failed to create artifacts dir");
 
     // Copy fixture WASMs to directory with spaces
-    std::fs::copy(wasm("v1.wasm"), artifacts_dir.join("v1.wasm"))
-        .expect("failed to copy v1.wasm");
-    std::fs::copy(wasm("v2.wasm"), artifacts_dir.join("v2.wasm"))
-        .expect("failed to copy v2.wasm");
+    std::fs::copy(wasm("v1.wasm"), artifacts_dir.join("v1.wasm")).expect("failed to copy v1.wasm");
+    std::fs::copy(wasm("v2.wasm"), artifacts_dir.join("v2.wasm")).expect("failed to copy v2.wasm");
 
     let manifest_content = format!(
         r#"
@@ -110,7 +108,9 @@ name = "breaking_pair"
     let json = run.json();
     assert_eq!(json["total_pairs"].as_u64().unwrap(), 2);
 
-    let results = json["results"].as_array().expect("results must be an array");
+    let results = json["results"]
+        .as_array()
+        .expect("results must be an array");
     assert_eq!(results.len(), 2);
 
     // Verify provenance preserves the full path with spaces
@@ -144,10 +144,8 @@ fn json_manifest_resolves_paths_with_spaces() {
     std::fs::create_dir_all(&artifacts_dir).expect("failed to create artifacts dir");
 
     // Copy fixture WASMs to directory with spaces
-    std::fs::copy(wasm("v1.wasm"), artifacts_dir.join("v1.wasm"))
-        .expect("failed to copy v1.wasm");
-    std::fs::copy(wasm("v3.wasm"), artifacts_dir.join("v3.wasm"))
-        .expect("failed to copy v3.wasm");
+    std::fs::copy(wasm("v1.wasm"), artifacts_dir.join("v1.wasm")).expect("failed to copy v1.wasm");
+    std::fs::copy(wasm("v3.wasm"), artifacts_dir.join("v3.wasm")).expect("failed to copy v3.wasm");
 
     let manifest_content = format!(
         r#"{{
@@ -180,7 +178,9 @@ fn json_manifest_resolves_paths_with_spaces() {
     let json = run.json();
     assert_eq!(json["total_pairs"].as_u64().unwrap(), 2);
 
-    let results = json["results"].as_array().expect("results must be an array");
+    let results = json["results"]
+        .as_array()
+        .expect("results must be an array");
     assert_eq!(results.len(), 2);
 
     // Verify both pairs resolved and compared successfully

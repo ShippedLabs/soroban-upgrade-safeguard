@@ -459,8 +459,8 @@ fn extract_output_trailing_newline_regression_test() {
         "full extraction output must end with exactly one newline"
     );
     let trimmed_full = &full_stdout[..full_stdout.len() - 1];
-    let parsed: Value = serde_json::from_str(trimmed_full)
-        .expect("removing the final newline leaves valid JSON");
+    let parsed: Value =
+        serde_json::from_str(trimmed_full).expect("removing the final newline leaves valid JSON");
     assert_eq!(parsed["spec_schema_version"], 1);
 
     // 2. Hash-only extraction output ends with exactly one newline
@@ -481,4 +481,3 @@ fn extract_output_trailing_newline_regression_test() {
         "removing the final newline leaves a valid hash"
     );
 }
-

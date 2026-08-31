@@ -1396,9 +1396,8 @@ fn current_git_commit() -> Option<String> {
     }
     let commit = String::from_utf8(output.stdout).ok()?;
     let commit = commit.trim();
-    let is_valid_sha = !commit.is_empty()
-        && commit.len() >= 7
-        && commit.chars().all(|c| c.is_ascii_hexdigit());
+    let is_valid_sha =
+        !commit.is_empty() && commit.len() >= 7 && commit.chars().all(|c| c.is_ascii_hexdigit());
     is_valid_sha.then(|| commit.to_string())
 }
 

@@ -126,6 +126,7 @@ impl std::error::Error for RenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             RenderError::Malformed(err) => Some(err),
+            RenderError::EmptyInput => None,
             RenderError::IncompatibleSchema { .. } => None,
         }
     }

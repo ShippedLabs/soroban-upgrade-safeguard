@@ -429,7 +429,10 @@ fn explicit_cli_config_overrides_discovery_and_env_and_keeps_loaded_rules() {
         .unwrap_or_else(|e| panic!("stdout was not valid JSON: {e}\n---stdout---\n{stdout}"));
     let code = output.status.code().expect("process terminated by signal");
 
-    assert_eq!(code, 1, "the explicit config must win over both discovery and env: {stdout}");
+    assert_eq!(
+        code, 1,
+        "the explicit config must win over both discovery and env: {stdout}"
+    );
     assert_eq!(json["suppressed_count"].as_u64().unwrap(), 0);
     assert_eq!(json["counts"]["critical"].as_u64().unwrap(), 3);
     assert!(json["findings_by_category"].is_object());
@@ -438,7 +441,9 @@ fn explicit_cli_config_overrides_discovery_and_env_and_keeps_loaded_rules() {
         Value::String("ConfigData.threshold".to_string())
     );
     assert!(
-        json["findings_by_category"]["Struct Field Removed"][0]["suppressed"].as_bool().unwrap_or(false)
+        json["findings_by_category"]["Struct Field Removed"][0]["suppressed"]
+            .as_bool()
+            .unwrap_or(false)
             == false,
         "the explicit file should be the source of truth, not the env/discovered configs"
     );

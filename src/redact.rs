@@ -45,6 +45,9 @@ mod tests {
 
     #[test]
     fn bare_file_name_is_still_labeled() {
-        assert_eq!(redact_local_path("contract.wasm"), "<redacted>/contract.wasm");
+        assert_eq!(
+            redact_local_path("contract.wasm"),
+            "<redacted>/contract.wasm"
+        );
     }
 }

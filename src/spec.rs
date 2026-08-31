@@ -1,7 +1,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use stellar_xdr::curr::{
     ScSpecEntry, ScSpecFunctionV0, ScSpecUdtEnumV0, ScSpecUdtErrorEnumV0, ScSpecUdtStructV0,
     ScSpecUdtUnionV0,
@@ -25,6 +25,43 @@ pub struct DuplicateDeclaration {
     pub name: String,
     /// How many times this name occurs for this kind in `entries`.
     pub occurrences: usize,
+}
+
+// `kind` is `&'static str` (matched against elsewhere as a static, e.g.
+// `LintTarget::new`), which serde cannot derive `Deserialize` for directly —
+// a derived impl would need to borrow `kind` from the deserializer's input
+// with lifetime `'de`, not manufacture a `'static` reference. Deserialize
+// into an owned string instead and map it onto the fixed set of known kinds.
+impl<'de> Deserialize<'de> for DuplicateDeclaration {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Raw {
+            kind: String,
+            name: String,
+            occurrences: usize,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        let kind: &'static str = match raw.kind.as_str() {
+            "function" => "function",
+            "struct" => "struct",
+            "enum" => "enum",
+            "union" => "union",
+            "error_enum" => "error_enum",
+            other => {
+                return Err(serde::de::Error::custom(format!(
+                    "unknown duplicate-declaration kind '{other}'"
+                )))
+            }
+        };
+        Ok(DuplicateDeclaration {
+            kind,
+            name: raw.name,
+            occurrences: raw.occurrences,
+        })
+    }
 }
 
 /// A structured representation of a Soroban contract's public interface,
