@@ -1,0 +1,24 @@
+{
+  "declarations": [
+    {
+      "name": "counter",
+      "operation": "set",
+      "durability": "persistent"
+    },
+    {
+      "name": "session",
+      "operation": "set",
+      "durability": "temporary"
+    },
+    {
+      "name": "config",
+      "operation": "get",
+      "durability": "instance"
+    },
+    {
+      "name": "stable",
+      "operation": "set",
+      "durability": "persistent"
+    }
+  ]
+}

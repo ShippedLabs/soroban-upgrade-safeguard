@@ -77,6 +77,13 @@ pub enum FindingCategory {
     DataSegmentChanged,
     WasmProposalAdded,
     WasmProposalRemoved,
+    /// A storage declaration's durability tier changed between the old and new
+    /// schema (e.g. persistent → temporary).
+    StorageDurabilityChanged,
+    /// A storage declaration's namespace or key-domain prefix changed between
+    /// the old and new schema, redirecting reads and writes to a different
+    /// ledger entry.
+    StorageNamespaceChanged,
 }
 
 impl std::str::FromStr for FindingCategory {
@@ -161,6 +168,8 @@ impl FindingCategory {
             FindingCategory::DataSegmentChanged => "Data Segment Changed",
             FindingCategory::WasmProposalAdded => "WASM Proposal Added",
             FindingCategory::WasmProposalRemoved => "WASM Proposal Removed",
+            FindingCategory::StorageDurabilityChanged => "Storage Durability Changed",
+            FindingCategory::StorageNamespaceChanged => "Storage Namespace Changed",
         }
     }
 
@@ -239,6 +248,8 @@ impl FindingCategory {
             FindingCategory::DataSegmentChanged => Severity::Info,
             FindingCategory::WasmProposalAdded => Severity::Warning,
             FindingCategory::WasmProposalRemoved => Severity::Info,
+            FindingCategory::StorageDurabilityChanged => Severity::Critical,
+            FindingCategory::StorageNamespaceChanged => Severity::Critical,
         }
     }
 
@@ -448,6 +459,12 @@ impl FindingCategory {
             }
             FindingCategory::WasmProposalRemoved => {
                 "A WebAssembly proposal/feature required by the old contract is no longer required."
+            }
+            FindingCategory::StorageDurabilityChanged => {
+                "A storage declaration's durability tier changed between the old and new schema (e.g. persistent → temporary), which changes retention behaviour and makes existing entries unreachable."
+            }
+            FindingCategory::StorageNamespaceChanged => {
+                "A storage declaration's namespace or key-domain prefix changed between the old and new schema, redirecting reads and writes to a different ledger entry and orphaning stored data."
             }
         }
     }
@@ -659,6 +676,12 @@ impl FindingCategory {
             FindingCategory::WasmProposalRemoved => {
                 "No action required. The contract has simplified its runtime feature requirements."
             }
+            FindingCategory::StorageDurabilityChanged => {
+                "Restore the original durability or perform a data migration that reads existing entries under the old durability tier and writes them under the new one before deploying."
+            }
+            FindingCategory::StorageNamespaceChanged => {
+                "Restore the original namespace or perform a data migration that reads existing entries under the old namespace and writes them under the new one before deploying."
+            }
         }
     }
 
@@ -733,6 +756,8 @@ impl FindingCategory {
             FindingCategory::DataSegmentChanged,
             FindingCategory::WasmProposalAdded,
             FindingCategory::WasmProposalRemoved,
+            FindingCategory::StorageDurabilityChanged,
+            FindingCategory::StorageNamespaceChanged,
         ]
     }
 
