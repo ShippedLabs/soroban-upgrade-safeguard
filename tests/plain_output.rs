@@ -206,7 +206,7 @@ fn plain_batch_rendering_is_fully_decoration_free_on_stdout() {
         name = "breaking_contract"
         "#,
         wasm("v1.wasm").to_str().unwrap(),
-        wasm("v1.wasm").to_str().unwrap(),
+        wasm("v3.wasm").to_str().unwrap(),
         wasm("v1.wasm").to_str().unwrap(),
         wasm("v2.wasm").to_str().unwrap()
     );

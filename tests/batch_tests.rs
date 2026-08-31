@@ -46,7 +46,7 @@ fn batch_manifest_toml_mode_fails_and_exits_one() {
         name = "breaking_contract"
         "#,
         wasm("v1.wasm").to_str().unwrap(),
-        wasm("v1.wasm").to_str().unwrap(),
+        wasm("v3.wasm").to_str().unwrap(),
         wasm("v1.wasm").to_str().unwrap(),
         wasm("v2.wasm").to_str().unwrap()
     );
@@ -113,9 +113,9 @@ fn batch_manifest_all_clean_exits_zero() {
         name = "clean_2"
         "#,
         wasm("v1.wasm").to_str().unwrap(),
+        wasm("v3.wasm").to_str().unwrap(),
         wasm("v1.wasm").to_str().unwrap(),
-        wasm("v1.wasm").to_str().unwrap(),
-        wasm("v1.wasm").to_str().unwrap()
+        wasm("v3.wasm").to_str().unwrap()
     );
 
     let manifest_path = write_manifest("manifest_clean.toml", &manifest_content);
@@ -159,7 +159,7 @@ fn batch_manifest_json_mode_json_output() {
             ]
         }}"#,
         wasm("v1.wasm").to_str().unwrap(),
-        wasm("v1.wasm").to_str().unwrap(),
+        wasm("v3.wasm").to_str().unwrap(),
         wasm("v1.wasm").to_str().unwrap(),
         wasm("v2.wasm").to_str().unwrap()
     );
@@ -210,13 +210,13 @@ fn batch_manifest_mixed_coverage_is_isolated_and_ordered() {
             ]
         }}"#,
         portable(&wasm("v1.wasm")),
+        portable(&wasm("v3.wasm")),
         portable(&wasm("v1.wasm")),
-        portable(&wasm("v1.wasm")),
-        portable(&wasm("v1.wasm")),
+        portable(&wasm("v3.wasm")),
         "schemas/old.json",
         "schemas/new.json",
         portable(&wasm("v1.wasm")),
-        portable(&wasm("v1.wasm")),
+        portable(&wasm("v3.wasm")),
         portable(&invalid_schema),
         portable(&invalid_schema),
     );
@@ -267,10 +267,10 @@ fn batch_manifest_partial_schema_is_pair_error_without_aborting_next_pair() {
         name = "after_partial"
         "#,
         wasm("v1.wasm").display().to_string(),
-        wasm("v1.wasm").display().to_string(),
+        wasm("v3.wasm").display().to_string(),
         schema.display().to_string(),
         wasm("v1.wasm").display().to_string(),
-        wasm("v1.wasm").display().to_string(),
+        wasm("v3.wasm").display().to_string(),
     );
     let manifest_path = write_manifest("partial_manifest.toml", &manifest);
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
@@ -324,7 +324,7 @@ fn batch_markdown_output_shows_scope_and_coverage_columns() {
         name = "markdown_contract"
         "#,
         wasm("v1.wasm").to_string_lossy(),
-        wasm("v1.wasm").to_string_lossy(),
+        wasm("v3.wasm").to_string_lossy(),
     );
     let manifest_path = write_manifest("markdown_manifest.toml", &manifest);
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
@@ -639,14 +639,14 @@ fn batch_directory_handles_dotfile_wasm_json() {
     assert_eq!(json["is_safe"], Value::Bool(true), "JSON must report safe");
 
     let results = json["results"]
-        .as_object()
-        .expect("results must be an object");
-    assert!(
-        results.contains_key(".baseline"),
-        "JSON results must contain the dotfile contract name '.baseline'"
-    );
+        .as_array()
+        .expect("results must be an array");
+    let baseline = results
+        .iter()
+        .find(|r| r["name"] == ".baseline")
+        .expect("JSON results must contain the dotfile contract name '.baseline'");
     assert_eq!(
-        results[".baseline"]["is_safe"],
+        baseline["report"]["is_safe"],
         Value::Bool(true),
         "contract '.baseline' must be safe"
     );

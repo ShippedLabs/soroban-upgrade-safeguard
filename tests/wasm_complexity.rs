@@ -14,10 +14,10 @@
 use std::path::PathBuf;
 
 use soroban_upgrade_safeguard::wasm_complexity::{
-    ComplexityBudgetConfig, ComplexityBudgetEntryFile, WasmComplexityDelta, WasmComplexityProfile,
-    evaluate_complexity_budgets, profile_wasm,
+    evaluate_complexity_budgets, profile_wasm, ComplexityBudgetConfig, ComplexityBudgetEntryFile,
+    WasmComplexityDelta, WasmComplexityProfile,
 };
-use soroban_upgrade_safeguard::{CompareOptions, compare_wasm_bytes_with_options};
+use soroban_upgrade_safeguard::{compare_wasm_bytes_with_options, CompareOptions};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,8 +51,7 @@ fn budget(metric: &str, limit: Option<i64>, pct: Option<f64>) -> ComplexityBudge
 }
 
 fn make_budget(entries: Vec<ComplexityBudgetEntryFile>) -> ComplexityBudgetConfig {
-    ComplexityBudgetConfig::from_file_entries(entries)
-        .expect("test budget config must be valid")
+    ComplexityBudgetConfig::from_file_entries(entries).expect("test budget config must be valid")
 }
 
 // ── Profile tests ─────────────────────────────────────────────────────────────
@@ -60,8 +59,14 @@ fn make_budget(entries: Vec<ComplexityBudgetEntryFile>) -> ComplexityBudgetConfi
 #[test]
 fn profile_empty_module_has_zero_counts() {
     let profile = profile_wasm(&minimal_wasm()).expect("minimal WASM must profile cleanly");
-    assert_eq!(profile.defined_functions, 0, "no functions in minimal module");
-    assert_eq!(profile.total_instructions, 0, "no instructions in minimal module");
+    assert_eq!(
+        profile.defined_functions, 0,
+        "no functions in minimal module"
+    );
+    assert_eq!(
+        profile.total_instructions, 0,
+        "no instructions in minimal module"
+    );
     assert!(profile.functions.is_empty(), "no function entries");
     // All family counts should be 0
     for (family, count) in &profile.by_family {
@@ -73,8 +78,14 @@ fn profile_empty_module_has_zero_counts() {
 fn profile_v1_wasm_has_nonzero_functions_and_instructions() {
     let bytes = read_wasm("v1.wasm");
     let profile = profile_wasm(&bytes).expect("v1.wasm must profile cleanly");
-    assert!(profile.defined_functions > 0, "v1.wasm must have at least one function");
-    assert!(profile.total_instructions > 0, "v1.wasm must have instructions");
+    assert!(
+        profile.defined_functions > 0,
+        "v1.wasm must have at least one function"
+    );
+    assert!(
+        profile.total_instructions > 0,
+        "v1.wasm must have instructions"
+    );
 }
 
 #[test]
@@ -106,8 +117,15 @@ fn profile_malformed_wasm_does_not_panic() {
 fn profile_all_families_present_in_by_family_map() {
     let profile = profile_wasm(&minimal_wasm()).expect("minimal must profile");
     let expected_families = [
-        "arithmetic", "control", "calls", "memory", "comparison",
-        "conversion", "reference", "simd", "other",
+        "arithmetic",
+        "control",
+        "calls",
+        "memory",
+        "comparison",
+        "conversion",
+        "reference",
+        "simd",
+        "other",
     ];
     for family in expected_families {
         assert!(
@@ -168,7 +186,10 @@ fn delta_is_deterministic_for_same_inputs() {
     let p2 = profile_wasm(&bytes).unwrap();
     let d1 = WasmComplexityDelta::compute(&p1, &p2);
     let d2 = WasmComplexityDelta::compute(&p1, &p2);
-    assert_eq!(d1.total_instructions.absolute, d2.total_instructions.absolute);
+    assert_eq!(
+        d1.total_instructions.absolute,
+        d2.total_instructions.absolute
+    );
     assert_eq!(d1.defined_functions.absolute, d2.defined_functions.absolute);
 }
 
@@ -349,10 +370,9 @@ fn complexity_section_present_in_json_output_when_budget_set() {
     )
     .expect("comparison must not error");
 
-    let json_str = serde_json::to_string(&report.to_renderable())
-        .expect("renderable must serialize to JSON");
-    let json: serde_json::Value =
-        serde_json::from_str(&json_str).expect("JSON must be valid");
+    let json_str =
+        serde_json::to_string(&report.to_renderable()).expect("renderable must serialize to JSON");
+    let json: serde_json::Value = serde_json::from_str(&json_str).expect("JSON must be valid");
 
     assert!(
         json.get("complexity_delta").is_some(),

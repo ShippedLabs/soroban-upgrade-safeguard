@@ -6,11 +6,10 @@
 //! provenance in the batch JSON, and the quality of the error when a manifest is
 //! wrong. Unit-level precedence coverage lives in `src/manifest.rs`.
 //!
-//! The checked-in fixtures give three verdicts to compose with:
+//! The checked-in fixtures give two verdicts to compose with:
 //!
-//! - `v1 -> v1` safe
+//! - `v1 -> v3` safe (warning-only: passes normally, fails under `--strict`)
 //! - `v1 -> v2` breaking (3 criticals)
-//! - `v1 -> v3` warning-only: passes normally, fails under `--strict`
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -147,7 +146,7 @@ fn nested_includes_compose_depth_first() {
 
             [[pairs]]
             old  = "v1.wasm"
-            new  = "v1.wasm"
+            new  = "v3.wasm"
             name = "b"
             "#,
             dir.join("wasm").to_str().unwrap()
@@ -165,7 +164,7 @@ fn nested_includes_compose_depth_first() {
 
             [[pairs]]
             old  = "v1.wasm"
-            new  = "v1.wasm"
+            new  = "v3.wasm"
             name = "a"
             "#,
             dir.join("wasm").to_str().unwrap()
@@ -182,7 +181,7 @@ fn nested_includes_compose_depth_first() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "root"
         "#,
     );
@@ -252,12 +251,12 @@ fn pair_beats_root_defaults_beats_included_defaults() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "inherits"
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "overrides"
 
         [pairs.policy]
@@ -496,7 +495,7 @@ fn relative_paths_anchor_on_the_defining_file_not_the_cwd() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "pool"
         "#,
     );
@@ -511,7 +510,7 @@ fn relative_paths_anchor_on_the_defining_file_not_the_cwd() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "root"
         "#,
     );
@@ -561,7 +560,7 @@ fn root_base_dir_does_not_reach_into_an_included_fragment() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "pool"
         "#,
     );
@@ -576,7 +575,7 @@ fn root_base_dir_does_not_reach_into_an_included_fragment() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "root"
         "#,
     );
@@ -617,7 +616,7 @@ fn duplicate_pair_names_fail_before_anything_runs() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
         "#,
     );
@@ -689,7 +688,7 @@ fn explicit_pair_id_is_accepted_in_a_toml_manifest_and_appears_in_batch_json() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "Token (v1, safe)"
         id   = "token-safe"
         "#,
@@ -723,7 +722,7 @@ fn explicit_pair_id_is_accepted_in_a_json_manifest() {
     let manifest = serde_json::json!({
         "defaults": { "base_dir": "wasm" },
         "pairs": [
-            { "old": "v1.wasm", "new": "v1.wasm", "name": "token", "id": "token-1" }
+            { "old": "v1.wasm", "new": "v3.wasm", "name": "token", "id": "token-1" }
         ]
     })
     .to_string();
@@ -754,7 +753,7 @@ fn omitted_pair_id_falls_back_deterministically_to_the_resolved_name() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
         "#,
     );
@@ -787,7 +786,7 @@ fn duplicate_pair_ids_fail_before_anything_runs() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token-a"
         id   = "shared"
         "#,
@@ -822,7 +821,7 @@ fn duplicate_pair_ids_fail_before_anything_runs() {
 
     let combined = format!("{}{}", run.stdout, run.stderr);
     assert!(
-        combined.contains("Duplicate pair id 'shared'"),
+        combined.contains("Duplicate pair identifier 'shared'"),
         "error must name the collision: {combined}"
     );
     assert!(
@@ -852,7 +851,7 @@ fn duplicate_pair_ids_fail_in_a_json_manifest_too() {
     let manifest = serde_json::json!({
         "defaults": { "base_dir": "wasm" },
         "pairs": [
-            { "old": "v1.wasm", "new": "v1.wasm", "name": "token-a", "id": "shared" },
+            { "old": "v1.wasm", "new": "v3.wasm", "name": "token-a", "id": "shared" },
             { "old": "v1.wasm", "new": "v2.wasm", "name": "token-b", "id": "shared" }
         ]
     })
@@ -863,7 +862,7 @@ fn duplicate_pair_ids_fail_in_a_json_manifest_too() {
     assert_eq!(run.code, 1);
     let combined = format!("{}{}", run.stdout, run.stderr);
     assert!(
-        combined.contains("Duplicate pair id 'shared'"),
+        combined.contains("Duplicate pair identifier 'shared'"),
         "error must name the collision: {combined}"
     );
 }
@@ -882,7 +881,7 @@ fn invalid_pair_id_is_rejected_before_anything_runs() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
         id   = "not a valid id!"
         "#,
@@ -932,7 +931,7 @@ fn empty_pair_id_is_rejected() {
 
         [[pairs]]
         old = "v1.wasm"
-        new = "v1.wasm"
+        new = "v3.wasm"
         id  = ""
         "#,
     );
@@ -956,7 +955,7 @@ fn explain_manifest_reports_pair_ids() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
         id   = "token-1"
         "#,
@@ -1023,7 +1022,7 @@ fn include_depth_cap_is_enforced_at_nine_and_allows_eight() {
 
                     [[pairs]]
                     old  = "v1.wasm"
-                    new  = "v1.wasm"
+                    new  = "v3.wasm"
                     name = "deep"
                     "#,
                     dir.join("wasm").to_str().unwrap()
@@ -1214,7 +1213,7 @@ fn a_flat_toml_manifest_behaves_exactly_as_before() {
             name = "breaking_contract"
             "#,
             wasm("v1.wasm").to_str().unwrap(),
-            wasm("v1.wasm").to_str().unwrap(),
+            wasm("v3.wasm").to_str().unwrap(),
             wasm("v1.wasm").to_str().unwrap(),
             wasm("v2.wasm").to_str().unwrap(),
         ),
@@ -1239,7 +1238,7 @@ fn a_flat_json_manifest_behaves_exactly_as_before() {
         "root.json",
         &serde_json::json!({
             "pairs": [
-                { "old": wasm("v1.wasm"), "new": wasm("v1.wasm"), "name": "clean" },
+                { "old": wasm("v1.wasm"), "new": wasm("v3.wasm"), "name": "clean" },
                 { "old": wasm("v1.wasm"), "new": wasm("v2.wasm"), "name": "breaking" },
             ]
         })
@@ -1273,12 +1272,12 @@ fn a_manifest_declaring_dependencies_still_parses() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "pool"
 
         [[dependencies]]
@@ -1432,7 +1431,7 @@ fn the_same_manifest_yields_byte_identical_json() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "b"
 
         [[pairs]]
@@ -1506,7 +1505,7 @@ fn write_mixed_verdict_manifest(dir: &Path) -> PathBuf {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "safe-pair"
         old_storage_schema = "schemas/empty.json"
         new_storage_schema = "schemas/empty.json"
@@ -1518,12 +1517,12 @@ fn write_mixed_verdict_manifest(dir: &Path) -> PathBuf {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "incomplete-pair"
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "errored-pair"
         old_storage_schema = "schemas/empty.json"
         "#,
@@ -1653,14 +1652,14 @@ fn batch_summary_is_all_safe_when_every_pair_is_schema_backed_and_clean() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "a"
         old_storage_schema = "schemas/empty.json"
         new_storage_schema = "schemas/empty.json"
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "b"
         old_storage_schema = "schemas/empty.json"
         new_storage_schema = "schemas/empty.json"
@@ -1680,14 +1679,15 @@ fn batch_summary_is_all_safe_when_every_pair_is_schema_backed_and_clean() {
 // ── --max-pairs ──────────────────────────────────────────────────────────────
 
 /// A manifest with `n` pairs, all comparing the checked-in `v1.wasm` fixture
-/// against itself, none needing a storage schema. Cheap and fast to run even
-/// at boundary sizes, since a safe v1 -> v1 comparison does no real work.
+/// against `v3.wasm` (a safe, distinct build), none needing a storage schema.
+/// Cheap and fast to run even at boundary sizes, since a safe comparison does
+/// no real work.
 fn write_n_pair_manifest(dir: &Path, n: usize) -> PathBuf {
     stage_wasm(&dir.join("wasm"));
     let mut body = String::from("[defaults]\nbase_dir = \"wasm\"\n\n");
     for i in 0..n {
         body.push_str(&format!(
-            "[[pairs]]\nold = \"v1.wasm\"\nnew = \"v1.wasm\"\nname = \"pair-{i}\"\n\n"
+            "[[pairs]]\nold = \"v1.wasm\"\nnew = \"v3.wasm\"\nname = \"pair-{i}\"\n\n"
         ));
     }
     write(dir, "root.toml", &body)
@@ -1799,13 +1799,13 @@ fn labels_appear_in_batch_json_results_and_manifest_provenance() {
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "labeled"
         labels = ["stage:prod", "service:payments"]
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "unlabeled"
         "#,
     );
@@ -1859,7 +1859,7 @@ fn labels_appear_in_text_output() {
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "labeled"
         labels = ["prod", "payments"]
         "#,
@@ -1887,7 +1887,7 @@ fn labels_appear_in_markdown_output() {
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "labeled"
         labels = ["prod", "payments"]
         "#,
@@ -1919,19 +1919,19 @@ fn repeated_labels_across_many_pairs_are_accepted() {
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "a"
         labels = ["prod"]
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "b"
         labels = ["prod"]
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "c"
         labels = ["prod"]
         "#,
@@ -1969,7 +1969,7 @@ fn invalid_label_is_rejected_before_anything_runs() {
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "token"
         labels = ["not a valid label!"]
         "#,
@@ -2014,13 +2014,13 @@ fn unlabeled_pairs_are_unaffected_in_a_mixed_batch() {
 
         [[pairs]]
         old    = "v1.wasm"
-        new    = "v1.wasm"
+        new    = "v3.wasm"
         name   = "labeled"
         labels = ["prod"]
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "unlabeled"
         "#,
     );
@@ -2053,7 +2053,7 @@ fn manifest_version_defaults_to_one_integration() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "default-version"
         "#,
     );
@@ -2079,7 +2079,7 @@ fn manifest_version_one_toml_integration() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "version-one"
         "#,
     );
@@ -2101,7 +2101,7 @@ fn manifest_version_one_json_integration() {
             "version": 1,
             "defaults": { "base_dir": "wasm" },
             "pairs": [
-                { "old": "v1.wasm", "new": "v1.wasm", "name": "version-one" }
+                { "old": "v1.wasm", "new": "v3.wasm", "name": "version-one" }
             ]
         }"#,
     );
@@ -2127,7 +2127,7 @@ fn manifest_version_mismatch_toml_integration() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "version-two"
         "#,
     );
@@ -2153,7 +2153,7 @@ fn manifest_version_mismatch_json_integration() {
             "version": 2,
             "defaults": { "base_dir": "wasm" },
             "pairs": [
-                { "old": "v1.wasm", "new": "v1.wasm", "name": "version-two" }
+                { "old": "v1.wasm", "new": "v3.wasm", "name": "version-two" }
             ]
         }"#,
     );

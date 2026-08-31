@@ -180,7 +180,7 @@ fn gha_batch_mode_uses_log_groups() {
         r#"
         [[pairs]]
         old = {old_v1:?}
-        new = {old_v1:?}
+        new = {new_v3:?}
         name = "clean_pair"
 
         [[pairs]]
@@ -189,6 +189,7 @@ fn gha_batch_mode_uses_log_groups() {
         name = "breaking_pair"
         "#,
         old_v1 = wasm("v1.wasm").to_str().unwrap(),
+        new_v3 = wasm("v3.wasm").to_str().unwrap(),
         new_v2 = wasm("v2.wasm").to_str().unwrap(),
     );
 

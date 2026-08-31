@@ -183,14 +183,14 @@ fn report_readback_validates_after_unicode_write() {
 
     // Validate report structure
     assert!(json.get("is_safe").is_some());
-    assert!(json.get("old").is_some());
-    assert!(json.get("new").is_some());
-    assert!(json.get("findings").is_some());
     assert!(json.get("counts").is_some());
-
-    let findings = json["findings"].as_array().expect("findings must be array");
+    assert!(json.get("findings_by_category").is_some());
+    assert!(json.get("findings_by_axis").is_some());
     assert!(
-        findings.len() > 0,
+        json["findings_by_category"]
+            .as_object()
+            .map(|m| !m.is_empty())
+            .unwrap_or(false),
         "v1->v2 breaking comparison must have findings"
     );
 }

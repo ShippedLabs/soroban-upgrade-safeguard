@@ -63,9 +63,19 @@ fn text_renderer_handles_missing_provenance() {
     );
 
     let sha256_pattern = regex::Regex::new(r"\b[0-9a-f]{64}\b").unwrap();
-    assert!(
-        !sha256_pattern.is_match(&text),
-        "text output must not contain a fabricated SHA-256 hash"
+    let mut hashes: Vec<&str> = sha256_pattern
+        .find_iter(&text)
+        .map(|m| m.as_str())
+        .collect();
+    hashes.sort();
+    hashes.dedup();
+    assert_eq!(
+        hashes,
+        vec![
+            "17618edb2d0d99112a446eec51b056ef59d07e2d1ffdbbb0656f48f62e4a4265",
+            "75ac891b458995add52ccc2d24edde3d5494fecdcbc413f0e4aca4e9afc72158"
+        ],
+        "only the two interface hashes may appear — no fabricated code hash"
     );
 }
 
@@ -110,9 +120,19 @@ fn markdown_renderer_handles_missing_provenance() {
     );
 
     let sha256_pattern = regex::Regex::new(r"\b[0-9a-f]{64}\b").unwrap();
-    assert!(
-        !sha256_pattern.is_match(&markdown),
-        "markdown output must not contain a fabricated SHA-256 hash"
+    let mut hashes: Vec<&str> = sha256_pattern
+        .find_iter(&markdown)
+        .map(|m| m.as_str())
+        .collect();
+    hashes.sort();
+    hashes.dedup();
+    assert_eq!(
+        hashes,
+        vec![
+            "17618edb2d0d99112a446eec51b056ef59d07e2d1ffdbbb0656f48f62e4a4265",
+            "75ac891b458995add52ccc2d24edde3d5494fecdcbc413f0e4aca4e9afc72158"
+        ],
+        "only the two interface hashes may appear — no fabricated code hash"
     );
 }
 
