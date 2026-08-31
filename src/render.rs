@@ -128,7 +128,6 @@ impl std::error::Error for RenderError {
             RenderError::Malformed(err) => Some(err),
             RenderError::EmptyInput => None,
             RenderError::IncompatibleSchema { .. } => None,
-            RenderError::EmptyInput => None,
         }
     }
 }
@@ -1480,7 +1479,7 @@ mod tests {
         let report = SafetyReport::new_with_specs(&diff, &empty_spec, &empty_spec);
 
         let text = report.generate_summary_text(false);
-        
+
         // Should render the finding message without panic
         assert!(text.contains("Protocol version changed from 20 to 21"));
         assert!(text.contains("Environment Changed"));
@@ -1501,7 +1500,7 @@ mod tests {
         let report = SafetyReport::new_with_specs(&diff, &empty_spec, &empty_spec);
 
         let markdown = report.generate_summary_markdown();
-        
+
         // Should render the finding message without panic
         assert!(markdown.contains("Protocol version changed from 20 to 21"));
         assert!(markdown.contains("Environment Changed"));

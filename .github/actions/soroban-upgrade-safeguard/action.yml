@@ -1,7 +1,9 @@
 name: 'Soroban Upgrade Safeguard'
 description: >-
-  Run soroban-upgrade-safeguard on a pair of WASM files and post the
-  Markdown report as a PR comment, updating it in-place on subsequent pushes.
+  Run soroban-upgrade-safeguard on a pair of WASM files, post the
+  Markdown report as a PR comment (updating it in-place on subsequent
+  pushes), and optionally publish a first-class GitHub Checks run that
+  surfaces per-finding annotations directly on the commit.
 
 inputs:
   old-wasm:
@@ -13,7 +15,8 @@ inputs:
   token:
     description: >-
       GitHub token with pull-requests: write permission.
-      Defaults to `${{ github.token }}`.
+      To also publish check runs, the token additionally needs
+      checks: write. Defaults to `${{ github.token }}`.
     required: false
     default: ${{ github.token }}
   args:
@@ -23,6 +26,22 @@ inputs:
       --config <PATH>). Use an empty string for none.
     required: false
     default: ''
+  publish-check:
+    description: >-
+      When 'true', create or update a GitHub Checks API check run for
+      the current commit. The check run surfaces a structured summary
+      and per-finding annotations directly on the commit and PR.
+      Requires `checks: write` permission on the token.
+      Fork pull requests will receive a graceful warning instead of a
+      hard failure when the permission is not available.
+    required: false
+    default: 'false'
+  check-name:
+    description: >-
+      Display name shown for the check run in the GitHub Checks UI.
+      Only used when publish-check is 'true'.
+    required: false
+    default: 'Soroban Upgrade Safeguard'
 
 outputs:
   is_safe:
@@ -31,6 +50,12 @@ outputs:
   comment_id:
     description: 'ID of the created/updated PR comment'
     value: ${{ steps.script.outputs.comment_id }}
+  check_run_id:
+    description: >-
+      ID of the created or updated GitHub Checks API check run.
+      Empty when publish-check is 'false' or when the token lacks
+      checks: write permission (e.g. fork pull requests).
+    value: ${{ steps.script.outputs.check_run_id }}
 
 runs:
   using: 'composite'
@@ -40,55 +65,348 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
+        INPUT_PUBLISH_CHECK: ${{ inputs.publish-check }}
+        INPUT_CHECK_NAME: ${{ inputs.check-name }}
+        INPUT_OLD_WASM: ${{ inputs.old-wasm }}
+        INPUT_NEW_WASM: ${{ inputs.new-wasm }}
+        INPUT_ARGS: ${{ inputs.args }}
       run: |
         set -euo pipefail
 
-        # ── Identify the PR ─────────────────────────────────────────────
+        # ── Sanitise inputs ──────────────────────────────────────────────
+        # Check name: strip control characters to prevent header injection.
+        SAFE_CHECK_NAME="${INPUT_CHECK_NAME//[$'\001'-$'\037']/ }"
+        # Truncate to 100 characters (GitHub API limit for check name).
+        SAFE_CHECK_NAME="${SAFE_CHECK_NAME:0:100}"
+
+        # ── Identify the PR / commit context ────────────────────────────
         if [[ -z "${GITHUB_REF_NAME:-}" ]]; then
           echo "❌ Not in a GitHub Actions environment"
           exit 1
         fi
 
         REPO="${GITHUB_REPOSITORY:-}"
+        SHA="${GITHUB_SHA:-}"
         PR_NUMBER=""
-        # Try to extract PR number from GITHUB_REF (refs/pull/<number>/merge)
+
         if [[ "$GITHUB_REF" == refs/pull/*/merge ]]; then
           PR_NUMBER="${GITHUB_REF#refs/pull/}"
           PR_NUMBER="${PR_NUMBER%/merge}"
         elif [[ -n "${GITHUB_EVENT_PATH:-}" ]]; then
-          # Extract from the push / pull_request event payload
-          PR_NUMBER="$(jq -r '.pull_request.number // .issue.number // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+          PR_NUMBER="$(jq -r '.pull_request.number // .issue.number // empty' \
+            "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
         fi
 
         if [[ -z "$PR_NUMBER" || "$PR_NUMBER" == "null" ]]; then
-          echo "⚠️  Not running in a pull request context. Cannot post a PR comment."
-          echo "is_safe=false" >> "$GITHUB_OUTPUT"
-          exit 0
+          PR_NUMBER=""
+        fi
+
+        # ── Detect fork PR (write permissions not available) ─────────────
+        IS_FORK_PR="false"
+        if [[ -n "${GITHUB_EVENT_PATH:-}" ]]; then
+          FORK_REPO="$(jq -r \
+            '.pull_request.head.repo.full_name // empty' \
+            "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+          if [[ -n "$FORK_REPO" && "$FORK_REPO" != "$REPO" ]]; then
+            IS_FORK_PR="true"
+          fi
         fi
 
         # ── Run the safeguard tool ──────────────────────────────────────
-        TEMP_REPORT="$(mktemp)"
+        TEMP_MD="$(mktemp)"
+        TEMP_JSON="$(mktemp)"
+        TEMP_GHA="$(mktemp)"
         TEMP_STDERR="$(mktemp)"
 
         EXIT_CODE=0
+
+        # Run in github-actions format for annotations; capture markdown for
+        # the PR comment; capture JSON for structured annotation extraction.
         soroban-upgrade-safeguard \
-          "${{ inputs.old-wasm }}" \
-          "${{ inputs.new-wasm }}" \
+          "$INPUT_OLD_WASM" \
+          "$INPUT_NEW_WASM" \
           --format markdown \
-          ${{ inputs.args }} \
-          > "$TEMP_REPORT" 2>"$TEMP_STDERR" || EXIT_CODE=$?
+          --output "json:${TEMP_JSON}" \
+          --output "github-actions:${TEMP_GHA}" \
+          --no-timestamp \
+          $INPUT_ARGS \
+          > "$TEMP_MD" 2>"$TEMP_STDERR" || EXIT_CODE=$?
 
         IS_SAFE="false"
-        if [[ "$EXIT_CODE" -eq 0 ]]; then
-          IS_SAFE="true"
-        fi
+        [[ "$EXIT_CODE" -eq 0 ]] && IS_SAFE="true"
         echo "is_safe=$IS_SAFE" >> "$GITHUB_OUTPUT"
 
-        # Read the report
-        REPORT_CONTENT="$(cat "$TEMP_REPORT")"
-        rm -f "$TEMP_REPORT" "$TEMP_STDERR"
+        # ── Determine check conclusion ───────────────────────────────────
+        # Exit codes:
+        #   0  – safe (no critical findings)        → success
+        #   1  – unsafe (critical findings found)   → failure
+        #   2  – resource limit / config error      → action_required
+        #  other – unexpected tool error            → cancelled (tool error)
+        case "$EXIT_CODE" in
+          0)   CONCLUSION="success" ;;
+          1)   CONCLUSION="failure" ;;
+          2)   CONCLUSION="action_required" ;;
+          *)   CONCLUSION="cancelled" ;;
+        esac
 
-        # ── Build the comment body ──────────────────────────────────────
+        # ── Optionally publish a GitHub Checks API check run ────────────
+        CHECK_RUN_ID=""
+
+        if [[ "$INPUT_PUBLISH_CHECK" == "true" ]]; then
+          if [[ "$IS_FORK_PR" == "true" ]]; then
+            echo "⚠️  Fork PR detected — checks: write is not available." \
+              "Skipping check run creation. The safeguard report is still" \
+              "available as a workflow artifact or PR comment."
+          else
+            # ── Build annotations from the JSON report ─────────────────
+            # GitHub Checks API accepts at most 50 annotations per request.
+            ANNOTATIONS_JSON="$(python3 - "$TEMP_JSON" <<'PYEOF'
+import json, sys, pathlib
+
+MAX_ANNOTATIONS = 50
+
+try:
+    data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except Exception:
+    print("[]")
+    sys.exit(0)
+
+findings = data.get("findings", [])
+annotations = []
+omitted = 0
+
+for f in findings:
+    if f.get("suppressed"):
+        continue
+    severity = f.get("severity", "").lower()
+    # Map severity to GitHub annotation level
+    if severity == "critical":
+        level = "failure"
+    elif severity == "warning":
+        level = "warning"
+    else:
+        level = "notice"
+
+    category = f.get("category", "Unknown")
+    target   = f.get("target", "")
+    message  = f"{category}: {target}" if target else category
+    detail   = f.get("detail", "") or ""
+    if detail:
+        message = f"{message}\n{detail}"
+    # Truncate to 64 KB GitHub limit per annotation
+    message = message[:65000]
+
+    # Use a file path if the target looks like one; otherwise fall back
+    # to the action.yml itself as a placeholder path (GitHub requires a
+    # non-empty path).
+    import re
+    path_match = re.search(r'([\w./\\-]+\.\w+)', target or "")
+    ann_path = path_match.group(1) if path_match else ".github/actions/soroban-upgrade-safeguard/action.yml"
+
+    if len(annotations) < MAX_ANNOTATIONS:
+        annotations.append({
+            "path": ann_path,
+            "start_line": 1,
+            "end_line": 1,
+            "annotation_level": level,
+            "message": message,
+            "title": f"[{category}] {target}"[:255] if target else category[:255],
+        })
+    else:
+        omitted += 1
+
+result = {"annotations": annotations, "omitted": omitted}
+print(json.dumps(result))
+PYEOF
+)"
+
+            ANNOTATIONS="$(echo "$ANNOTATIONS_JSON" | python3 -c \
+              'import json,sys; d=json.load(sys.stdin); print(json.dumps(d["annotations"]))')"
+            OMITTED_COUNT="$(echo "$ANNOTATIONS_JSON" | python3 -c \
+              'import json,sys; d=json.load(sys.stdin); print(d["omitted"])')"
+
+            # ── Build the check run summary ─────────────────────────────
+            REPORT_MD="$(cat "$TEMP_MD")"
+
+            if [[ "$OMITTED_COUNT" -gt 0 ]]; then
+              OMISSION_NOTE="
+
+> **Note:** $OMITTED_COUNT finding(s) were omitted from inline annotations due to the GitHub Checks API limit of 50 annotations per check run. The complete list of findings is available in the full report below and in the workflow run artifacts."
+            else
+              OMISSION_NOTE=""
+            fi
+
+            SUMMARY_TEXT="$(cat <<-SUMMARY
+        ## Soroban Upgrade Safeguard
+
+        **Result:** $([ "$IS_SAFE" = "true" ] && echo "✅ PASSED" || echo "❌ FAILED")
+        **Conclusion:** \`${CONCLUSION}\`
+        ${OMISSION_NOTE}
+
+        ${REPORT_MD}
+
+        <!-- soroban-upgrade-safeguard-check-run -->
+        SUMMARY
+        )"
+            # Truncate summary to 65535 bytes (GitHub API limit)
+            SUMMARY_TEXT="${SUMMARY_TEXT:0:65535}"
+
+            # ── Look for an existing check run to update ─────────────────
+            # A stable check run per (repo, sha, check-name) prevents
+            # duplicate active checks on reruns and superseded commits.
+            EXISTING_CHECK_ID=""
+            EXISTING_CHECK_ID="$(gh api \
+              "/repos/${REPO}/commits/${SHA}/check-runs" \
+              --jq ".check_runs[] | select(.name == \"${SAFE_CHECK_NAME}\") | .id" \
+              2>/dev/null | head -1 || true)"
+
+            # ── Create or update the check run ───────────────────────────
+            COMPLETED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+            # Build the output payload (annotations sent separately when needed)
+            OUTPUT_PAYLOAD="$(python3 - "$SUMMARY_TEXT" "$ANNOTATIONS" <<'OUTEOF'
+import json, sys
+summary = sys.argv[1]
+annotations = json.loads(sys.argv[2])
+payload = {
+    "title": "Soroban Upgrade Safeguard Report",
+    "summary": summary,
+    "annotations": annotations,
+}
+print(json.dumps(payload))
+OUTEOF
+)"
+
+            if [[ -n "$EXISTING_CHECK_ID" && "$EXISTING_CHECK_ID" != "null" ]]; then
+              echo "🔄 Updating check run #${EXISTING_CHECK_ID}..."
+              RESULT="$(gh api \
+                -X PATCH \
+                "/repos/${REPO}/check-runs/${EXISTING_CHECK_ID}" \
+                --input - <<-PAYLOAD 2>/dev/null || true
+        {
+          "name": $(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$SAFE_CHECK_NAME"),
+          "status": "completed",
+          "conclusion": "$CONCLUSION",
+          "completed_at": "$COMPLETED_AT",
+          "output": $OUTPUT_PAYLOAD
+        }
+        PAYLOAD
+              )"
+              CHECK_RUN_ID="$EXISTING_CHECK_ID"
+            else
+              echo "🆕 Creating check run..."
+              RESULT="$(gh api \
+                -X POST \
+                "/repos/${REPO}/check-runs" \
+                --input - <<-PAYLOAD 2>/dev/null || true
+        {
+          "name": $(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$SAFE_CHECK_NAME"),
+          "head_sha": "$SHA",
+          "status": "completed",
+          "conclusion": "$CONCLUSION",
+          "completed_at": "$COMPLETED_AT",
+          "output": $OUTPUT_PAYLOAD
+        }
+        PAYLOAD
+              )"
+              CHECK_RUN_ID="$(echo "$RESULT" | python3 -c \
+                'import json,sys; d=json.load(sys.stdin); print(d.get("id",""))' \
+                2>/dev/null || true)"
+            fi
+
+            if [[ -z "$CHECK_RUN_ID" || "$CHECK_RUN_ID" == "None" ]]; then
+              echo "⚠️  Could not create or update check run." \
+                "Verify the token has checks: write permission."
+              CHECK_RUN_ID=""
+            else
+              echo "✅ Check run published: #${CHECK_RUN_ID}"
+
+              # ── Paginate additional annotations if any were omitted ────
+              # GitHub allows up to 50 annotations per PATCH request.
+              # Re-read the full list and send any beyond the first batch.
+              if [[ "$OMITTED_COUNT" -gt 0 ]]; then
+                echo "📎 Sending additional annotation pages..."
+                python3 - "$TEMP_JSON" "$REPO" "$CHECK_RUN_ID" <<'PAGEEOF'
+import json, pathlib, subprocess, sys
+
+MAX_PER_PAGE = 50
+
+try:
+    data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except Exception:
+    sys.exit(0)
+
+repo       = sys.argv[2]
+run_id     = sys.argv[3]
+findings   = data.get("findings", [])
+
+import re
+annotations = []
+for f in findings:
+    if f.get("suppressed"):
+        continue
+    severity = f.get("severity", "").lower()
+    level    = "failure" if severity == "critical" else \
+               "warning" if severity == "warning" else "notice"
+    category = f.get("category", "Unknown")
+    target   = f.get("target", "")
+    message  = f"{category}: {target}" if target else category
+    detail   = f.get("detail", "") or ""
+    if detail:
+        message = f"{message}\n{detail}"
+    message = message[:65000]
+    path_match = re.search(r'([\w./\\-]+\.\w+)', target or "")
+    ann_path = path_match.group(1) if path_match else \
+        ".github/actions/soroban-upgrade-safeguard/action.yml"
+    annotations.append({
+        "path": ann_path,
+        "start_line": 1,
+        "end_line": 1,
+        "annotation_level": level,
+        "message": message,
+        "title": (f"[{category}] {target}" if target else category)[:255],
+    })
+
+# Skip first batch (already sent)
+remaining = annotations[MAX_PER_PAGE:]
+page = 2
+while remaining:
+    batch = remaining[:MAX_PER_PAGE]
+    remaining = remaining[MAX_PER_PAGE:]
+    payload = json.dumps({"output": {"title": "Soroban Upgrade Safeguard Report",
+                                      "summary": "Additional annotations (page {})".format(page),
+                                      "annotations": batch}})
+    result = subprocess.run(
+        ["gh", "api", "-X", "PATCH",
+         f"/repos/{repo}/check-runs/{run_id}",
+         "--input", "-"],
+        input=payload, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"Warning: page {page} annotation upload failed: {result.stderr}",
+              file=sys.stderr)
+    else:
+        print(f"  ↳ Sent annotation page {page} ({len(batch)} annotations)")
+    page += 1
+PAGEEOF
+              fi
+            fi
+          fi
+        fi
+
+        echo "check_run_id=${CHECK_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+        # ── PR comment (existing behaviour) ────────────────────────────
+        if [[ -z "$PR_NUMBER" ]]; then
+          echo "⚠️  Not running in a pull request context. Cannot post a PR comment."
+          echo "comment_id=" >> "$GITHUB_OUTPUT"
+          rm -f "$TEMP_MD" "$TEMP_JSON" "$TEMP_GHA" "$TEMP_STDERR"
+          exit 0
+        fi
+
+        REPORT_CONTENT="$(cat "$TEMP_MD")"
+        rm -f "$TEMP_MD" "$TEMP_JSON" "$TEMP_GHA" "$TEMP_STDERR"
+
         COMMENT_BODY=$(cat <<-EOF
         ## 🔍 Soroban Upgrade Safeguard Report
 
@@ -98,8 +416,6 @@ runs:
         EOF
         )
 
-        # ── Check if a previous comment exists ──────────────────────────
-        # The hidden marker lets us find our own comments reliably.
         SEARCH_MARKER="soroban-upgrade-safeguard-report"
         EXISTING_COMMENT_ID=""
 
@@ -109,11 +425,9 @@ runs:
           2>/dev/null || true)"
 
         if [[ -n "$COMMENTS_JSON" ]]; then
-          # Take the first matching comment (there should only be one)
           EXISTING_COMMENT_ID="$(echo "$COMMENTS_JSON" | head -1)"
         fi
 
-        # ── Create or update the comment ────────────────────────────────
         if [[ -n "$EXISTING_COMMENT_ID" ]]; then
           echo "🔄 Updating existing comment #${EXISTING_COMMENT_ID}..."
           gh api \

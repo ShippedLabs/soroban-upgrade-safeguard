@@ -12,10 +12,11 @@ three complete workflow examples covering the most common usage modes.
 3. [Example 1 – Pull request check](#example-1--pull-request-check)
 4. [Example 2 – Release gate](#example-2--release-gate)
 5. [Example 3 – Fork pull request](#example-3--fork-pull-request)
-6. [Common `args` combinations](#common-args-combinations)
-7. [Artifact paths](#artifact-paths)
-8. [Fork limitations](#fork-limitations)
-9. [Fallback behavior](#fallback-behavior)
+6. [Example 4 – GitHub Checks API publisher](#example-4--github-checks-api-publisher)
+7. [Common `args` combinations](#common-args-combinations)
+8. [Artifact paths](#artifact-paths)
+9. [Fork limitations](#fork-limitations)
+10. [Fallback behavior](#fallback-behavior)
 
 ---
 
@@ -27,8 +28,10 @@ three complete workflow examples covering the most common usage modes.
 | :--- | :---: | :--- | :--- |
 | `old-wasm` | yes | — | Path to the baseline (deployed) WASM file. |
 | `new-wasm` | yes | — | Path to the candidate (new) WASM file. |
-| `token` | no | `${{ github.token }}` | GitHub token used to post the PR comment. Must have `pull-requests: write`. |
+| `token` | no | `${{ github.token }}` | GitHub token used to post the PR comment and (when `publish-check` is enabled) to create check runs. Must have `pull-requests: write`; additionally requires `checks: write` for check-run publication. |
 | `args` | no | `''` | Additional CLI flags passed verbatim to `soroban-upgrade-safeguard` (e.g. `--strict --explain --config .safeguard.toml`). |
+| `publish-check` | no | `'false'` | When `'true'`, create or update a GitHub Checks API check run for the current commit. Surfaces a structured summary and per-finding annotations directly on the commit and in the PR Checks tab. Requires `checks: write`. Fork pull requests degrade gracefully when the permission is unavailable. |
+| `check-name` | no | `'Soroban Upgrade Safeguard'` | Display name shown for the check run in the Checks UI. Only used when `publish-check` is `'true'`. Should be kept stable across runs so reruns update the same check entry rather than creating duplicates. |
 
 ### Outputs
 
@@ -36,17 +39,19 @@ three complete workflow examples covering the most common usage modes.
 | :--- | :--- |
 | `is_safe` | `'true'` when the upgrade passes with no critical findings; `'false'` otherwise. |
 | `comment_id` | ID of the created or updated PR comment. Empty when running outside a PR context or when the write permission is not available. |
+| `check_run_id` | ID of the created or updated GitHub Checks API check run. Empty when `publish-check` is `'false'` or when the token lacks `checks: write` permission (e.g. fork pull requests). |
 
 ---
 
 ## Permissions reference
 
-| Scenario | `pull-requests` | `contents` | Notes |
-| :--- | :--- | :--- | :--- |
-| Standard PR (same-repo branch) | `write` | `read` | Token can post comments directly. |
-| Release gate (tag push) | not needed | `write` (if creating a release) | No PR comment is posted; report is saved as a workflow artifact. |
-| Fork PR – analysis job | not needed | `read` | Fork context; write permissions are not available. |
-| Fork PR – comment job | `write` | `read` | Runs in the base-repo context via `workflow_run`; never executes fork code. |
+| Scenario | `pull-requests` | `checks` | `contents` | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| Standard PR (same-repo branch) | `write` | `write` (if `publish-check: 'true'`) | `read` | Token can post comments and create check runs directly. |
+| Standard PR, comment only | `write` | not needed | `read` | Default behaviour without `publish-check`. |
+| Release gate (tag push) | not needed | `write` (optional) | `write` (if creating a release) | No PR comment posted; report saved as artifact. |
+| Fork PR – analysis job | not needed | not needed | `read` | Fork context; write permissions unavailable. `publish-check` is skipped gracefully. |
+| Fork PR – comment job | `write` | `write` (optional) | `read` | Base-repo context via `workflow_run`; safe to grant `checks: write` here. |
 
 The default `GITHUB_TOKEN` satisfies these requirements for same-repo PRs and
 release workflows with no extra configuration. Repository secrets (including
@@ -285,6 +290,82 @@ one file would expose the write token to fork-supplied code.
 
 ---
 
+## Example 4 – GitHub Checks API publisher
+
+**Use this when:** you want a first-class check run on every commit — not just
+a PR comment. A check run gives reviewers one stable status entry in the PR
+Checks tab, per-finding annotations attached directly to the commit diff, and a
+clear distinction between a safe upgrade, an unsafe upgrade, and a tool error.
+
+Full workflow: [`docs/workflow-examples/checks-publisher.yml`](workflow-examples/checks-publisher.yml)
+
+```yaml
+name: Soroban Upgrade Safety – Checks API Publisher
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['wasm/**', 'contracts/**']
+
+jobs:
+  upgrade-safeguard:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write          # publish the check run
+      pull-requests: write   # post / update the report comment
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Run upgrade safety check
+        id: safeguard
+        uses: ./.github/actions/soroban-upgrade-safeguard
+        with:
+          old-wasm: ./wasm/v1.wasm
+          new-wasm: ./wasm/v2.wasm
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --strict --explain
+          publish-check: 'true'
+          check-name: 'Soroban Upgrade Safeguard'
+
+      - name: Gate on safety verdict
+        if: steps.safeguard.outputs.is_safe != 'true'
+        run: |
+          echo "::error::Upgrade safety check failed."
+          exit 1
+```
+
+**What it does:**
+- Creates a check run named `Soroban Upgrade Safeguard` on the head commit.
+- Maps safeguard outcomes to check conclusions:
+  - Exit 0 (safe) → `success`
+  - Exit 1 (critical findings) → `failure`
+  - Exit 2 (resource limit / config error) → `action_required`
+  - Other → `cancelled`
+- Publishes up to 50 per-finding annotations in the first API call, then paginates
+  the remainder automatically. When findings are omitted from inline annotations,
+  the check-run summary includes a note with the omitted count and a reference to
+  the full report.
+- On reruns, detects the existing check run for the same commit and name and
+  updates it in-place rather than creating a duplicate.
+- On fork pull requests, skips check-run creation gracefully (logs a warning) and
+  continues without failing the job. The PR comment and safeguard verdict are
+  still produced normally.
+- The `check_run_id` output holds the ID of the published check run, which you
+  can use to link directly to it from a subsequent step.
+
+**Setting up branch protection:**
+To require the check before merging, add `Soroban Upgrade Safeguard` (or
+whatever `check-name` you configured) as a required status check in your
+branch protection settings under *Settings → Branches → Require status
+checks to pass before merging*.
+
+---
+
 ## Common `args` combinations
 
 Pass any of these via the `args` input (or directly on the CLI):
@@ -357,6 +438,10 @@ overall workflow:
 | PR comment already exists | The existing comment is updated in-place rather than creating a duplicate. |
 | Tool exits with code 1 (critical findings) | `is_safe` is `'false'`; the job continues to the gate step. |
 | Tool exits with code 2 (resource limit exceeded) | `is_safe` is `'false'`; treat this as a configuration issue (raise the relevant limit). |
+| `publish-check: 'true'` but token lacks `checks: write` | A warning is logged; `check_run_id` is empty; the PR comment and verdict are unaffected. |
+| `publish-check: 'true'` on a fork PR | Check-run creation is skipped with a warning; all other behaviour is unchanged. |
+| Check run for the same commit and name already exists | The existing check run is updated in-place rather than creating a duplicate active check. |
+| More than 50 findings | Annotations are paginated automatically (50 per request); the omitted count is noted in the check-run summary. |
 
 To make the workflow fail when the token cannot write comments (rather than
 silently continuing), check `steps.safeguard.outputs.comment_id` explicitly:

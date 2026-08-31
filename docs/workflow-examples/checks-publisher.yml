@@ -1,0 +1,110 @@
+# Example – GitHub Checks API publisher
+#
+# Uses the `publish-check` input to create a first-class check run for every
+# commit, surfacing a structured summary and per-finding annotations directly
+# in the GitHub Checks UI — independent of (and in addition to) the PR
+# comment posted by the action.
+#
+# Required permissions
+# --------------------
+# checks: write         — create and update check runs.
+# pull-requests: write  — post / update the PR comment (existing behaviour).
+# contents: read        — check out the repository.
+#
+# The default GITHUB_TOKEN satisfies all three permissions for a same-repo
+# pull request.  No additional secrets are required.
+#
+# Fork pull request notes
+# -----------------------
+# Fork PR jobs run with a read-only token.  The action detects this
+# automatically and skips the check-run creation step with a warning, rather
+# than failing the job.  The safeguard verdict and PR comment are still
+# produced normally via the two-job fork-pr.yml pattern — see that example for
+# the full fork workflow.  If you also want check runs for fork PRs, use the
+# `workflow_run` pattern: run `publish-check: 'true'` in the base-repo job
+# (job 2 of fork-pr.yml) where the write token is available.
+#
+# Annotation cap
+# --------------
+# GitHub's Checks API accepts at most 50 annotations per API call.  When
+# there are more than 50 findings the action sends them in pages
+# automatically, and also notes the total omitted count in the check-run
+# summary so reviewers know to look at the full report for the complete list.
+#
+# check-name
+# ----------
+# The `check-name` input controls the display name shown in the Checks UI.
+# Pick a name that is stable across runs so GitHub can group re-runs under the
+# same check entry rather than creating duplicates.  The action enforces this
+# by looking for an existing check run with the same name on the same commit
+# before creating a new one.
+
+name: Soroban Upgrade Safety – Checks API Publisher
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'contracts/**'
+
+jobs:
+  upgrade-safeguard:
+    name: Upgrade safety check
+    runs-on: ubuntu-latest
+
+    permissions:
+      checks: write          # publish the check run
+      pull-requests: write   # post / update the report comment
+      contents: read         # check out the repository
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build soroban-upgrade-safeguard
+        run: cargo build --release
+
+      - name: Add tool to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Run upgrade safety check
+        id: safeguard
+        uses: ./.github/actions/soroban-upgrade-safeguard
+        with:
+          old-wasm: ./wasm/v1.wasm
+          new-wasm: ./wasm/v2.wasm
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --strict --explain
+          # Enable GitHub Checks API integration.
+          publish-check: 'true'
+          # Stable name: GitHub groups re-runs under the same check entry.
+          check-name: 'Soroban Upgrade Safeguard'
+
+      # Surface the check-run ID in the job summary for easy navigation.
+      - name: Print check run URL
+        if: steps.safeguard.outputs.check_run_id != ''
+        run: |
+          echo "Check run: https://github.com/${{ github.repository }}/runs/${{ steps.safeguard.outputs.check_run_id }}"
+
+      # Gate the merge on the safeguard verdict.  The check run itself also
+      # blocks the merge when configured as a required status check in the
+      # branch protection settings.
+      - name: Gate on safety verdict
+        if: steps.safeguard.outputs.is_safe != 'true'
+        run: |
+          echo "::error::Upgrade safety check failed. Review the check run and the report comment on this PR."
+          exit 1
