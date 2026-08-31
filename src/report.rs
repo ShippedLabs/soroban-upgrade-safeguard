@@ -385,6 +385,91 @@ impl SafetyReport {
                     });
             }
         }
+
+        // Cross-schema findings: durability and namespace changes across versions.
+        for mismatch in &comparison.cross_findings {
+            use crate::storage_schema::SchemaMismatch;
+            let (category, target, remediation_hint) = match mismatch {
+                SchemaMismatch::DurabilityChanged {
+                    declaration,
+                    old_durability,
+                    new_durability,
+                    remediation,
+                    ..
+                } => (
+                    "Storage Durability Changed".to_string(),
+                    Some(format!(
+                        "{declaration} ({} → {})",
+                        old_durability.label(),
+                        new_durability.label()
+                    )),
+                    remediation.clone(),
+                ),
+                SchemaMismatch::NamespaceChanged {
+                    declaration,
+                    old_namespace,
+                    new_namespace,
+                    remediation,
+                } => {
+                    let change_desc = if old_namespace.is_empty() {
+                        format!("{declaration} (added '{new_namespace}')")
+                    } else if new_namespace.is_empty() {
+                        format!("{declaration} (removed '{old_namespace}')")
+                    } else {
+                        format!("{declaration} ('{old_namespace}' → '{new_namespace}')")
+                    };
+                    (
+                        "Storage Namespace Changed".to_string(),
+                        Some(change_desc),
+                        remediation.clone(),
+                    )
+                }
+                // Per-side mismatch variants should not appear in cross_findings.
+                _ => continue,
+            };
+
+            let message = format!("{mismatch}");
+            let finding = crate::diff::Finding {
+                severity: crate::diff::Severity::Critical,
+                axes: vec![crate::diff::CompatibilityAxis::StorageLayout],
+                category: category.clone(),
+                message,
+                type_name: None,
+                target: target.clone(),
+                change: None,
+                root_target: None,
+            };
+            let rule = suppressions.matching_rule(&finding);
+            let suppressed = rule.is_some();
+            self.critical_count += 1;
+            self.total_findings += 1;
+            if suppressed {
+                self.suppressed_count += 1;
+                self.suppressed_critical_count += 1;
+            }
+            if !suppressed {
+                let storage_gated = suppressions.policy.gate_storage_layout || strict;
+                if storage_gated {
+                    self.is_safe = false;
+                    self.axis_verdicts.insert(
+                        crate::diff::CompatibilityAxis::StorageLayout,
+                        AxisStatus::Failed,
+                    );
+                }
+            }
+            self.findings_by_category
+                .entry(category)
+                .or_default()
+                .push(ReportedFinding {
+                    rule_id: "storage_schema_mismatch".to_string(),
+                    axes: finding.axes.clone(),
+                    finding,
+                    suppressed,
+                    suppression_reason: rule.and_then(|rule| rule.reason.clone()),
+                    remediation: explain.then(|| remediation_hint.clone()),
+                    migrated_by: None,
+                });
+        }
     }
 
     pub fn apply_lineage_report(
