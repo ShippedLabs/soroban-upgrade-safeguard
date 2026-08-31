@@ -616,7 +616,8 @@ mod tests {
         // (The warning is a side effect printed to stderr during decode; this
         // test verifies the parser does not error and returns an empty vec.)
         let with_empty_section = wasm_with_custom_section("contractspecv0", &[]);
-        let metadata = extract_metadata(&with_empty_section).expect("empty contractspec must parse");
+        let metadata =
+            extract_metadata(&with_empty_section).expect("empty contractspec must parse");
         assert!(
             metadata.spec.is_empty(),
             "an empty contractspecv0 section must decode to an empty spec vec"

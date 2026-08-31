@@ -67,8 +67,7 @@ fn zero_byte_old_wasm_fails_with_validation_error() {
 
     // Must identify the file path
     assert!(
-        combined.contains(&zero_byte.display().to_string())
-            || combined.contains("empty.wasm"),
+        combined.contains(&zero_byte.display().to_string()) || combined.contains("empty.wasm"),
         "error must name the zero-byte file path, got: {combined}"
     );
 
@@ -105,8 +104,7 @@ fn zero_byte_new_wasm_fails_with_validation_error() {
 
     // Must identify the file path
     assert!(
-        combined.contains(&zero_byte.display().to_string())
-            || combined.contains("empty.wasm"),
+        combined.contains(&zero_byte.display().to_string()) || combined.contains("empty.wasm"),
         "error must name the zero-byte file path, got: {combined}"
     );
 
@@ -223,8 +221,7 @@ fn one_byte_wasm_also_fails_with_validation_error() {
     let combined = run.combined();
 
     assert!(
-        combined.contains(&one_byte.display().to_string())
-            || combined.contains("truncated.wasm"),
+        combined.contains(&one_byte.display().to_string()) || combined.contains("truncated.wasm"),
         "error must name the invalid file, got: {combined}"
     );
 
@@ -253,8 +250,7 @@ fn three_byte_wasm_fails_validation() {
     let combined = run.combined();
 
     assert!(
-        combined.contains(&three_byte.display().to_string())
-            || combined.contains("partial.wasm"),
+        combined.contains(&three_byte.display().to_string()) || combined.contains("partial.wasm"),
         "error must name the invalid file, got: {combined}"
     );
 
@@ -288,7 +284,9 @@ fn valid_wasm_does_not_trigger_zero_byte_error() {
 
     // Must produce actual comparison output
     assert!(
-        combined.contains("Function") || combined.contains("findings") || combined.contains("CRITICAL"),
+        combined.contains("Function")
+            || combined.contains("findings")
+            || combined.contains("CRITICAL"),
         "valid WASM comparison must produce findings, got: {combined}"
     );
 }

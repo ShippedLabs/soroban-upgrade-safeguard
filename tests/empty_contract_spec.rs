@@ -28,7 +28,7 @@ fn minimal_wasm_with_empty_contractspec() -> Vec<u8> {
     wasm.push(section_size as u8); // section size
     wasm.push(section_name.len() as u8); // name length
     wasm.extend_from_slice(section_name); // name
-    // No data bytes follow — this is the empty section
+                                          // No data bytes follow — this is the empty section
 
     wasm
 }
@@ -112,8 +112,7 @@ fn missing_contractspec_section_does_not_produce_empty_diagnostic() {
 
     // stderr must NOT contain the empty section diagnostic (section is absent)
     assert!(
-        !run
-            .stderr
+        !run.stderr
             .contains("contractspecv0 section is present but empty"),
         "missing section must not trigger empty-section diagnostic, stderr:\n{}",
         run.stderr
@@ -128,8 +127,7 @@ fn empty_spec_distinguishes_from_valid_nonempty_spec() {
     let valid_wasm_path = dir.join("v1.wasm");
 
     // v1.wasm has a valid non-empty spec
-    let valid_wasm = std::fs::read(&valid_wasm_path)
-        .expect("v1.wasm fixture must exist");
+    let valid_wasm = std::fs::read(&valid_wasm_path).expect("v1.wasm fixture must exist");
 
     let empty_wasm = minimal_wasm_with_empty_contractspec();
 
@@ -168,8 +166,7 @@ fn empty_to_nonempty_spec_is_a_valid_upgrade() {
     let valid_wasm_path = dir.join("v1.wasm");
 
     let empty_wasm = minimal_wasm_with_empty_contractspec();
-    let valid_wasm = std::fs::read(&valid_wasm_path)
-        .expect("v1.wasm fixture must exist");
+    let valid_wasm = std::fs::read(&valid_wasm_path).expect("v1.wasm fixture must exist");
 
     let run = run_comparison(&empty_wasm, &valid_wasm);
 
