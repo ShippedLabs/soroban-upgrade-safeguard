@@ -183,6 +183,10 @@ fn compatible_schemas_produce_no_cross_findings() {
     // every declared entry as UnobservedDeclaration, so is_compatible() is
     // expected to be false here. The purpose of this test is only to assert
     // that identical schemas produce zero *cross*-schema findings.
+    assert!(
+        cmp.is_compatible(),
+        "identical old/new schemas must be compatible"
+    );
 }
 
 // ── Namespace change detection ────────────────────────────────────────────────
@@ -414,6 +418,7 @@ fn namespace_change_is_in_json_output() {
 
 #[test]
 fn cross_schema_findings_apply_to_safety_report() {
+    use soroban_upgrade_safeguard::storage_schema::StorageSchema;
     use soroban_upgrade_safeguard::{compare_wasm_bytes_with_options, CompareOptions};
 
     let old_wasm =

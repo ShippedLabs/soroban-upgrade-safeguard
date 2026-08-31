@@ -18,6 +18,10 @@ use soroban_upgrade_safeguard::wasm_complexity::{
     WasmComplexityDelta, WasmComplexityProfile,
 };
 use soroban_upgrade_safeguard::{compare_wasm_bytes_with_options, CompareOptions};
+    ComplexityBudgetConfig, ComplexityBudgetEntryFile, WasmComplexityDelta, WasmComplexityProfile,
+    evaluate_complexity_budgets, profile_wasm,
+};
+use soroban_upgrade_safeguard::{CompareOptions, compare_wasm_bytes_with_options};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +56,8 @@ fn budget(metric: &str, limit: Option<i64>, pct: Option<f64>) -> ComplexityBudge
 
 fn make_budget(entries: Vec<ComplexityBudgetEntryFile>) -> ComplexityBudgetConfig {
     ComplexityBudgetConfig::from_file_entries(entries).expect("test budget config must be valid")
+    ComplexityBudgetConfig::from_file_entries(entries)
+        .expect("test budget config must be valid")
 }
 
 // ── Profile tests ─────────────────────────────────────────────────────────────
@@ -67,6 +73,8 @@ fn profile_empty_module_has_zero_counts() {
         profile.total_instructions, 0,
         "no instructions in minimal module"
     );
+    assert_eq!(profile.defined_functions, 0, "no functions in minimal module");
+    assert_eq!(profile.total_instructions, 0, "no instructions in minimal module");
     assert!(profile.functions.is_empty(), "no function entries");
     // All family counts should be 0
     for (family, count) in &profile.by_family {
@@ -86,6 +94,8 @@ fn profile_v1_wasm_has_nonzero_functions_and_instructions() {
         profile.total_instructions > 0,
         "v1.wasm must have instructions"
     );
+    assert!(profile.defined_functions > 0, "v1.wasm must have at least one function");
+    assert!(profile.total_instructions > 0, "v1.wasm must have instructions");
 }
 
 #[test]
@@ -126,6 +136,8 @@ fn profile_all_families_present_in_by_family_map() {
         "reference",
         "simd",
         "other",
+        "arithmetic", "control", "calls", "memory", "comparison",
+        "conversion", "reference", "simd", "other",
     ];
     for family in expected_families {
         assert!(
@@ -190,6 +202,7 @@ fn delta_is_deterministic_for_same_inputs() {
         d1.total_instructions.absolute,
         d2.total_instructions.absolute
     );
+    assert_eq!(d1.total_instructions.absolute, d2.total_instructions.absolute);
     assert_eq!(d1.defined_functions.absolute, d2.defined_functions.absolute);
 }
 
@@ -373,6 +386,10 @@ fn complexity_section_present_in_json_output_when_budget_set() {
     let json_str =
         serde_json::to_string(&report.to_renderable()).expect("renderable must serialize to JSON");
     let json: serde_json::Value = serde_json::from_str(&json_str).expect("JSON must be valid");
+    let json_str = serde_json::to_string(&report.to_renderable())
+        .expect("renderable must serialize to JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&json_str).expect("JSON must be valid");
 
     assert!(
         json.get("complexity_delta").is_some(),

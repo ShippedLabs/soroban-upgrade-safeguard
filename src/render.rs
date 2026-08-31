@@ -1495,6 +1495,10 @@ mod tests {
 
         // Should render the finding message without panic
         assert!(text.contains("Protocol version changed from 20 to 21"));
+        
+        // Should render the finding message without panic
+        assert!(text.contains("Protocol version changed from 20 to 21"));
+        assert!(text.contains("Environment Changed"));
         // Should not contain placeholder text like "unknown"
         assert!(!text.contains("unknown"));
     }
@@ -1513,6 +1517,7 @@ mod tests {
 
         let markdown = report.generate_summary_markdown();
 
+        
         // Should render the finding message without panic
         assert!(markdown.contains("Protocol version changed from 20 to 21"));
         assert!(markdown.contains("Environment Changed"));

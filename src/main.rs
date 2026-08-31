@@ -2334,6 +2334,8 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             progress,
         );
 
+        render_pair_outputs(&result, pair, args, outputs, width, progress)?;
+
         if !result.report().is_safe() {
             overall_safe = false;
         }
