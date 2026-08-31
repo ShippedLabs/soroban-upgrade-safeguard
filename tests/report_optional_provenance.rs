@@ -1,9 +1,8 @@
 //! Regression tests for reports that omit optional provenance fields.
 //!
 //! Report consumers may receive older or manually generated JSON that omits
-//! optional provenance fields (baseline_source, verified_code_hash,
-//! old_spec_summary, new_spec_summary). The renderer must handle these
-//! gracefully — no panics, no invented source values.
+//! optional provenance fields (old_spec_summary, new_spec_summary). The
+//! renderer must handle these gracefully — no panics, no invented source values.
 
 use std::path::PathBuf;
 
@@ -31,15 +30,6 @@ fn text_renderer_handles_missing_provenance() {
     assert!(
         report.critical_count >= 1,
         "v1 -> v2 must report at least one critical finding"
-    );
-
-    assert!(
-        report.baseline_source.is_none(),
-        "library API must not set baseline_source"
-    );
-    assert!(
-        report.verified_code_hash.is_none(),
-        "library API must not set verified_code_hash"
     );
 
     let output = std::panic::catch_unwind(|| report.generate_summary_text(false));
@@ -89,15 +79,6 @@ fn markdown_renderer_handles_missing_provenance() {
         "v1 -> v2 must report at least one critical finding"
     );
 
-    assert!(
-        report.baseline_source.is_none(),
-        "library API must not set baseline_source"
-    );
-    assert!(
-        report.verified_code_hash.is_none(),
-        "library API must not set verified_code_hash"
-    );
-
     let output = std::panic::catch_unwind(|| report.generate_summary_markdown());
     assert!(
         output.is_ok(),
@@ -145,9 +126,6 @@ fn safe_report_also_handles_missing_provenance() {
         report.critical_count, 0,
         "identical builds have no criticals"
     );
-
-    assert!(report.baseline_source.is_none());
-    assert!(report.verified_code_hash.is_none());
 
     let text_output = std::panic::catch_unwind(|| report.generate_summary_text(false));
     assert!(

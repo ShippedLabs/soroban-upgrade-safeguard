@@ -2280,14 +2280,12 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             args,
             outputs,
             width,
-            args.redact_paths,
-            Some(&gap.name),
             progress,
         )?;
 
         if let Some(output_dir) = args.per_contract_output_dir.as_deref() {
             let content = render_single(
-                &gap_report,
+                gap_result.report(),
                 args.format.unwrap_or(OutputFormat::Text),
                 args.explain,
                 args.ascii,
@@ -2305,18 +2303,8 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             )?;
         }
 
-        results.push(BatchResult::Error {
-            id: gap.name.clone(),
-            name: gap.name,
-            labels: Vec::new(),
-            old_path: gap.old_path,
-            new_path: None,
-            old_storage_schema: None,
-            new_storage_schema: None,
-            error: "contract is missing from the new deployment".to_string(),
-            report: gap_report,
-        });
         overall_safe = false;
+        results.push(gap_result);
     }
 
     // Process each regular pair with error-handling (per-pair failures do not abort the batch)
@@ -2332,149 +2320,21 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
 
         progress(format!(
             "📦 [{}/{}] Comparing contract pair: {}",
-            i + 1 + gaps.len(),
+            i + 1 + gap_count,
             total,
             contract_name.bold()
         ));
 
-        let mut pair_error = None;
-        let report = match (
-            load_wasm_input(
-                &pair.old,
-                &remote_config,
-                &oci_config,
-                args.no_symlinks,
-                progress,
-            ),
-            load_wasm_input(
-                &pair.new,
-                &remote_config,
-                &oci_config,
-                args.no_symlinks,
-                progress,
-            ),
-        ) {
-            (Ok(old_wasm), Ok(new_wasm)) => {
-                match load_pair_storage_schemas(pair).and_then(|storage_schemas| {
-                    if let Some(storage_schemas) = storage_schemas.as_ref() {
-                        let mut report =
-                            soroban_upgrade_safeguard::compare_wasm_bytes_with_options(
-                                &old_wasm.bytes,
-                                &new_wasm.bytes,
-                                &soroban_upgrade_safeguard::CompareOptions {
-                                    suppressions: Some(&pair_suppressions),
-                                    explain,
-                                    strict: settings.strict.value,
-                                    storage_schemas: Some((
-                                        &storage_schemas.old,
-                                        &storage_schemas.new,
-                                    )),
-                                    lineage_store: None,
-                                    contract: Some(contract_name.as_str()),
-                                },
-                            )?;
-                        report.set_no_timestamp(settings.no_timestamp.value);
-                        Ok(report)
-                    } else {
-                        compare_contracts(
-                            &ContractComparison {
-                                old_bytes: &old_wasm.bytes,
-                                old_path: &old_wasm.path,
-                                new_bytes: &new_wasm.bytes,
-                                new_path: &new_wasm.path,
-                                suppressions: &pair_suppressions,
-                                explain,
-                                strict: settings.strict.value,
-                                no_timestamp: settings.no_timestamp.value,
-                                empirical: args.empirical || args.empirical_file.is_some(),
-                                empirical_file: args.empirical_file.as_deref(),
-                                contract_id: None,
-                                rpc_url: None,
-                                rpc_headers: &args.rpc_headers,
-                                rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
-                                lineage_store: None,
-                                contract: Some(contract_name.as_str()),
-                            },
-                            progress,
-                        )
-                    }
-                }) {
-                    Ok(report) => {
-                        report.with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
-                    }
-                    Err(e) => {
-                        pair_error = Some(e.to_string());
-                        progress(format!(
-                            "  ⚠️  Comparison failed for '{}': {}",
-                            contract_name,
-                            e.to_string().red()
-                        ));
-                        synthesize_error_report(
-                            &contract_name,
-                            &e.to_string(),
-                            settings.strict.value,
-                            settings.no_timestamp.value,
-                        )
-                        .with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
-                    }
-                }
-            }
-            (Err(e), _) | (_, Err(e)) => {
-                pair_error = Some(e.to_string());
-                progress(format!(
-                    "  ⚠️  Failed to load contract files for '{}': {}",
-                    contract_name,
-                    e.to_string().red()
-                ));
-                synthesize_error_report(
-                    &contract_name,
-                    &e.to_string(),
-                    settings.strict.value,
-                    settings.no_timestamp.value,
-                )
-            }
-        };
-
-        if !report.is_safe() {
-            overall_safe = false;
-        }
-
-        let file_outputs: Vec<OutputSpec> = outputs
-            .iter()
-            .filter(|output| output.path.is_some())
-            .cloned()
-            .collect();
-        render_to_outputs(
-            &report,
-            &file_outputs,
-            explain,
-            ascii,
-            plain,
-            width,
-            args.redact_paths,
-            Some(&contract_name),
+        let result = compare_batch_pair(
+            pair,
+            args,
+            &remote_config,
+            &oci_config,
+            &mut config_cache,
             progress,
-        )?;
+        );
 
-        if let Some(output_dir) = args.per_contract_output_dir.as_deref() {
-            let content = render_single(
-                &report,
-                args.format.unwrap_or(OutputFormat::Text),
-                explain,
-                ascii,
-                plain,
-                width,
-                args.redact_paths,
-            )?;
-            write_report_file(
-                output_dir,
-                &contract_name,
-                &contract_id,
-                &args.per_contract_output_name_template,
-                args.format.unwrap_or(OutputFormat::Text),
-                &content,
-            )?;
-        }
+        render_pair_outputs(&result, pair, args, outputs, width, progress)?;
 
         if !result.report().is_safe() {
             overall_safe = false;
@@ -2600,6 +2460,10 @@ fn synthesize_error_report(
         empirical_findings: Vec::new(),
         budget_violations: Vec::new(),
         settings: report::ReportSettings::default(),
+        complexity_old: None,
+        complexity_new: None,
+        complexity_delta: None,
+        complexity_violations: Vec::new(),
     }
 }
 
@@ -2777,6 +2641,7 @@ fn compare_batch_pair(
                             storage_schemas: Some((&storage_schemas.old, &storage_schemas.new)),
                             lineage_store: None,
                             contract: Some(contract_name.as_str()),
+                            complexity_budget: None,
                         },
                     )?;
                     report.set_no_timestamp(settings.no_timestamp.value);
@@ -2800,6 +2665,7 @@ fn compare_batch_pair(
                             rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
                             lineage_store: None,
                             contract: Some(contract_name.as_str()),
+                            complexity_budget: None,
                         },
                         progress,
                     )
@@ -2898,6 +2764,7 @@ fn render_pair_outputs(
         ascii,
         plain,
         width,
+        args.redact_paths,
         Some(&pair.name),
         progress,
     )?;
@@ -2910,6 +2777,7 @@ fn render_pair_outputs(
             ascii,
             plain,
             width,
+            args.redact_paths,
         )?;
         write_report_file(
             output_dir,
@@ -3024,6 +2892,10 @@ fn gap_to_result(gap: &GapContract, args: &Args) -> BatchResult {
         empirical_findings: Vec::new(),
         budget_violations: Vec::new(),
         settings: report::ReportSettings::default(),
+        complexity_old: None,
+        complexity_new: None,
+        complexity_delta: None,
+        complexity_violations: Vec::new(),
     };
     BatchResult::Error {
         id: name.clone(),
@@ -3061,6 +2933,7 @@ fn render_gap_outputs(
         args.ascii,
         args.plain,
         width,
+        args.redact_paths,
         Some(gap_name),
         progress,
     )?;
@@ -3073,6 +2946,7 @@ fn render_gap_outputs(
             args.ascii,
             args.plain,
             width,
+            args.redact_paths,
         )?;
         write_report_file(
             output_dir,
@@ -3610,6 +3484,7 @@ fn run_single(
                     storage_schemas: None,
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
+                    complexity_budget: None,
                 },
             )?
             .with_symlinks(None, new.symlink.clone())
@@ -3648,6 +3523,7 @@ fn run_single(
                     rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
+                    complexity_budget: None,
                 },
                 progress,
             )?
@@ -4357,6 +4233,9 @@ struct ContractComparison<'a> {
     /// The contract's name, used to scope migrations declared with
     /// `contracts = [..]` in a config shared across several contracts.
     contract: Option<&'a str>,
+    /// Complexity budgets for the WASM code section. `None` skips profiling.
+    complexity_budget:
+        Option<&'a soroban_upgrade_safeguard::wasm_complexity::ComplexityBudgetConfig>,
 }
 
 struct PairStorageSchemas {
@@ -4415,6 +4294,7 @@ fn compare_contracts(
         rpc_allow_id_mismatch,
         lineage_store,
         contract,
+        complexity_budget,
     } = comparison;
     let old_meta = parser::extract_metadata(old_bytes)?;
     let old_spec = spec::ContractSpec::from_entries(&old_meta.spec);
@@ -4479,6 +4359,12 @@ fn compare_contracts(
     .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
 
     report.no_timestamp = *no_timestamp;
+
+    // WASM complexity profiling — runs when a budget is configured.
+    if let Some(budget) = complexity_budget {
+        report.apply_complexity(old_bytes, new_bytes, budget);
+    }
+
     let mut empirical_findings = Vec::new();
     let mut is_empirical = false;
 
