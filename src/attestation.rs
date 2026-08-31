@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
+/// In-toto statement constants
 pub const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
 pub const PREDICATE_TYPE: &str =
     "https://github.com/ShippedLabs/soroban-upgrade-safeguard/attestation/v1";
@@ -21,6 +22,7 @@ pub struct ArtifactDigest {
     pub sha256: String,
 }
 
+/// Helper to compute SHA-256 digests for artifacts.
 impl ArtifactDigest {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self {
@@ -39,6 +41,7 @@ pub struct InTotoSubject {
     pub digest: ArtifactDigest,
 }
 
+/// Attested artifact with name and digest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestedArtifact {
     pub name: String,

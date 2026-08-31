@@ -463,13 +463,14 @@ schema coverage rules, path rules, and JSON provenance.
 
 ### Deterministic output for snapshot testing
 
-Use `--no-timestamp` to suppress the timestamp in report provenance,
-enabling reproducible snapshot tests:
+By default, every report includes a timestamp in the provenance metadata for full auditability. Use `--no-timestamp` to suppress only the provenance timestamp, enabling reproducible snapshot tests and deterministic artifact generation:
 
 ```bash
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
   --format json --no-timestamp > report.json
 ```
+
+This flag omits only the provenance timestamp field from the report metadata. All other timestamp information (such as build timestamps embedded in the WASM itself) remains unchanged. The normal timestamped behavior is the default and should be used for production workflows where auditability is important.
 
 ### GitHub Action
 
