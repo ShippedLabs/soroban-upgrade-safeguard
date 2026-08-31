@@ -21,6 +21,8 @@ pub struct ArtifactDigest {
     pub sha256: String,
 }
 
+//commented with this
+
 impl ArtifactDigest {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self {
