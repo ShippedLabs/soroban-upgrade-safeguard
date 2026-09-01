@@ -768,17 +768,6 @@ fn fold_pairs(walk: &Walk, cli: &CliSettings) -> Result<Vec<ResolvedPair>> {
         let old = resolve_path(&walked.base_dir, walked.raw.old.clone());
         let new = resolve_path(&walked.base_dir, walked.raw.new.clone());
 
-        // Reject self-comparison: old and new must resolve to different files
-        if canonical_identity(&old) == canonical_identity(&new) {
-            bail!(
-                "Manifest pair compares a file with itself.\n  \
-                 file: {}\n  defined in: {}\n\
-                 A comparison requires two distinct build inputs (old and new).",
-                old.display(),
-                walked.defined_in.display()
-            );
-        }
-
         // Identity derivation preserves the pre-composition behavior: explicit
         // `name`, else the file name of `new`.
         let name = walked.raw.name.clone().unwrap_or_else(|| {
@@ -2308,7 +2297,7 @@ mod tests {
 
         let error = format!("{:#}", resolve(&root, &CliSettings::default()).unwrap_err());
         assert!(
-            error.contains("Duplicate pair id 'shared-id'"),
+            error.contains("Duplicate pair identifier 'shared-id'"),
             "got: {error}"
         );
         assert!(error.contains("frag.toml"), "first file missing: {error}");
@@ -2338,7 +2327,10 @@ mod tests {
         );
 
         let error = format!("{:#}", resolve(&root, &CliSettings::default()).unwrap_err());
-        assert!(error.contains("Duplicate pair id 'dup'"), "got: {error}");
+        assert!(
+            error.contains("Duplicate pair identifier 'dup'"),
+            "got: {error}"
+        );
     }
 
     #[test]
@@ -2445,7 +2437,10 @@ mod tests {
             ]}"#,
         );
         let error = format!("{:#}", resolve(&root, &CliSettings::default()).unwrap_err());
-        assert!(error.contains("Duplicate pair id 'same'"), "got: {error}");
+        assert!(
+            error.contains("Duplicate pair identifier 'same'"),
+            "got: {error}"
+        );
     }
 
     #[test]
