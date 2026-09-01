@@ -1,0 +1,60 @@
+# Example 4 – GitHub Checks API publisher
+#
+# Posts a first-class check run on every commit — showing a structured
+# summary and per-finding annotations directly in the GitHub Checks UI —
+# alongside the existing PR comment.
+#
+# Requirements:
+#   permissions:
+#     checks: write          # create/update check runs
+#     pull-requests: write   # post/update the PR comment
+#     contents: read
+#
+# The action detects fork PRs and skips check-run creation automatically
+# (no write permission is available in that context). The PR comment is
+# still posted via the workflow_run pattern for forks; see fork-pr.yml.
+
+name: Soroban Upgrade Safety – Checks API
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'contracts/**'
+
+jobs:
+  upgrade-safeguard:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build soroban-upgrade-safeguard
+        run: cargo build --release
+
+      - name: Add tool to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Run upgrade safety check
+        id: safeguard
+        uses: ./.github/actions/soroban-upgrade-safeguard
+        with:
+          old-wasm: ./wasm/v1.wasm
+          new-wasm: ./wasm/v2.wasm
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --strict --explain
+          publish-check: 'true'
+          check-name: 'Soroban Upgrade Safeguard'
+
+      - name: Gate on safety verdict
+        if: steps.safeguard.outputs.is_safe != 'true'
+        run: |
+          echo "::error::Upgrade safety check failed. Check run: ${{ steps.safeguard.outputs.check_run_id }}"
+          exit 1
