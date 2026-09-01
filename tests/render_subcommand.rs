@@ -216,7 +216,12 @@ fn render_ignores_unknown_additive_json_fields() {
         code, 1,
         "the stored verdict was a failure, so must the exit be"
     );
-    assert!(rendered.contains("SOROBAN UPGRADE SAFETY REPORT"));
+    // Markdown format uses sentence-case heading; text format uses all-caps.
+    assert!(
+        rendered.contains("SOROBAN UPGRADE SAFETY REPORT")
+            || rendered.contains("Soroban Upgrade Safety Report"),
+        "rendered output must contain the report title, got:\n{rendered}"
+    );
     assert!(
         rendered.contains("CRITICAL") || rendered.contains("WARNING") || rendered.contains("INFO")
     );

@@ -822,7 +822,7 @@ fn duplicate_pair_ids_fail_before_anything_runs() {
 
     let combined = format!("{}{}", run.stdout, run.stderr);
     assert!(
-        combined.contains("Duplicate pair id 'shared'"),
+        combined.contains("Duplicate pair identifier 'shared'"),
         "error must name the collision: {combined}"
     );
     assert!(
@@ -863,7 +863,7 @@ fn duplicate_pair_ids_fail_in_a_json_manifest_too() {
     assert_eq!(run.code, 1);
     let combined = format!("{}{}", run.stdout, run.stderr);
     assert!(
-        combined.contains("Duplicate pair id 'shared'"),
+        combined.contains("Duplicate pair identifier 'shared'"),
         "error must name the collision: {combined}"
     );
 }

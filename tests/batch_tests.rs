@@ -639,14 +639,14 @@ fn batch_directory_handles_dotfile_wasm_json() {
     assert_eq!(json["is_safe"], Value::Bool(true), "JSON must report safe");
 
     let results = json["results"]
-        .as_object()
-        .expect("results must be an object");
-    assert!(
-        results.contains_key(".baseline"),
-        "JSON results must contain the dotfile contract name '.baseline'"
-    );
+        .as_array()
+        .expect("results must be an array");
+    let baseline = results
+        .iter()
+        .find(|r| r["name"] == ".baseline")
+        .expect("JSON results must contain the dotfile contract name '.baseline'");
     assert_eq!(
-        results[".baseline"]["is_safe"],
+        baseline["report"]["is_safe"],
         Value::Bool(true),
         "contract '.baseline' must be safe"
     );
