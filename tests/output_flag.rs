@@ -177,6 +177,9 @@ fn output_flag_safe_upgrade_writes_file_and_exits_zero() {
 // Atomic Writing & Permissions Integration Tests
 // ──────────────────────────────────────────────────────────────────
 
+// Permission bit modes are Unix-only; the equivalent behavior on Windows is
+// governed by ACLs, so this test is gated like the other `cfg(unix)` tests.
+#[cfg(unix)]
 #[test]
 fn output_flag_atomic_replacement_and_permissions() {
     use std::os::unix::fs::PermissionsExt;
