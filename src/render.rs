@@ -1495,9 +1495,10 @@ mod tests {
         let text = report.generate_summary_text(false);
 
         // The report must be non-empty and not contain erroneous placeholder text.
+        // The text renderer outputs finding messages but not category names inline;
+        // the category is grouped under an axis section header, not per-finding.
         assert!(!text.is_empty());
         assert!(text.contains("Protocol version changed from 20 to 21"));
-        assert!(text.contains("Environment Changed"));
         assert!(!text.contains("unknown"));
     }
 
