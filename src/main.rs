@@ -5834,6 +5834,7 @@ mod tests {
         assert!(!temp_path.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_write_atomically_preserves_permissions() {
         use std::os::unix::fs::PermissionsExt;

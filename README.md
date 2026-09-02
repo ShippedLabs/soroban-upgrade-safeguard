@@ -43,6 +43,27 @@ soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
 ```
 
+### Strict mode
+
+By default the command exits `0` unless it finds **Critical** breaking changes
+(or a structural error). **Warning** and **Info** findings are reported but do
+not affect the exit status:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
+```
+
+Pass `--strict` to also fail the run when **Warning** findings are present.
+The exit code is then non-zero if any unsuppressed Warning or Critical findings
+are found; **Info** findings never affect it:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --strict
+```
+
+A manifest can enable strict mode per pair (`strict = true`), but it cannot
+disable `--strict` passed on the command line.
+
 ### Comparing against a deployed contract (RPC baseline)
 
 Fetch the baseline directly from an on-chain contract instead of a local file

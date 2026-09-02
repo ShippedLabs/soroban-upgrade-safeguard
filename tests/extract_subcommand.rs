@@ -344,7 +344,7 @@ fn extract_accepts_wasm_path_with_spaces() {
     let json: Value = serde_json::from_str(&stdout).expect("stdout was not valid JSON");
     assert_eq!(
         json["source"].as_str().unwrap(),
-        target_wasm.to_str().unwrap(),
+        target_wasm.to_str().unwrap().replace('\\', "/"),
         "source field must contain the complete unsplit path"
     );
 

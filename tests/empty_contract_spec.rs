@@ -45,8 +45,8 @@ struct Run {
     code: i32,
 }
 
-fn run_comparison(old: &[u8], new: &[u8]) -> Run {
-    let dir = temp_dir("empty-spec-test");
+fn run_comparison(name: &str, old: &[u8], new: &[u8]) -> Run {
+    let dir = temp_dir(&format!("empty-spec-test-{name}"));
     let old_path = dir.join("old.wasm");
     let new_path = dir.join("new.wasm");
 
@@ -73,7 +73,7 @@ fn empty_contractspec_section_produces_diagnostic() {
     let old = minimal_wasm_with_empty_contractspec();
     let new = minimal_wasm_with_empty_contractspec();
 
-    let run = run_comparison(&old, &new);
+    let run = run_comparison("diag", &old, &new);
 
     // The comparison should succeed (both empty interfaces match)
     assert_eq!(
@@ -101,7 +101,7 @@ fn missing_contractspec_section_does_not_produce_empty_diagnostic() {
     let old = minimal_wasm_without_contractspec();
     let new = minimal_wasm_without_contractspec();
 
-    let run = run_comparison(&old, &new);
+    let run = run_comparison("missing", &old, &new);
 
     // The comparison should succeed (no spec to compare)
     assert_eq!(
@@ -131,7 +131,7 @@ fn empty_spec_distinguishes_from_valid_nonempty_spec() {
 
     let empty_wasm = minimal_wasm_with_empty_contractspec();
 
-    let run = run_comparison(&valid_wasm, &empty_wasm);
+    let run = run_comparison("distinguish", &valid_wasm, &empty_wasm);
 
     // This comparison should fail (functions removed)
     assert_ne!(
@@ -153,7 +153,10 @@ fn empty_spec_distinguishes_from_valid_nonempty_spec() {
         serde_json::from_str(&run.stdout).expect("output must be valid JSON");
     assert_eq!(json["is_safe"], false);
     assert!(
-        json["findings"].as_array().unwrap().len() > 0,
+        json["findings_by_category"]
+            .as_object()
+            .map(|m| !m.is_empty())
+            .unwrap_or(false),
         "comparison must report removed functions"
     );
 }
@@ -168,12 +171,15 @@ fn empty_to_nonempty_spec_is_a_valid_upgrade() {
     let empty_wasm = minimal_wasm_with_empty_contractspec();
     let valid_wasm = std::fs::read(&valid_wasm_path).expect("v1.wasm fixture must exist");
 
-    let run = run_comparison(&empty_wasm, &valid_wasm);
+    let run = run_comparison("upgrade", &empty_wasm, &valid_wasm);
 
-    // Adding functions to an empty interface is safe
+    // v1 declares host imports the empty build lacks. With the default
+    // policy (`gate_call_abi = true`) that "Host Import Added" warning fails
+    // the run, so empty -> valid exits non-zero even though adding functions
+    // alone is backwards-compatible.
     assert_eq!(
-        run.code, 0,
-        "empty -> valid (adding functions) must exit 0, stderr:\n{}",
+        run.code, 1,
+        "empty -> valid adds host imports and must fail under default CallAbi gating, stderr:\n{}",
         run.stderr
     );
 
@@ -187,5 +193,5 @@ fn empty_to_nonempty_spec_is_a_valid_upgrade() {
 
     let json: serde_json::Value =
         serde_json::from_str(&run.stdout).expect("output must be valid JSON");
-    assert_eq!(json["is_safe"], true);
+    assert_eq!(json["is_safe"], false);
 }

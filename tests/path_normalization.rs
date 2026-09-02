@@ -43,7 +43,7 @@ fn write(dir: &Path, name: &str, contents: &str) -> PathBuf {
 
 fn stage_wasm(dir: &Path) {
     std::fs::create_dir_all(dir).expect("failed to create wasm dir");
-    for name in ["v1.wasm", "v2.wasm"] {
+    for name in ["v1.wasm", "v2.wasm", "v3.wasm"] {
         std::fs::copy(wasm(name), dir.join(name)).expect("failed to copy fixture wasm");
     }
 }
@@ -108,7 +108,7 @@ fn batch_json_path_fields_never_contain_a_backslash() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
         "#,
     );
@@ -158,7 +158,7 @@ fn batch_json_storage_schema_paths_never_contain_a_backslash() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
         old_storage_schema = "schemas/empty.json"
         new_storage_schema = "schemas/empty.json"
@@ -233,7 +233,7 @@ fn explain_manifest_output_never_contains_a_backslash() {
 
         [[pairs]]
         old  = "v1.wasm"
-        new  = "v1.wasm"
+        new  = "v3.wasm"
         name = "token"
         "#,
     );

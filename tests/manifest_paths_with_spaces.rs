@@ -79,12 +79,13 @@ fn toml_manifest_resolves_paths_with_spaces() {
     // Copy fixture WASMs to directory with spaces
     std::fs::copy(wasm("v1.wasm"), artifacts_dir.join("v1.wasm")).expect("failed to copy v1.wasm");
     std::fs::copy(wasm("v2.wasm"), artifacts_dir.join("v2.wasm")).expect("failed to copy v2.wasm");
+    std::fs::copy(wasm("v3.wasm"), artifacts_dir.join("v3.wasm")).expect("failed to copy v3.wasm");
 
     let manifest_content = format!(
         r#"
 [[pairs]]
 old = "build artifacts/v1.wasm"
-new = "build artifacts/v1.wasm"
+new = "build artifacts/v3.wasm"
 name = "safe_pair"
 
 [[pairs]]
@@ -117,7 +118,7 @@ name = "breaking_pair"
     let safe_pair = &results[0];
     assert_eq!(safe_pair["name"], "safe_pair");
     assert_eq!(safe_pair["report"]["is_safe"], true);
-    let old_path = safe_pair["report"]["old"]["path"]
+    let old_path = safe_pair["old"]
         .as_str()
         .expect("old path must be a string");
     assert!(
@@ -128,7 +129,7 @@ name = "breaking_pair"
     let breaking_pair = &results[1];
     assert_eq!(breaking_pair["name"], "breaking_pair");
     assert_eq!(breaking_pair["report"]["is_safe"], false);
-    let new_path = breaking_pair["report"]["new"]["path"]
+    let new_path = breaking_pair["new"]
         .as_str()
         .expect("new path must be a string");
     assert!(
@@ -152,7 +153,7 @@ fn json_manifest_resolves_paths_with_spaces() {
     "pairs": [
         {{
             "old": "release artifacts/v1.wasm",
-            "new": "release artifacts/v1.wasm",
+            "new": "release artifacts/v3.wasm",
             "name": "safe_json_pair"
         }},
         {{
@@ -186,12 +187,8 @@ fn json_manifest_resolves_paths_with_spaces() {
     // Verify both pairs resolved and compared successfully
     for result in results {
         let name = result["name"].as_str().unwrap();
-        let old_path = result["report"]["old"]["path"]
-            .as_str()
-            .expect("old path must be a string");
-        let new_path = result["report"]["new"]["path"]
-            .as_str()
-            .expect("new path must be a string");
+        let old_path = result["old"].as_str().expect("old path must be a string");
+        let new_path = result["new"].as_str().expect("new path must be a string");
 
         assert!(
             old_path.contains("release artifacts"),
