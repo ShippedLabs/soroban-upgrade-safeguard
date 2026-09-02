@@ -1,9 +1,11 @@
 # GitHub Action Examples
 
 The reusable action at `.github/actions/soroban-upgrade-safeguard/` wraps the
-CLI and posts a Markdown report as a PR comment. This page documents the
-available inputs and outputs, the required permissions for each scenario, and
-three complete workflow examples covering the most common usage modes.
+CLI, posts a Markdown report as a PR comment, and — optionally — creates a
+first-class GitHub Checks API check run with a structured summary and
+per-finding annotations. This page documents the available inputs and outputs,
+the required permissions for each scenario, and four complete workflow examples
+covering the most common usage modes.
 
 ## Table of Contents
 
@@ -12,10 +14,11 @@ three complete workflow examples covering the most common usage modes.
 3. [Example 1 – Pull request check](#example-1--pull-request-check)
 4. [Example 2 – Release gate](#example-2--release-gate)
 5. [Example 3 – Fork pull request](#example-3--fork-pull-request)
-6. [Common `args` combinations](#common-args-combinations)
-7. [Artifact paths](#artifact-paths)
-8. [Fork limitations](#fork-limitations)
-9. [Fallback behavior](#fallback-behavior)
+6. [Example 4 – GitHub Checks API publisher](#example-4--github-checks-api-publisher)
+7. [Common `args` combinations](#common-args-combinations)
+8. [Artifact paths](#artifact-paths)
+9. [Fork limitations](#fork-limitations)
+10. [Fallback behavior](#fallback-behavior)
 
 ---
 
@@ -27,8 +30,11 @@ three complete workflow examples covering the most common usage modes.
 | :--- | :---: | :--- | :--- |
 | `old-wasm` | yes | — | Path to the baseline (deployed) WASM file. |
 | `new-wasm` | yes | — | Path to the candidate (new) WASM file. |
-| `token` | no | `${{ github.token }}` | GitHub token used to post the PR comment. Must have `pull-requests: write`. |
+| `token` | no | `${{ github.token }}` | GitHub token used to post the PR comment and (when `publish-check-run` is `'true'`) to create/update the check run. Must have `pull-requests: write` for comments and `checks: write` for check-run publication. |
 | `args` | no | `''` | Additional CLI flags passed verbatim to `soroban-upgrade-safeguard` (e.g. `--strict --explain --config .safeguard.toml`). |
+| `publish-check-run` | no | `'false'` | Set to `'true'` to create or update a GitHub Checks API check run for the current commit. Silently skipped on fork pull requests where the token does not carry `checks: write` for the base repository. |
+| `check-name` | no | `'Soroban Upgrade Safeguard'` | Display name shown in the Checks tab. Ignored when `publish-check-run` is not `'true'`. |
+| `check-run-id` | no | `''` | ID of an existing check run to update rather than creating a new one. Useful for re-runs and matrix jobs where the caller controls the check run lifecycle. |
 
 ### Outputs
 
@@ -36,17 +42,19 @@ three complete workflow examples covering the most common usage modes.
 | :--- | :--- |
 | `is_safe` | `'true'` when the upgrade passes with no critical findings; `'false'` otherwise. |
 | `comment_id` | ID of the created or updated PR comment. Empty when running outside a PR context or when the write permission is not available. |
+| `check_run_id` | ID of the created or updated check run. Empty when `publish-check-run` is not `'true'`, the token lacks `checks: write`, or the action is running in a fork PR context. |
 
 ---
 
 ## Permissions reference
 
-| Scenario | `pull-requests` | `contents` | Notes |
-| :--- | :--- | :--- | :--- |
-| Standard PR (same-repo branch) | `write` | `read` | Token can post comments directly. |
-| Release gate (tag push) | not needed | `write` (if creating a release) | No PR comment is posted; report is saved as a workflow artifact. |
-| Fork PR – analysis job | not needed | `read` | Fork context; write permissions are not available. |
-| Fork PR – comment job | `write` | `read` | Runs in the base-repo context via `workflow_run`; never executes fork code. |
+| Scenario | `checks` | `pull-requests` | `contents` | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| Standard PR (same-repo branch) | not needed | `write` | `read` | Token can post comments directly. |
+| Standard PR + check run | `write` | `write` | `read` | Required for `publish-check-run: 'true'`. |
+| Release gate (tag push) | not needed | not needed | `write` (if creating a release) | No PR comment is posted; report is saved as a workflow artifact. |
+| Fork PR – analysis job | not needed | not needed | `read` | Fork context; write permissions are not available. Check-run publication is automatically skipped. |
+| Fork PR – comment job | not needed | `write` | `read` | Runs in the base-repo context via `workflow_run`; never executes fork code. |
 
 The default `GITHUB_TOKEN` satisfies these requirements for same-repo PRs and
 release workflows with no extra configuration. Repository secrets (including
@@ -285,6 +293,124 @@ one file would expose the write token to fork-supplied code.
 
 ---
 
+## Example 4 – GitHub Checks API publisher
+
+**Use this when:** you want a first-class check run in the Checks tab of each
+pull request, with per-finding annotations attached to the commit and a clear
+`success` / `failure` conclusion that reviewers can see without opening the PR
+comment.
+
+Full workflow: [`docs/workflow-examples/checks-publisher.yml`](workflow-examples/checks-publisher.yml)
+
+```yaml
+name: Soroban Upgrade Safety – Checks Publisher
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'contracts/**'
+
+jobs:
+  upgrade-safeguard:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write          # create / update the check run
+      pull-requests: write   # post / update the report comment
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Run upgrade safety check
+        id: safeguard
+        uses: ./.github/actions/soroban-upgrade-safeguard
+        with:
+          old-wasm: ./wasm/v1.wasm
+          new-wasm: ./wasm/v2.wasm
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --strict --explain
+          publish-check-run: 'true'
+          check-name: 'Soroban Upgrade Safeguard'
+
+      - name: Gate on safety verdict
+        if: steps.safeguard.outputs.is_safe != 'true'
+        run: |
+          echo "::error::Upgrade safety check failed."
+          exit 1
+```
+
+**What it does:**
+
+- Creates a check run named `Soroban Upgrade Safeguard` on the head commit.
+- Populates the check run summary with the full Markdown report (truncated to
+  the 65 535-character API limit).
+- Attaches per-finding annotations (`failure` for Critical, `warning` for
+  Warning, `notice` for Info) visible inline on the Files Changed tab.
+- Paginates annotations in batches of 50 (the GitHub API limit per call).
+- When more than 50 findings are present, a note in the summary explains how
+  many were omitted and directs reviewers to the full PR comment.
+- Updates the existing check run on re-runs rather than creating a duplicate.
+- Automatically skips check-run publication on fork PRs (where the token does
+  not carry `checks: write`) without failing the workflow.
+
+**Conclusion mapping:**
+
+| Tool exit code | Check run conclusion |
+| :--- | :--- |
+| `0` – no breaking changes | `success` |
+| `1` – breaking changes found | `failure` |
+| `2` – resource or configuration limit | `action_required` |
+| Other (tool crash) | `failure` |
+| Job cancelled | `cancelled` |
+
+**Custom check-run name:**
+
+If your repository has multiple safeguard jobs (e.g. one per contract) you can
+give each a distinct name so they appear as separate entries in the Checks tab:
+
+```yaml
+- uses: ./.github/actions/soroban-upgrade-safeguard
+  with:
+    old-wasm: ./wasm/token_v1.wasm
+    new-wasm: ./wasm/token_v2.wasm
+    token: ${{ secrets.GITHUB_TOKEN }}
+    publish-check-run: 'true'
+    check-name: 'Soroban Upgrade Safeguard (token)'
+```
+
+**Updating an existing run explicitly:**
+
+If you create the check run yourself (e.g. to set it `in_progress` before the
+analysis starts) pass its ID via `check-run-id` and the action will update it
+rather than searching by name:
+
+```yaml
+- name: Create pending check run
+  id: pending
+  run: |
+    id=$(gh api -X POST /repos/${{ github.repository }}/check-runs \
+      -f name="Soroban Upgrade Safeguard" \
+      -f head_sha="${{ github.event.pull_request.head.sha }}" \
+      -f status="in_progress" \
+      --jq '.id')
+    echo "id=${id}" >> "$GITHUB_OUTPUT"
+
+- uses: ./.github/actions/soroban-upgrade-safeguard
+  with:
+    old-wasm: ./wasm/v1.wasm
+    new-wasm: ./wasm/v2.wasm
+    token: ${{ secrets.GITHUB_TOKEN }}
+    publish-check-run: 'true'
+    check-run-id: ${{ steps.pending.outputs.id }}
+```
+
+---
+
 ## Common `args` combinations
 
 Pass any of these via the `args` input (or directly on the CLI):
@@ -357,6 +483,11 @@ overall workflow:
 | PR comment already exists | The existing comment is updated in-place rather than creating a duplicate. |
 | Tool exits with code 1 (critical findings) | `is_safe` is `'false'`; the job continues to the gate step. |
 | Tool exits with code 2 (resource limit exceeded) | `is_safe` is `'false'`; treat this as a configuration issue (raise the relevant limit). |
+| `publish-check-run: 'true'` on a fork PR | Check-run publication is skipped silently; the PR comment and `is_safe` output are unaffected. |
+| Token lacks `checks: write` | The check-run API call fails silently; `check_run_id` output is empty; the PR comment and verdict are unaffected. |
+| Check run already exists for the commit | The action updates the existing run rather than creating a duplicate. |
+| More than 50 findings | Annotations are paginated in batches of 50; excess findings are noted in the check run summary. |
+| Job is cancelled before the action completes | The check run conclusion is set to `cancelled` when `GITHUB_JOB_STATUS=cancelled`. |
 
 To make the workflow fail when the token cannot write comments (rather than
 silently continuing), check `steps.safeguard.outputs.comment_id` explicitly:
@@ -365,4 +496,16 @@ silently continuing), check `steps.safeguard.outputs.comment_id` explicitly:
 - name: Verify comment was posted
   if: steps.safeguard.outputs.comment_id == ''
   run: echo "::warning::PR comment could not be posted — check token permissions."
+```
+
+To verify the check run was published:
+
+```yaml
+- name: Verify check run was created
+  if: >-
+    inputs.publish-check-run == 'true' &&
+    steps.safeguard.outputs.check_run_id == ''
+  run: |
+    echo "::warning::Check run could not be published — \
+    ensure the token has checks: write permission."
 ```
