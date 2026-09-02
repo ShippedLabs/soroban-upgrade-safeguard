@@ -64,6 +64,22 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --strict
 A manifest can enable strict mode per pair (`strict = true`), but it cannot
 disable `--strict` passed on the command line.
 
+### ASCII output
+
+Terminals and log viewers that cannot render emoji can use `--ascii` to
+replace the marker glyphs with plain-text equivalents:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --ascii
+```
+
+Severity markers render as `[CRITICAL]`, `[WARN]`, `[INFO]`, and `[WARNING]`,
+and verdict markers as `[PASS]`, `[FAIL]`, and `[SUPPRESSED]`, so the report
+stays readable in any log viewer. `--ascii` only swaps the markers — it does
+not disable color. Pass `--no-color` to turn color off, or `--plain` for fully
+plain output (which implies both `--no-color` and `--ascii` and also strips
+the remaining decorative separators).
+
 ### Comparing against a deployed contract (RPC baseline)
 
 Fetch the baseline directly from an on-chain contract instead of a local file
