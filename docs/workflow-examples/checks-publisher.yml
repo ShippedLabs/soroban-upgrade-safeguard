@@ -1,0 +1,106 @@
+# Example 4 – GitHub Checks API publisher
+#
+# Enables the optional check-run publisher so each pull request gets a
+# first-class entry in the Checks tab of GitHub.  The check run carries
+# a structured summary, per-finding annotations attached to the commit,
+# and a clear conclusion (success / failure) that reviewers can see
+# without opening the PR comment.
+#
+# Required permissions
+# --------------------
+# checks: write        — create and update check runs
+# pull-requests: write — post / update the Markdown report comment
+# contents: read       — check out the repository
+#
+# The default GITHUB_TOKEN has these permissions for PRs from branches
+# inside the same repository.  Fork PRs do NOT have checks: write; the
+# action detects this automatically and skips check-run publication
+# without affecting the safeguard verdict or the PR comment.
+#
+# Rerun and superseded-commit handling
+# -------------------------------------
+# When the same commit is checked more than once (e.g. a re-run after a
+# flaky step) the action searches for an existing check run with the same
+# name and updates it rather than creating a duplicate.  Pass the check
+# run ID produced by a previous step via the check-run-id input to pin
+# the update target explicitly.
+#
+# Annotation limits
+# -----------------
+# GitHub's Checks API accepts at most 50 annotations per update call.
+# The action paginates automatically.  When the total number of findings
+# exceeds 50, the summary notes how many were omitted and directs
+# reviewers to the full PR comment and the JSON artifact.
+
+name: Soroban Upgrade Safety – Checks Publisher
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'contracts/**'
+
+jobs:
+  upgrade-safeguard:
+    name: Check upgrade safety
+    runs-on: ubuntu-latest
+
+    permissions:
+      checks: write          # create / update the check run
+      pull-requests: write   # post / update the report comment
+      contents: read         # check out the repo
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build soroban-upgrade-safeguard
+        run: cargo build --release
+
+      - name: Add tool to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      # Run the composite action with check-run publication enabled.
+      # The action will:
+      #   1. Run the safeguard tool and produce a Markdown + JSON report.
+      #   2. Post or update the Markdown report as a PR comment.
+      #   3. Create or update a check run on the head commit with the
+      #      structured summary and per-finding annotations.
+      - name: Run upgrade safety check
+        id: safeguard
+        uses: ./.github/actions/soroban-upgrade-safeguard
+        with:
+          old-wasm: ./wasm/v1.wasm
+          new-wasm: ./wasm/v2.wasm
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --strict --explain
+          publish-check-run: 'true'
+          check-name: 'Soroban Upgrade Safeguard'
+
+      # Echo the check run ID for downstream steps (e.g. linking artifacts).
+      - name: Print check run ID
+        if: steps.safeguard.outputs.check_run_id != ''
+        run: |
+          echo "Check run ID: ${{ steps.safeguard.outputs.check_run_id }}"
+
+      # Fail the job explicitly so the PR is blocked on critical findings.
+      - name: Gate on safety verdict
+        if: steps.safeguard.outputs.is_safe != 'true'
+        run: |
+          echo "::error::Upgrade safety check failed. \
+          Review the Checks tab for annotated findings."
+          exit 1
