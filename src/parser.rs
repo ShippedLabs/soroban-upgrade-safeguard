@@ -624,3 +624,43 @@ mod tests {
         );
     }
 }
+
+    #[test]
+    fn extract_metadata_ignores_unrelated_custom_sections() {
+        // WASM modules may contain custom sections unrelated to Soroban metadata.
+        // The parser must ignore these sections and still extract valid Soroban
+        // metadata successfully.
+        let spec_data = encode_spec_entries(&[spec_function("hello", "doc")]);
+        let env_data = encode_interface_version(20, 0);
+        let unrelated_data = b"some unrelated custom data";
+
+        // Build a WASM module with Soroban sections plus an unrelated section
+        let mut wasm = Vec::from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+        
+        // Add contractspecv0 section
+        let spec_body = wasm_string("contractspecv0");
+        let mut spec_with_data = spec_body;
+        spec_with_data.extend_from_slice(&spec_data);
+        wasm.extend(wasm_section(0, spec_with_data));
+        
+        // Add contractenvmetav0 section
+        let env_body = wasm_string("contractenvmetav0");
+        let mut env_with_data = env_body;
+        env_with_data.extend_from_slice(&env_data);
+        wasm.extend(wasm_section(0, env_with_data));
+        
+        // Add unrelated custom section
+        let unrelated_body = wasm_string("unrelated_section");
+        let mut unrelated_with_data = unrelated_body;
+        unrelated_with_data.extend_from_slice(unrelated_data);
+        wasm.extend(wasm_section(0, unrelated_with_data));
+
+        let metadata = extract_metadata(&wasm).expect("WASM with unrelated section must parse");
+        assert_eq!(metadata.spec.len(), 1, "spec must be extracted from Soroban section");
+        assert!(metadata.env_meta.is_some(), "env meta must be extracted from Soroban section");
+        assert_eq!(
+            metadata.env_meta.as_ref().unwrap().protocol_version(),
+            Some(20),
+            "env meta protocol version must be correct"
+        );
+    }
