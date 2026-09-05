@@ -486,4 +486,165 @@ mod tests {
             "build_reverse_dependencies() must produce entries — structured metadata is required"
         );
     }
+
+    #[test]
+    fn primitive_types_produce_empty_dependency_set() {
+        let spec = ContractSpec::default();
+        let mapper = LayoutMapper::new(&spec);
+
+        // Primitive types should produce no UDT dependencies
+        let primitives = vec![
+            ScSpecTypeDef::U32,
+            ScSpecTypeDef::I32,
+            ScSpecTypeDef::U64,
+            ScSpecTypeDef::I64,
+            ScSpecTypeDef::U128,
+            ScSpecTypeDef::I128,
+            ScSpecTypeDef::Bool,
+            ScSpecTypeDef::Void,
+            ScSpecTypeDef::Symbol,
+            ScSpecTypeDef::String,
+            ScSpecTypeDef::Bytes,
+            ScSpecTypeDef::Address,
+        ];
+
+        for primitive in primitives {
+            let deps = mapper.get_udt_dependencies(&primitive);
+            assert!(
+                deps.is_empty(),
+                "Primitive type {:?} must produce empty dependency set, got {:?}",
+                type_to_string(&primitive),
+                deps
+            );
+        }
+    }
+
+    #[test]
+    fn container_of_primitives_produces_no_udt_dependency() {
+        let spec = ContractSpec::default();
+        let mapper = LayoutMapper::new(&spec);
+
+        // Vec<u32> should have no UDT dependencies
+        let vec_u32 = ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
+            element_type: Box::new(ScSpecTypeDef::U32),
+        }));
+        let deps = mapper.get_udt_dependencies(&vec_u32);
+        assert!(
+            deps.is_empty(),
+            "Vec<u32> must produce empty dependency set, got {:?}",
+            deps
+        );
+
+        // Option<bool> should have no UDT dependencies
+        let option_bool = ScSpecTypeDef::Option(Box::new(ScSpecTypeOption {
+            value_type: Box::new(ScSpecTypeDef::Bool),
+        }));
+        let deps = mapper.get_udt_dependencies(&option_bool);
+        assert!(
+            deps.is_empty(),
+            "Option<bool> must produce empty dependency set, got {:?}",
+            deps
+        );
+
+        // Map<String, u64> should have no UDT dependencies
+        let map_string_u64 = ScSpecTypeDef::Map(Box::new(ScSpecTypeMap {
+            key_type: Box::new(ScSpecTypeDef::String),
+            value_type: Box::new(ScSpecTypeDef::U64),
+        }));
+        let deps = mapper.get_udt_dependencies(&map_string_u64);
+        assert!(
+            deps.is_empty(),
+            "Map<String, u64> must produce empty dependency set, got {:?}",
+            deps
+        );
+
+        // Result<i32, bool> should have no UDT dependencies
+        let result_i32_bool = ScSpecTypeDef::Result(Box::new(ScSpecTypeResult {
+            ok_type: Box::new(ScSpecTypeDef::I32),
+            error_type: Box::new(ScSpecTypeDef::Bool),
+        }));
+        let deps = mapper.get_udt_dependencies(&result_i32_bool);
+        assert!(
+            deps.is_empty(),
+            "Result<i32, bool> must produce empty dependency set, got {:?}",
+            deps
+        );
+
+        // Tuple (u32, String, bool) should have no UDT dependencies
+        let tuple_primitives = ScSpecTypeDef::Tuple(Box::new(ScSpecTypeTuple {
+            value_types: VecM::try_from(vec![
+                ScSpecTypeDef::U32,
+                ScSpecTypeDef::String,
+                ScSpecTypeDef::Bool,
+            ])
+            .unwrap(),
+        }));
+        let deps = mapper.get_udt_dependencies(&tuple_primitives);
+        assert!(
+            deps.is_empty(),
+            "Tuple of primitives must produce empty dependency set, got {:?}",
+            deps
+        );
+    }
+
+    #[test]
+    fn nested_container_of_primitives_produces_no_udt_dependency() {
+        let spec = ContractSpec::default();
+        let mapper = LayoutMapper::new(&spec);
+
+        // Vec<Option<u32>> should have no UDT dependencies
+        let vec_option_u32 = ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
+            element_type: Box::new(ScSpecTypeDef::Option(Box::new(ScSpecTypeOption {
+                value_type: Box::new(ScSpecTypeDef::U32),
+            }))),
+        }));
+        let deps = mapper.get_udt_dependencies(&vec_option_u32);
+        assert!(
+            deps.is_empty(),
+            "Vec<Option<u32>> must produce empty dependency set, got {:?}",
+            deps
+        );
+    }
+
+    #[test]
+    fn container_containing_udt_reports_that_udt() {
+        let mut spec = ContractSpec::default();
+        insert_struct(&mut spec, "MyType", vec![("value", ScSpecTypeDef::U32)]);
+
+        let mapper = LayoutMapper::new(&spec);
+
+        // Vec<MyType> should report MyType as a dependency
+        let vec_mytype = ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
+            element_type: Box::new(udt("MyType")),
+        }));
+        let deps = mapper.get_udt_dependencies(&vec_mytype);
+        assert_eq!(
+            sorted(&deps),
+            vec!["MyType".to_string()],
+            "Vec<MyType> must report MyType as a dependency"
+        );
+
+        // Option<MyType> should report MyType as a dependency
+        let option_mytype = ScSpecTypeDef::Option(Box::new(ScSpecTypeOption {
+            value_type: Box::new(udt("MyType")),
+        }));
+        let deps = mapper.get_udt_dependencies(&option_mytype);
+        assert_eq!(
+            sorted(&deps),
+            vec!["MyType".to_string()],
+            "Option<MyType> must report MyType as a dependency"
+        );
+
+        // Map<u32, MyType> should report MyType as a dependency
+        let map_u32_mytype = ScSpecTypeDef::Map(Box::new(ScSpecTypeMap {
+            key_type: Box::new(ScSpecTypeDef::U32),
+            value_type: Box::new(udt("MyType")),
+        }));
+        let deps = mapper.get_udt_dependencies(&map_u32_mytype);
+        assert_eq!(
+            sorted(&deps),
+            vec!["MyType".to_string()],
+            "Map<u32, MyType> must report MyType as a dependency"
+        );
+    }
 }

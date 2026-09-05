@@ -287,6 +287,37 @@ pub struct SafetyReport {
     pub settings: ReportSettings,
     #[cfg(not(feature = "unstable"))]
     pub(crate) settings: ReportSettings,
+
+    /// Static complexity profile for the old WASM build (code-section only).
+    /// `None` when the profiler was not invoked.
+    #[cfg(feature = "unstable")]
+    pub complexity_old: Option<crate::wasm_complexity::WasmComplexityProfile>,
+    /// Static complexity profile for the old WASM build.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) complexity_old: Option<crate::wasm_complexity::WasmComplexityProfile>,
+
+    /// Static complexity profile for the new WASM build.
+    #[cfg(feature = "unstable")]
+    pub complexity_new: Option<crate::wasm_complexity::WasmComplexityProfile>,
+    /// Static complexity profile for the new WASM build.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) complexity_new: Option<crate::wasm_complexity::WasmComplexityProfile>,
+
+    /// Delta between the old and new complexity profiles.
+    /// `None` when profiling was not performed.
+    #[cfg(feature = "unstable")]
+    pub complexity_delta: Option<crate::wasm_complexity::WasmComplexityDelta>,
+    /// Delta between the old and new complexity profiles.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) complexity_delta: Option<crate::wasm_complexity::WasmComplexityDelta>,
+
+    /// Budget entries exceeded by the new build's complexity profile.
+    /// Always gates `is_safe` when non-empty.
+    #[cfg(feature = "unstable")]
+    pub complexity_violations: Vec<crate::wasm_complexity::ComplexityViolation>,
+    /// Budget entries exceeded by the new build's complexity profile.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) complexity_violations: Vec<crate::wasm_complexity::ComplexityViolation>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -384,6 +415,91 @@ impl SafetyReport {
                         migrated_by: None,
                     });
             }
+        }
+
+        // Cross-schema findings: durability and namespace changes across versions.
+        for mismatch in &comparison.cross_findings {
+            use crate::storage_schema::SchemaMismatch;
+            let (category, target, remediation_hint) = match mismatch {
+                SchemaMismatch::DurabilityChanged {
+                    declaration,
+                    old_durability,
+                    new_durability,
+                    remediation,
+                    ..
+                } => (
+                    "Storage Durability Changed".to_string(),
+                    Some(format!(
+                        "{declaration} ({} → {})",
+                        old_durability.label(),
+                        new_durability.label()
+                    )),
+                    remediation.clone(),
+                ),
+                SchemaMismatch::NamespaceChanged {
+                    declaration,
+                    old_namespace,
+                    new_namespace,
+                    remediation,
+                } => {
+                    let change_desc = if old_namespace.is_empty() {
+                        format!("{declaration} (added '{new_namespace}')")
+                    } else if new_namespace.is_empty() {
+                        format!("{declaration} (removed '{old_namespace}')")
+                    } else {
+                        format!("{declaration} ('{old_namespace}' → '{new_namespace}')")
+                    };
+                    (
+                        "Storage Namespace Changed".to_string(),
+                        Some(change_desc),
+                        remediation.clone(),
+                    )
+                }
+                // Per-side mismatch variants should not appear in cross_findings.
+                _ => continue,
+            };
+
+            let message = format!("{mismatch}");
+            let finding = crate::diff::Finding {
+                severity: crate::diff::Severity::Critical,
+                axes: vec![crate::diff::CompatibilityAxis::StorageLayout],
+                category: category.clone(),
+                message,
+                type_name: None,
+                target: target.clone(),
+                change: None,
+                root_target: None,
+            };
+            let rule = suppressions.matching_rule(&finding);
+            let suppressed = rule.is_some();
+            self.critical_count += 1;
+            self.total_findings += 1;
+            if suppressed {
+                self.suppressed_count += 1;
+                self.suppressed_critical_count += 1;
+            }
+            if !suppressed {
+                let storage_gated = suppressions.policy.gate_storage_layout || strict;
+                if storage_gated {
+                    self.is_safe = false;
+                    self.axis_verdicts.insert(
+                        crate::diff::CompatibilityAxis::StorageLayout,
+                        AxisStatus::Failed,
+                    );
+                }
+            }
+            self.findings_by_category
+                .entry(category)
+                .or_default()
+                .push(ReportedFinding {
+                    rule_id: "storage_schema_mismatch".to_string(),
+                    axes: finding.axes.clone(),
+                    finding,
+                    suppressed,
+                    suppression_reason: rule.and_then(|rule| rule.reason.clone()),
+                    remediation: explain.then(|| remediation_hint.clone()),
+                    migrated_by: None,
+                });
         }
     }
 
@@ -576,6 +692,60 @@ impl SafetyReport {
 
     pub fn budget_violations(&self) -> &[crate::budget::BudgetViolation] {
         &self.budget_violations
+    }
+
+    /// The old build's static complexity profile, if profiling was performed.
+    pub fn complexity_old(&self) -> Option<&crate::wasm_complexity::WasmComplexityProfile> {
+        self.complexity_old.as_ref()
+    }
+
+    /// The new build's static complexity profile, if profiling was performed.
+    pub fn complexity_new(&self) -> Option<&crate::wasm_complexity::WasmComplexityProfile> {
+        self.complexity_new.as_ref()
+    }
+
+    /// The delta between old and new complexity profiles, if profiling was performed.
+    pub fn complexity_delta(&self) -> Option<&crate::wasm_complexity::WasmComplexityDelta> {
+        self.complexity_delta.as_ref()
+    }
+
+    /// Budget entries exceeded by the new build's complexity metrics.
+    pub fn complexity_violations(&self) -> &[crate::wasm_complexity::ComplexityViolation] {
+        &self.complexity_violations
+    }
+
+    /// Run the WASM complexity profiler against `old_wasm` and `new_wasm`,
+    /// compute the delta, evaluate any configured budget entries, and attach the
+    /// results to this report. Exceeded budgets always gate `is_safe`.
+    ///
+    /// Profiling errors (e.g. malformed WASM) are non-fatal: the complexity
+    /// section is simply omitted from the report, and the existing safety verdict
+    /// is unchanged.
+    pub fn apply_complexity(
+        &mut self,
+        old_wasm: &[u8],
+        new_wasm: &[u8],
+        budget: &crate::wasm_complexity::ComplexityBudgetConfig,
+    ) {
+        let old_profile = match crate::wasm_complexity::profile_wasm(old_wasm) {
+            Ok(p) => p,
+            Err(_) => return, // malformed old WASM — skip gracefully
+        };
+        let new_profile = match crate::wasm_complexity::profile_wasm(new_wasm) {
+            Ok(p) => p,
+            Err(_) => return, // malformed new WASM — skip gracefully
+        };
+        let delta =
+            crate::wasm_complexity::WasmComplexityDelta::compute(&old_profile, &new_profile);
+        let violations =
+            crate::wasm_complexity::evaluate_complexity_budgets(&delta, &budget.entries);
+        if !violations.is_empty() {
+            self.is_safe = false;
+        }
+        self.complexity_old = Some(old_profile);
+        self.complexity_new = Some(new_profile);
+        self.complexity_delta = Some(delta);
+        self.complexity_violations = violations;
     }
 }
 
@@ -832,6 +1002,10 @@ impl SafetyReport {
             old_symlink: None,
             new_symlink: None,
             settings: ReportSettings::default(),
+            complexity_old: None,
+            complexity_new: None,
+            complexity_delta: None,
+            complexity_violations: Vec::new(),
         }
     }
 
@@ -1185,6 +1359,10 @@ impl SafetyReport {
                 explain,
                 ..ReportSettings::default()
             },
+            complexity_old: None,
+            complexity_new: None,
+            complexity_delta: None,
+            complexity_violations: Vec::new(),
         }
     }
 
@@ -1340,6 +1518,10 @@ impl SafetyReport {
             migrated_count: self.migrated_count,
             migration_status: self.migration_status,
             migration_diagnostics: self.migration_diagnostics.clone(),
+            complexity_old: self.complexity_old.clone(),
+            complexity_new: self.complexity_new.clone(),
+            complexity_delta: self.complexity_delta.clone(),
+            complexity_violations: self.complexity_violations.clone(),
         }
     }
 
@@ -1396,9 +1578,8 @@ fn current_git_commit() -> Option<String> {
     }
     let commit = String::from_utf8(output.stdout).ok()?;
     let commit = commit.trim();
-    let is_valid_sha = !commit.is_empty()
-        && commit.len() >= 7
-        && commit.chars().all(|c| c.is_ascii_hexdigit());
+    let is_valid_sha =
+        !commit.is_empty() && commit.len() >= 7 && commit.chars().all(|c| c.is_ascii_hexdigit());
     is_valid_sha.then(|| commit.to_string())
 }
 
@@ -1531,6 +1712,10 @@ mod tests {
             empirical_findings: Vec::new(),
             budget_violations: Vec::new(),
             settings: ReportSettings::default(),
+            complexity_old: None,
+            complexity_new: None,
+            complexity_delta: None,
+            complexity_violations: Vec::new(),
         };
 
         assert_eq!(report.recommended_bump(), "patch");

@@ -102,7 +102,7 @@ fn bom_prefixed_manifest_resolves() {
         &format!(
             "{BOM}[[pairs]]\nold = {:?}\nnew = {:?}\nname = \"token\"\n",
             wasm("v1.wasm").to_str().unwrap(),
-            wasm("v1.wasm").to_str().unwrap(),
+            wasm("v3.wasm").to_str().unwrap(),
         ),
     );
 
@@ -123,7 +123,7 @@ fn crlf_manifest_resolves() {
         &format!(
             "[[pairs]]\r\nold = {:?}\r\nnew = {:?}\r\nname = \"token\"\r\n",
             wasm("v1.wasm").to_str().unwrap(),
-            wasm("v1.wasm").to_str().unwrap(),
+            wasm("v3.wasm").to_str().unwrap(),
         ),
     );
 

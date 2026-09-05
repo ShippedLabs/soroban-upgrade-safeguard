@@ -212,10 +212,18 @@ fn render_ignores_unknown_additive_json_fields() {
 
     let (rendered, code) = render(&unknown.to_string(), &["--format", "markdown"]);
 
-    assert_eq!(code, 1, "the stored verdict was a failure, so must the exit be");
-    assert!(rendered.contains("SOROBAN UPGRADE SAFETY REPORT"));
-    assert!(rendered.contains("CRITICAL") || rendered.contains("WARNING") || rendered.contains("INFO"));
-    assert!(rendered.contains("Storage Layout Compatibility") || rendered.contains("Call ABI Compatibility"));
+    assert_eq!(
+        code, 1,
+        "the stored verdict was a failure, so must the exit be"
+    );
+    assert!(rendered.contains("# Soroban Upgrade Safety Report"));
+    assert!(
+        rendered.contains("Critical") || rendered.contains("Warning") || rendered.contains("Info")
+    );
+    assert!(
+        rendered.contains("Storage Layout Compatibility")
+            || rendered.contains("Call ABI Compatibility")
+    );
 }
 
 #[test]
@@ -316,7 +324,7 @@ fn a_missing_report_file_fails_with_a_clear_error() {
     assert_ne!(output.status.code(), Some(0));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Failed to read report file"),
+        stderr.contains("Failed to inspect report path"),
         "got: {stderr}"
     );
 }
@@ -387,4 +395,3 @@ fn empty_report_rendering_regression_test() {
         "no placeholder finding rows in markdown output"
     );
 }
-

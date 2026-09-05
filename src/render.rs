@@ -126,6 +126,7 @@ impl std::error::Error for RenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             RenderError::Malformed(err) => Some(err),
+            RenderError::EmptyInput => None,
             RenderError::IncompatibleSchema { .. } => None,
         }
     }
@@ -199,6 +200,20 @@ pub struct RenderableReport {
     /// Declared migrations that did not verify, and coverage gaps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub migration_diagnostics: Vec<crate::contract_migration::MigrationDiagnostic>,
+
+    /// Static complexity profile for the old WASM build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_old: Option<crate::wasm_complexity::WasmComplexityProfile>,
+    /// Static complexity profile for the new WASM build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_new: Option<crate::wasm_complexity::WasmComplexityProfile>,
+    /// Delta between the old and new complexity profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity_delta: Option<crate::wasm_complexity::WasmComplexityDelta>,
+    /// Complexity budget entries exceeded by the new build. Always gates
+    /// `is_safe` when present.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub complexity_violations: Vec<crate::wasm_complexity::ComplexityViolation>,
 }
 
 fn default_schema_version() -> u32 {
@@ -585,71 +600,12 @@ impl RenderableReport {
             );
 
             for reported in group {
-                let finding = &reported.finding;
-
-                if reported.suppressed {
-                    let body = match width {
-                        Some(w) => wrap_with_prefix("🔕 [SUPPRESSED] ", &finding.message, w),
-                        None => format!("🔕 [SUPPRESSED] {}", finding.message),
-                    };
-                    output.push_str(&format!("{}\n", body.dimmed()));
-                    if let Some(reason) = &reported.suppression_reason {
-                        output
-                            .push_str(&format!("    ↳ reason: {}\n", reason).dimmed().to_string());
-                    }
-                    continue;
-                }
-
-                let (prefix, body) = match finding.severity {
-                    Severity::Critical => ("🔴 ", finding.message.as_str()),
-                    Severity::Warning => ("🟡 ", finding.message.as_str()),
-                    Severity::Info => ("🔵 ", finding.message.as_str()),
-                };
-                let line = match width {
-                    Some(w) => wrap_with_prefix(prefix, body, w),
-                    None => format!("{prefix}{body}"),
-                };
-                let formatted = match finding.severity {
-                    Severity::Critical => line.red(),
-                    Severity::Warning => line.yellow(),
-                    Severity::Info => line.cyan(),
-                };
-                output.push_str(&format!("{}\n", formatted));
-                if self.empirical {
-                    if let Some(ref udt_name) = finding.type_name {
-                        let matching_emp: Vec<&crate::empirical::EmpiricalFinding> = self
-                            .empirical_findings
-                            .iter()
-                            .filter(|ef| &ef.type_name == udt_name)
-                            .collect();
-                        if !matching_emp.is_empty() {
-                            let has_failures = matching_emp.iter().any(|ef| !ef.is_success);
-                            if has_failures {
-                                for ef in matching_emp.iter().filter(|ef| !ef.is_success) {
-                                    if let Some(ref err) = ef.error {
-                                        output.push_str(&format!("    ↳ 🔴 [CONFIRMED] Stored data failed to decode: {}\n", err).red().bold().to_string());
-                                    }
-                                }
-                            } else {
-                                output.push_str(&"    ↳ 🟢 [CONTRADICTED] Sampled stored values all decoded successfully under the new spec.\n".green().to_string());
-                            }
-                        } else {
-                            output.push_str(&"    ↳ ⚪ [UNCONFIRMED] No matching stored data found in the sample.\n".dimmed().to_string());
-                        }
-                    }
-                }
-                if explain {
-                    if let Some(remediation) = &reported.remediation {
-                        output.push_str(
-                            &format!("    ↳ guidance: {}\n", remediation)
-                                .green()
-                                .to_string(),
-                        );
-                    }
-                }
+                self.append_finding_text(&mut output, reported, width, explain);
             }
             output.push('\n');
         }
+
+        self.append_unclassified_text(&mut output, width, explain);
 
         if !self.is_safe {
             if self.strict && self.counts.critical == 0 {
@@ -732,7 +688,249 @@ impl RenderableReport {
             }
         }
 
+        if self.complexity_delta.is_some() {
+            output.push('\n');
+            output.push_str(
+                &"========================================\n"
+                    .bold()
+                    .to_string(),
+            );
+            output.push_str(&"    WASM COMPLEXITY DELTA\n".bold().cyan().to_string());
+            output.push_str(
+                &"========================================\n"
+                    .bold()
+                    .to_string(),
+            );
+            output.push_str(
+                &"(Static analysis only — not an execution-cost estimate)\n"
+                    .dimmed()
+                    .to_string(),
+            );
+            output.push_str(&self.complexity_delta_text());
+            if !self.complexity_violations.is_empty() {
+                output.push('\n');
+                output.push_str(
+                    &"--- Complexity Budget Violations ---\n"
+                        .red()
+                        .bold()
+                        .to_string(),
+                );
+                for v in &self.complexity_violations {
+                    output.push_str(&format!("🔴 {v}\n").red().to_string());
+                }
+            }
+        }
+
         output
+    }
+
+    /// Keys identifying the findings already rendered inside the per-axis
+    /// sections, so the unclassified pass below does not re-render them.
+    fn classified_finding_keys(&self) -> BTreeSet<(String, String, Option<String>)> {
+        self.findings_by_axis
+            .values()
+            .flatten()
+            .map(|r| {
+                (
+                    r.finding.category.clone(),
+                    r.finding.message.clone(),
+                    r.finding.target.clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// Findings that carry no compatibility axis (for example environment
+    /// metadata) and are therefore absent from every per-axis section.
+    fn unclassified_findings(&self) -> Vec<&ReportedFinding> {
+        let classified = self.classified_finding_keys();
+        self.findings_by_category
+            .values()
+            .flatten()
+            .filter(|r| {
+                !classified.contains(&(
+                    r.finding.category.clone(),
+                    r.finding.message.clone(),
+                    r.finding.target.clone(),
+                ))
+            })
+            .collect()
+    }
+
+    fn append_finding_text(
+        &self,
+        output: &mut String,
+        reported: &ReportedFinding,
+        width: Option<usize>,
+        explain: bool,
+    ) {
+        let finding = &reported.finding;
+
+        if reported.suppressed {
+            let body = match width {
+                Some(w) => wrap_with_prefix("🔕 [SUPPRESSED] ", &finding.message, w),
+                None => format!("🔕 [SUPPRESSED] {}", finding.message),
+            };
+            output.push_str(&format!("{}\n", body.dimmed()));
+            if let Some(reason) = &reported.suppression_reason {
+                output.push_str(&format!("    ↳ reason: {}\n", reason).dimmed().to_string());
+            }
+            return;
+        }
+
+        let (prefix, body) = match finding.severity {
+            Severity::Critical => ("🔴 ", finding.message.as_str()),
+            Severity::Warning => ("🟡 ", finding.message.as_str()),
+            Severity::Info => ("🔵 ", finding.message.as_str()),
+        };
+        // A targetless finding has no symbol to pin the message to, so the
+        // category stands in as its label in text output.
+        let message = if finding.target.is_none() {
+            format!("[{}] {body}", finding.category)
+        } else {
+            body.to_string()
+        };
+        let line = match width {
+            Some(w) => wrap_with_prefix(prefix, &message, w),
+            None => format!("{prefix}{message}"),
+        };
+        let formatted = match finding.severity {
+            Severity::Critical => line.red(),
+            Severity::Warning => line.yellow(),
+            Severity::Info => line.cyan(),
+        };
+        output.push_str(&format!("{}\n", formatted));
+        if self.empirical {
+            if let Some(ref udt_name) = finding.type_name {
+                let matching_emp: Vec<&crate::empirical::EmpiricalFinding> = self
+                    .empirical_findings
+                    .iter()
+                    .filter(|ef| &ef.type_name == udt_name)
+                    .collect();
+                if !matching_emp.is_empty() {
+                    let has_failures = matching_emp.iter().any(|ef| !ef.is_success);
+                    if has_failures {
+                        for ef in matching_emp.iter().filter(|ef| !ef.is_success) {
+                            if let Some(ref err) = ef.error {
+                                output.push_str(
+                                    &format!(
+                                        "    ↳ 🔴 [CONFIRMED] Stored data failed to decode: {}\n",
+                                        err
+                                    )
+                                    .red()
+                                    .bold()
+                                    .to_string(),
+                                );
+                            }
+                        }
+                    } else {
+                        output.push_str(&"    ↳ 🟢 [CONTRADICTED] Sampled stored values all decoded successfully under the new spec.\n".green().to_string());
+                    }
+                } else {
+                    output.push_str(
+                        &"    ↳ ⚪ [UNCONFIRMED] No matching stored data found in the sample.\n"
+                            .dimmed()
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        if explain {
+            if let Some(remediation) = &reported.remediation {
+                output.push_str(
+                    &format!("    ↳ guidance: {}\n", remediation)
+                        .green()
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    fn append_unclassified_text(&self, output: &mut String, width: Option<usize>, explain: bool) {
+        let unclassified = self.unclassified_findings();
+        if unclassified.is_empty() {
+            return;
+        }
+        output.push_str(&"--- [OTHER FINDINGS] ---\n".magenta().bold().to_string());
+        for reported in unclassified {
+            output.push_str(&format!("[{}]\n", reported.finding.category));
+            self.append_finding_text(output, reported, width, explain);
+        }
+        output.push('\n');
+    }
+
+    fn append_finding_markdown(&self, output: &mut String, reported: &ReportedFinding) {
+        let finding = &reported.finding;
+
+        if reported.suppressed {
+            output.push_str(&format!(
+                "- 🔕 **[SUPPRESSED]** {}\n",
+                markdown_escape_text(&finding.message)
+            ));
+            if let Some(reason) = &reported.suppression_reason {
+                output.push_str(&format!("  - ↳ reason: {}\n", markdown_escape_text(reason)));
+            }
+            return;
+        }
+
+        let emoji = match finding.severity {
+            Severity::Critical => "🔴",
+            Severity::Warning => "🟡",
+            Severity::Info => "🔵",
+        };
+        output.push_str(&format!(
+            "- {} {}\n",
+            emoji,
+            markdown_escape_text(&finding.message)
+        ));
+        if self.empirical {
+            if let Some(ref udt_name) = finding.type_name {
+                let matching_emp: Vec<&crate::empirical::EmpiricalFinding> = self
+                    .empirical_findings
+                    .iter()
+                    .filter(|ef| &ef.type_name == udt_name)
+                    .collect();
+                if !matching_emp.is_empty() {
+                    let has_failures = matching_emp.iter().any(|ef| !ef.is_success);
+                    if has_failures {
+                        for ef in matching_emp.iter().filter(|ef| !ef.is_success) {
+                            if let Some(ref err) = ef.error {
+                                output.push_str(&format!(
+                                    "  - ↳ 🔴 **[CONFIRMED]** Stored data failed to decode: {}\n",
+                                    markdown_code_span(err)
+                                ));
+                            }
+                        }
+                    } else {
+                        output.push_str("  - ↳ 🟢 **[CONTRADICTED]** Sampled stored values all decoded successfully under the new spec.\n");
+                    }
+                } else {
+                    output.push_str(
+                        "  - ↳ ⚪ **[UNCONFIRMED]** No matching stored data found in the sample.\n",
+                    );
+                }
+            }
+        }
+    }
+
+    fn append_unclassified_markdown(&self, output: &mut String) {
+        let unclassified = self.unclassified_findings();
+        if unclassified.is_empty() {
+            return;
+        }
+        output.push_str("### Other Findings\n\n");
+        let mut current_category: Option<&str> = None;
+        for reported in unclassified {
+            if current_category != Some(reported.finding.category.as_str()) {
+                current_category = Some(&reported.finding.category);
+                output.push_str(&format!(
+                    "### {}\n\n",
+                    markdown_escape_text(&reported.finding.category)
+                ));
+            }
+            self.append_finding_markdown(output, reported);
+        }
+        output.push('\n');
     }
 
     pub fn to_markdown(&self) -> String {
@@ -855,58 +1053,12 @@ impl RenderableReport {
                         markdown_escape_text(&finding.category)
                     ));
                 }
-
-                if reported.suppressed {
-                    output.push_str(&format!(
-                        "- 🔕 **[SUPPRESSED]** {}\n",
-                        markdown_escape_text(&finding.message)
-                    ));
-                    if let Some(reason) = &reported.suppression_reason {
-                        output
-                            .push_str(&format!("  - ↳ reason: {}\n", markdown_escape_text(reason)));
-                    }
-                    continue;
-                }
-
-                let emoji = match finding.severity {
-                    Severity::Critical => "🔴",
-                    Severity::Warning => "🟡",
-                    Severity::Info => "🔵",
-                };
-                output.push_str(&format!(
-                    "- {} {}\n",
-                    emoji,
-                    markdown_escape_text(&finding.message)
-                ));
-                if self.empirical {
-                    if let Some(ref udt_name) = finding.type_name {
-                        let matching_emp: Vec<&crate::empirical::EmpiricalFinding> = self
-                            .empirical_findings
-                            .iter()
-                            .filter(|ef| &ef.type_name == udt_name)
-                            .collect();
-                        if !matching_emp.is_empty() {
-                            let has_failures = matching_emp.iter().any(|ef| !ef.is_success);
-                            if has_failures {
-                                for ef in matching_emp.iter().filter(|ef| !ef.is_success) {
-                                    if let Some(ref err) = ef.error {
-                                        output.push_str(&format!(
-                                            "  - ↳ 🔴 **[CONFIRMED]** Stored data failed to decode: {}\n",
-                                            markdown_code_span(err)
-                                        ));
-                                    }
-                                }
-                            } else {
-                                output.push_str("  - ↳ 🟢 **[CONTRADICTED]** Sampled stored values all decoded successfully under the new spec.\n");
-                            }
-                        } else {
-                            output.push_str("  - ↳ ⚪ **[UNCONFIRMED]** No matching stored data found in the sample.\n");
-                        }
-                    }
-                }
+                self.append_finding_markdown(&mut output, reported);
             }
             output.push('\n');
         }
+
+        self.append_unclassified_markdown(&mut output);
 
         if !self.is_safe {
             output.push_str("### ⚠️ Action Required\n\n");
@@ -948,7 +1100,107 @@ impl RenderableReport {
             output.push('\n');
         }
 
+        if self.complexity_delta.is_some() {
+            output.push_str("### 📊 WASM Complexity Delta\n\n");
+            output.push_str("> **Static analysis only** — these counts describe the code section as decoded by the tool. They are not Soroban host gas estimates or execution profiling data.\n\n");
+            output.push_str(&self.complexity_delta_markdown());
+            if !self.complexity_violations.is_empty() {
+                output.push_str("#### 🔴 Complexity Budget Violations\n\n");
+                for v in &self.complexity_violations {
+                    output.push_str(&format!("- {v}\n"));
+                }
+                output.push('\n');
+            }
+        }
+
         output
+    }
+
+    /// Render the complexity delta section as plain text.
+    fn complexity_delta_text(&self) -> String {
+        let mut out = String::new();
+        let delta = match &self.complexity_delta {
+            Some(d) => d,
+            None => return out,
+        };
+
+        let fmt_delta = |d: &crate::wasm_complexity::MetricDelta| -> String {
+            let sign = if d.absolute >= 0 { "+" } else { "" };
+            match d.pct {
+                Some(pct) => format!(
+                    "{} → {} ({}{}, {}{:.2}%)",
+                    d.old, d.new, sign, d.absolute, sign, pct
+                ),
+                None => format!("{} → {} ({}{})", d.old, d.new, sign, d.absolute),
+            }
+        };
+
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "defined_functions:",
+            fmt_delta(&delta.defined_functions)
+        ));
+        out.push_str(&format!(
+            "  {:<22} {}\n",
+            "total_instructions:",
+            fmt_delta(&delta.total_instructions)
+        ));
+        out.push_str("  Per-family instruction counts:\n");
+        for (family, d) in &delta.by_family {
+            out.push_str(&format!(
+                "    {:<20} {}\n",
+                format!("{family}:"),
+                fmt_delta(d)
+            ));
+        }
+        out
+    }
+
+    /// Render the complexity delta section as Markdown.
+    fn complexity_delta_markdown(&self) -> String {
+        let mut out = String::new();
+        let delta = match &self.complexity_delta {
+            Some(d) => d,
+            None => return out,
+        };
+
+        out.push_str("| Metric | Old | New | Δ Absolute | Δ % |\n");
+        out.push_str("|---|---:|---:|---:|---:|\n");
+
+        let fmt_pct = |pct: Option<f64>| -> String {
+            match pct {
+                Some(p) => format!("{:+.2}%", p),
+                None => "—".to_string(),
+            }
+        };
+        let d = &delta.defined_functions;
+        out.push_str(&format!(
+            "| `defined_functions` | {} | {} | {:+} | {} |\n",
+            d.old,
+            d.new,
+            d.absolute,
+            fmt_pct(d.pct)
+        ));
+        let d = &delta.total_instructions;
+        out.push_str(&format!(
+            "| `total_instructions` | {} | {} | {:+} | {} |\n",
+            d.old,
+            d.new,
+            d.absolute,
+            fmt_pct(d.pct)
+        ));
+        for (family, d) in &delta.by_family {
+            out.push_str(&format!(
+                "| `{}` | {} | {} | {:+} | {} |\n",
+                family,
+                d.old,
+                d.new,
+                d.absolute,
+                fmt_pct(d.pct)
+            ));
+        }
+        out.push('\n');
+        out
     }
 
     fn directional_call_abi_text(&self) -> String {
@@ -1078,6 +1330,19 @@ mod tests {
             message: message.to_string(),
             type_name: None,
             target: Some("thing".to_string()),
+            change: None,
+            root_target: None,
+        }
+    }
+
+    fn targetless_finding(severity: Severity, category: &str, message: &str) -> Finding {
+        Finding {
+            severity,
+            axes: Vec::new(),
+            category: category.to_string(),
+            message: message.to_string(),
+            type_name: None,
+            target: None,
             change: None,
             root_target: None,
         }
@@ -1316,6 +1581,48 @@ mod tests {
         assert!(rendered.starts_with("``"));
         assert!(rendered.ends_with("``"));
         assert!(rendered.contains("value `with` backticks"));
+    }
+
+    #[test]
+    fn text_renders_targetless_finding_without_panic() {
+        let diff = DiffReport {
+            findings: vec![targetless_finding(
+                Severity::Info,
+                "Environment Changed",
+                "Protocol version changed from 20 to 21",
+            )],
+        };
+        let empty_spec = ContractSpec::default();
+        let report = SafetyReport::new_with_specs(&diff, &empty_spec, &empty_spec);
+
+        let text = report.generate_summary_text(false);
+
+        // Should render the finding message without panic
+        assert!(text.contains("Protocol version changed from 20 to 21"));
+        assert!(text.contains("Environment Changed"));
+        // Should not contain placeholder text like "unknown"
+        assert!(!text.contains("unknown"));
+    }
+
+    #[test]
+    fn markdown_renders_targetless_finding_without_panic() {
+        let diff = DiffReport {
+            findings: vec![targetless_finding(
+                Severity::Info,
+                "Environment Changed",
+                "Protocol version changed from 20 to 21",
+            )],
+        };
+        let empty_spec = ContractSpec::default();
+        let report = SafetyReport::new_with_specs(&diff, &empty_spec, &empty_spec);
+
+        let markdown = report.generate_summary_markdown();
+
+        // Should render the finding message without panic
+        assert!(markdown.contains("Protocol version changed from 20 to 21"));
+        assert!(markdown.contains("Environment Changed"));
+        // Should not contain placeholder text like "unknown"
+        assert!(!markdown.contains("unknown"));
     }
 
     #[test]

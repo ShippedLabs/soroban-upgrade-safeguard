@@ -542,6 +542,67 @@ fn test_file_config_partial_deserialization() {
 }
 
 #[test]
+fn test_partial_file_config_uses_documented_defaults() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_safeguard_env();
+    let temp_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let config_path = temp_dir.join("config_partial_defaults.toml");
+
+    fs::write(&config_path, "strict = true\n").unwrap();
+
+    let args = Args {
+        wasm_paths: vec![],
+        format: OutputFormat::Text,
+        contract_id: None,
+        rpc_url: None,
+        config: Some(config_path),
+        explain: false,
+        strict: false,
+        no_color: false,
+        manifest: None,
+        old_dir: None,
+        new_dir: None,
+        max_xdr_depth: None,
+        max_xdr_len: None,
+        max_entries: None,
+        max_walk_depth: None,
+        ..Args::default()
+    };
+
+    let resolved = ResolvedConfig::resolve(args).unwrap();
+
+    assert_eq!(resolved.strict, true);
+    assert_eq!(resolved.format, OutputFormat::Text);
+    assert_eq!(resolved.explain, false);
+    assert_eq!(resolved.no_color, false);
+    assert_eq!(resolved.contract_id, None);
+    assert_eq!(resolved.rpc_url, None);
+    assert_eq!(resolved.manifest, None);
+    assert_eq!(resolved.old_dir, None);
+    assert_eq!(resolved.new_dir, None);
+    assert_eq!(resolved.suppressions.max_suppressions, None);
+    assert_eq!(resolved.suppressions.allow_targetless, None);
+    assert_eq!(
+        resolved.policy.max_xdr_depth,
+        ResourcePolicy::default().max_xdr_depth
+    );
+    assert_eq!(
+        resolved.policy.max_xdr_len,
+        ResourcePolicy::default().max_xdr_len
+    );
+    assert_eq!(
+        resolved.policy.max_entries,
+        ResourcePolicy::default().max_entries
+    );
+    assert_eq!(
+        resolved.policy.max_walk_depth,
+        ResourcePolicy::default().max_walk_depth
+    );
+
+    clear_safeguard_env();
+}
+
+#[test]
 fn test_verdict_settings_mapping() {
     let _guard = ENV_LOCK.lock().unwrap();
     clear_safeguard_env();

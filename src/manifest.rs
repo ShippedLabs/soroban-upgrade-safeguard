@@ -745,7 +745,7 @@ fn fold_pairs(walk: &Walk, cli: &CliSettings) -> Result<Vec<ResolvedPair>> {
     // run with nothing written — the old code bailed mid-loop, after earlier
     // pairs had already produced report files.
     let mut names: HashMap<String, PathBuf> = HashMap::new();
-    let mut ids: HashMap<String, PathBuf> = HashMap::new();
+    let mut ids: HashMap<String, (PathBuf, String)> = HashMap::new();
 
     for walked in &walk.pairs {
         let pair_layer = Layer {
@@ -767,6 +767,17 @@ fn fold_pairs(walk: &Walk, cli: &CliSettings) -> Result<Vec<ResolvedPair>> {
 
         let old = resolve_path(&walked.base_dir, walked.raw.old.clone());
         let new = resolve_path(&walked.base_dir, walked.raw.new.clone());
+
+        // Reject self-comparison: old and new must resolve to different files
+        if canonical_identity(&old) == canonical_identity(&new) {
+            bail!(
+                "Manifest pair compares a file with itself.\n  \
+                 file: {}\n  defined in: {}\n\
+                 A comparison requires two distinct build inputs (old and new).",
+                old.display(),
+                walked.defined_in.display()
+            );
+        }
 
         // Identity derivation preserves the pre-composition behavior: explicit
         // `name`, else the file name of `new`.
@@ -810,17 +821,20 @@ fn fold_pairs(walk: &Walk, cli: &CliSettings) -> Result<Vec<ResolvedPair>> {
             None => name.clone(),
         };
 
-        if let Some(previous) = ids.get(&id) {
+        if let Some((previous_file, previous_name)) = ids.get(&id) {
             bail!(
-                "Duplicate pair id '{}' in the manifest composition.\n  \
-                 first defined in: {}\n  also defined in:  {}\n\
-                 Give one of them an explicit `id` so reruns and CI annotations stay unambiguous.",
+                "Duplicate pair identifier '{}' in the manifest composition.\n  \
+                 first occurrence: pair '{}' in {}\n  \
+                 duplicate: pair '{}' in {}\n\
+                 Each pair must have a unique identifier. Give one of them an explicit `id` field.",
                 id,
-                previous.display(),
+                previous_name,
+                previous_file.display(),
+                name,
                 walked.defined_in.display()
             );
         }
-        ids.insert(id.clone(), walked.defined_in.clone());
+        ids.insert(id.clone(), (walked.defined_in.clone(), name.clone()));
 
         // Labels: validated like `id`, but never checked for uniqueness —
         // the same label repeating across many pairs is the whole point.
@@ -1097,7 +1111,7 @@ fn parent_dir(path: &Path) -> PathBuf {
 /// A comparable identity for a path, falling back to the path itself when the
 /// file cannot be canonicalized (it may not exist yet — the read that follows
 /// reports that properly).
-fn canonical_identity(path: &Path) -> PathBuf {
+pub fn canonical_identity(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
@@ -2294,7 +2308,7 @@ mod tests {
 
         let error = format!("{:#}", resolve(&root, &CliSettings::default()).unwrap_err());
         assert!(
-            error.contains("Duplicate pair id 'shared-id'"),
+            error.contains("Duplicate pair identifier 'shared-id'"),
             "got: {error}"
         );
         assert!(error.contains("frag.toml"), "first file missing: {error}");
@@ -2324,7 +2338,10 @@ mod tests {
         );
 
         let error = format!("{:#}", resolve(&root, &CliSettings::default()).unwrap_err());
-        assert!(error.contains("Duplicate pair id 'dup'"), "got: {error}");
+        assert!(
+            error.contains("Duplicate pair identifier 'dup'"),
+            "got: {error}"
+        );
     }
 
     #[test]
@@ -2431,7 +2448,10 @@ mod tests {
             ]}"#,
         );
         let error = format!("{:#}", resolve(&root, &CliSettings::default()).unwrap_err());
-        assert!(error.contains("Duplicate pair id 'same'"), "got: {error}");
+        assert!(
+            error.contains("Duplicate pair identifier 'same'"),
+            "got: {error}"
+        );
     }
 
     #[test]

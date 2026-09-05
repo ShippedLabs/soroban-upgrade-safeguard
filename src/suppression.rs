@@ -816,6 +816,44 @@ mod tests {
     }
 
     #[test]
+    fn validates_expired_and_future_rules_with_fixed_dates() {
+        let expired = SuppressionConfig::from_toml_str(
+            r#"
+            [[suppress]]
+            category = "Struct Field Removed"
+            target   = "Data.amount"
+            expiry   = "2000-01-01"
+            "#,
+        )
+        .unwrap();
+        let future = SuppressionConfig::from_toml_str(
+            r#"
+            [[suppress]]
+            category = "Struct Field Removed"
+            target   = "Data.amount"
+            expiry   = "2100-01-01"
+            "#,
+        )
+        .unwrap();
+
+        let expired_validation = expired.validate();
+        let future_validation = future.validate();
+
+        assert!(
+            expired_validation
+                .errors
+                .iter()
+                .any(|message| message.contains("expired")),
+            "an expired rule must be rejected during validation"
+        );
+        assert!(
+            future_validation.errors.is_empty(),
+            "a future-dated rule must remain valid: {:?}",
+            future_validation.errors
+        );
+    }
+
+    #[test]
     fn validate_flags_a_rule_with_an_unknown_category() {
         // "Struct Field Reordded" is a misspelling of "Struct Field Reordered";
         // the tool never emits it, so the rule could never match.
@@ -913,20 +951,60 @@ mod tests {
     }
 
     #[test]
-    fn require_reason_by_rule_id_rejects_whitespace_only_reason() {
+    fn require_reason_rejects_whitespace_only_reason_with_newlines_and_tabs() {
+        // Not just spaces: a reason made entirely of newlines/tabs (e.g. an
+        // accidentally-pasted blank multi-line string) must be rejected the
+        // same way, and the error must still identify which suppression rule
+        // is affected — not just that *some* rule is missing a reason.
         let err = SuppressionConfig::from_toml_str(
-            r#"
+            "
             [require_reason]
-            rule_ids = ["struct_field_removed"]
+            rule_ids = [\"struct_field_removed\"]
 
             [[suppress]]
-            category = "Struct Field Removed"
-            target   = "Data.amount"
-            reason   = "   "
-            "#,
+            category = \"Struct Field Removed\"
+            target   = \"Data.amount\"
+            reason   = \"  \\n\\t \\n  \"
+            ",
         )
-        .expect_err("a whitespace-only reason must be rejected exactly like a missing one");
-        assert!(err.to_string().contains("require_reason"));
+        .expect_err("a reason of only spaces, tabs, and newlines must be rejected");
+        let message = err.to_string();
+        assert!(
+            message.contains("require_reason"),
+            "error should name the policy, got: {message}"
+        );
+        assert!(
+            message.contains("Struct Field Removed"),
+            "error should identify the affected rule's category, got: {message}"
+        );
+        assert!(
+            message.contains("Data.amount"),
+            "error should identify the affected rule's target, got: {message}"
+        );
+        assert!(
+            message.contains("rule #1"),
+            "error should identify the affected rule's position, got: {message}"
+        );
+    }
+
+    #[test]
+    fn require_reason_accepts_visible_text_padded_with_whitespace() {
+        // A reason with leading/trailing whitespace around real content is
+        // not whitespace-only and must be accepted — only entirely-blank
+        // reasons are rejected.
+        let config = SuppressionConfig::from_toml_str(
+            "
+            [require_reason]
+            rule_ids = [\"struct_field_removed\"]
+
+            [[suppress]]
+            category = \"Struct Field Removed\"
+            target   = \"Data.amount\"
+            reason   = \"  \\n  Planned migration, reviewed in #123.  \\n  \"
+            ",
+        )
+        .expect("a reason with visible text must be accepted even with surrounding whitespace");
+        assert_eq!(config.rules.len(), 1);
     }
 
     #[test]

@@ -143,6 +143,7 @@ fn width_never_affects_json_output() {
         wasm("v2.wasm").to_str().unwrap(),
         "--format",
         "json",
+        "--no-timestamp",
     ]);
     let narrow_output = run(&[
         wasm("v1.wasm").to_str().unwrap(),
@@ -151,6 +152,7 @@ fn width_never_affects_json_output() {
         "json",
         "--width",
         "20",
+        "--no-timestamp",
     ]);
 
     assert_eq!(stdout_of(&default_output), stdout_of(&narrow_output));
@@ -163,6 +165,7 @@ fn width_never_affects_markdown_output() {
         wasm("v2.wasm").to_str().unwrap(),
         "--format",
         "markdown",
+        "--no-timestamp",
     ]);
     let narrow_output = run(&[
         wasm("v1.wasm").to_str().unwrap(),
@@ -171,6 +174,7 @@ fn width_never_affects_markdown_output() {
         "markdown",
         "--width",
         "20",
+        "--no-timestamp",
     ]);
 
     assert_eq!(stdout_of(&default_output), stdout_of(&narrow_output));
@@ -237,6 +241,7 @@ fn width_never_affects_batch_json_output() {
         manifest_path.to_str().unwrap(),
         "--format",
         "json",
+        "--no-timestamp",
     ]);
     let narrow_output = run(&[
         "--manifest",
@@ -245,6 +250,7 @@ fn width_never_affects_batch_json_output() {
         "json",
         "--width",
         "20",
+        "--no-timestamp",
     ]);
 
     assert_eq!(stdout_of(&default_output), stdout_of(&narrow_output));

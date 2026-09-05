@@ -1,0 +1,27 @@
+{
+  "declarations": [
+    {
+      "name": "balance",
+      "operation": "set",
+      "durability": "persistent",
+      "namespace": "v2"
+    },
+    {
+      "name": "allowance",
+      "operation": "set",
+      "durability": "persistent"
+    },
+    {
+      "name": "meta",
+      "operation": "get",
+      "durability": "instance",
+      "namespace": "contract"
+    },
+    {
+      "name": "unnamespaced",
+      "operation": "set",
+      "durability": "persistent",
+      "namespace": "new_ns"
+    }
+  ]
+}

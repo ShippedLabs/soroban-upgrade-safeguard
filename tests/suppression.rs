@@ -381,6 +381,75 @@ fn explicit_cli_config_outranks_env_var() {
 }
 
 #[test]
+fn explicit_cli_config_overrides_discovery_and_env_and_keeps_loaded_rules() {
+    let cwd = temp_dir("explicit-config-precedence");
+    let discovered = cwd.join(".safeguard.toml");
+    std::fs::write(
+        &discovered,
+        r#"
+        [[suppress]]
+        category = "Function Signature Changed"
+        target   = "initialize"
+        reason   = "auto-discovered suppression"
+        "#,
+    )
+    .expect("failed to write discovered config");
+
+    let env_config = write_config(
+        "explicit-precedence-env",
+        r#"
+        [[suppress]]
+        category = "Struct Field Removed"
+        target   = "ConfigData.threshold"
+        reason   = "env suppression"
+        "#,
+    );
+
+    let cli_config = write_config(
+        "explicit-precedence-cli",
+        r#"
+        [[suppress]]
+        category = "Struct Field Removed"
+        target   = "ConfigData.some_other_field"
+        reason   = "explicit file suppression"
+        "#,
+    );
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"));
+    cmd.arg(wasm("v1.wasm"))
+        .arg(wasm("v2.wasm"))
+        .args(["--format", "json"])
+        .args(["--config", cli_config.to_str().unwrap()])
+        .env("SOROBAN_SAFEGUARD_CONFIG", env_config)
+        .current_dir(&cwd);
+
+    let output = cmd.output().expect("failed to run binary");
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+    let json: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout was not valid JSON: {e}\n---stdout---\n{stdout}"));
+    let code = output.status.code().expect("process terminated by signal");
+
+    assert_eq!(
+        code, 1,
+        "the explicit config must win over both discovery and env: {stdout}"
+    );
+    assert_eq!(json["suppressed_count"].as_u64().unwrap(), 0);
+    assert_eq!(json["counts"]["critical"].as_u64().unwrap(), 3);
+    assert!(json["findings_by_category"].is_object());
+    assert_eq!(
+        json["findings_by_category"]["Struct Field Removed"][0]["target"],
+        Value::String("ConfigData.threshold".to_string())
+    );
+    assert!(
+        json["findings_by_category"]["Struct Field Removed"][0]["suppressed"]
+            .as_bool()
+            .unwrap_or(false)
+            == false,
+        "the explicit file should be the source of truth, not the env/discovered configs"
+    );
+}
+
+#[test]
 fn env_var_outranks_auto_discovered_default_config() {
     // The cwd has its own .safeguard.toml (would normally auto-load and
     // suppress everything); the env var names a config that suppresses

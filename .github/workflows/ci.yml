@@ -20,6 +20,11 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache Cargo registry and build artifacts
+        # A cache hit is a performance optimization only. The hashFiles()
+        # cache-key evaluation is intermittently flaky on GitHub runners and
+        # can fail the whole job for an unrelated infra reason, so never let
+        # the cache step take the job down.
+        continue-on-error: true
         uses: actions/cache@v4
         with:
           path: |
@@ -66,6 +71,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo registry and build artifacts
+        # A cache hit is a performance optimization only. The hashFiles()
+        # cache-key evaluation is intermittently flaky on GitHub runners and
+        # can fail the whole job for an unrelated infra reason, so never let
+        # the cache step take the job down.
+        continue-on-error: true
         uses: actions/cache@v4
         with:
           path: |

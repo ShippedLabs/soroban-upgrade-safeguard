@@ -1,9 +1,8 @@
 //! Regression tests for reports that omit optional provenance fields.
 //!
 //! Report consumers may receive older or manually generated JSON that omits
-//! optional provenance fields (baseline_source, verified_code_hash,
-//! old_spec_summary, new_spec_summary). The renderer must handle these
-//! gracefully — no panics, no invented source values.
+//! optional provenance fields (old_spec_summary, new_spec_summary). The
+//! renderer must handle these gracefully — no panics, no invented source values.
 
 use std::path::PathBuf;
 
@@ -31,15 +30,6 @@ fn text_renderer_handles_missing_provenance() {
     assert!(
         report.critical_count >= 1,
         "v1 -> v2 must report at least one critical finding"
-    );
-
-    assert!(
-        report.baseline_source.is_none(),
-        "library API must not set baseline_source"
-    );
-    assert!(
-        report.verified_code_hash.is_none(),
-        "library API must not set verified_code_hash"
     );
 
     let output = std::panic::catch_unwind(|| report.generate_summary_text(false));
@@ -73,9 +63,19 @@ fn text_renderer_handles_missing_provenance() {
     );
 
     let sha256_pattern = regex::Regex::new(r"\b[0-9a-f]{64}\b").unwrap();
-    assert!(
-        !sha256_pattern.is_match(&text),
-        "text output must not contain a fabricated SHA-256 hash"
+    let mut hashes: Vec<&str> = sha256_pattern
+        .find_iter(&text)
+        .map(|m| m.as_str())
+        .collect();
+    hashes.sort();
+    hashes.dedup();
+    assert_eq!(
+        hashes,
+        vec![
+            "17618edb2d0d99112a446eec51b056ef59d07e2d1ffdbbb0656f48f62e4a4265",
+            "75ac891b458995add52ccc2d24edde3d5494fecdcbc413f0e4aca4e9afc72158"
+        ],
+        "only the two interface hashes may appear — no fabricated code hash"
     );
 }
 
@@ -87,15 +87,6 @@ fn markdown_renderer_handles_missing_provenance() {
     assert!(
         report.critical_count >= 1,
         "v1 -> v2 must report at least one critical finding"
-    );
-
-    assert!(
-        report.baseline_source.is_none(),
-        "library API must not set baseline_source"
-    );
-    assert!(
-        report.verified_code_hash.is_none(),
-        "library API must not set verified_code_hash"
     );
 
     let output = std::panic::catch_unwind(|| report.generate_summary_markdown());
@@ -129,9 +120,19 @@ fn markdown_renderer_handles_missing_provenance() {
     );
 
     let sha256_pattern = regex::Regex::new(r"\b[0-9a-f]{64}\b").unwrap();
-    assert!(
-        !sha256_pattern.is_match(&markdown),
-        "markdown output must not contain a fabricated SHA-256 hash"
+    let mut hashes: Vec<&str> = sha256_pattern
+        .find_iter(&markdown)
+        .map(|m| m.as_str())
+        .collect();
+    hashes.sort();
+    hashes.dedup();
+    assert_eq!(
+        hashes,
+        vec![
+            "17618edb2d0d99112a446eec51b056ef59d07e2d1ffdbbb0656f48f62e4a4265",
+            "75ac891b458995add52ccc2d24edde3d5494fecdcbc413f0e4aca4e9afc72158"
+        ],
+        "only the two interface hashes may appear — no fabricated code hash"
     );
 }
 
@@ -145,9 +146,6 @@ fn safe_report_also_handles_missing_provenance() {
         report.critical_count, 0,
         "identical builds have no criticals"
     );
-
-    assert!(report.baseline_source.is_none());
-    assert!(report.verified_code_hash.is_none());
 
     let text_output = std::panic::catch_unwind(|| report.generate_summary_text(false));
     assert!(

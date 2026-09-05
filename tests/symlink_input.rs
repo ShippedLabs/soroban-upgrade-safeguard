@@ -10,6 +10,8 @@
 //! rolled temp-dir helper).
 #![cfg(unix)]
 
+use std::ffi::OsString;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -219,6 +221,28 @@ fn both_sides_symlinked_records_two_entries() {
     assert_eq!(symlinks_in(&json).len(), 2);
 }
 
+#[test]
+fn a_non_utf8_path_component_is_reported_lossily_in_provenance() {
+    let dir = temp_dir("non-utf8-path");
+    let filename = OsString::from_vec(b"v1-\xFF.wasm".to_vec());
+    let path = dir.join(&filename);
+    if let Err(err) = std::fs::copy(wasm("v1.wasm"), &path) {
+        // Some filesystems (e.g. macOS APFS) reject non-UTF-8 names at the
+        // VFS layer with EILSEQ, so the lossy-path behavior cannot be
+        // exercised there. Skip rather than fail.
+        if err.raw_os_error() == Some(92) {
+            return;
+        }
+        panic!("failed to create WASM with a non-UTF-8 name: {err}");
+    }
+
+    let module = soroban_upgrade_safeguard::loader::load_wasm(&path)
+        .expect("a valid WASM file with a non-UTF-8 path component must still load");
+
+    assert_eq!(module.path, path.to_string_lossy().to_string());
+    assert!(module.path.contains("\u{FFFD}") || path.as_os_str().as_bytes().contains(&0xFF));
+}
+
 // ---------------------------------------------------------------------------
 // Chained symlinks
 // ---------------------------------------------------------------------------
@@ -400,7 +424,7 @@ fn no_symlinks_rejects_a_symlink_in_manifest_mode() {
 fn a_symlink_in_manifest_mode_is_recorded_without_no_symlinks() {
     let dir = temp_dir("symlink-manifest-allowed");
     let link = dir.join("new.wasm");
-    symlink(wasm("v1.wasm"), &link).expect("failed to create symlink");
+    symlink(wasm("v3.wasm"), &link).expect("failed to create symlink");
 
     let manifest = dir.join("manifest.toml");
     std::fs::write(
