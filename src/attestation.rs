@@ -23,8 +23,6 @@ pub struct ArtifactDigest {
 }
 
 /// Helper to compute SHA-256 digests for artifacts.
-//commented with this
-
 impl ArtifactDigest {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self {
