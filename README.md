@@ -22,6 +22,7 @@ A powerful CLI tool to analyze and validate Soroban smart contract upgrades on t
 - **Lineage Tracking**: Validate a candidate build against every historical version still marked live in a persistent lineage store, not just the immediate predecessor — catching a break in data an older release wrote that the immediate predecessor never touched.
 - **Provenance Metadata**: Every report includes the tool version, a timestamp, and input identifiers for full auditability (`--no-timestamp` for deterministic snapshot testing).
 - **Signed Attestations**: Bind reports, artifacts, extracted specs, policy, and verdicts in canonical in-toto statements with offline DSSE verification.
+- **Finding Category Catalog**: `categories` lists every finding category with its severity, trigger, and remediation — in human-readable text or machine-readable JSON — generated from the same source of truth the analysis uses, so it can never drift.
 - **GitHub Action**: Reusable action that posts the Markdown report as a PR comment and updates it in-place on subsequent pushes.
 
 ## Installation
@@ -374,6 +375,28 @@ cat ./wasm/v2.wasm | soroban-upgrade-safeguard ./wasm/v1.wasm -
 
 Only one positional input may be `-`; using `-` for both `OLD_WASM` and
 `NEW_WASM` is rejected because stdin can only be consumed once.
+
+### Listing finding categories
+
+Enumerate every finding category the analysis may emit, with its default
+severity, what triggers it, and how to remediate it:
+
+```bash
+soroban-upgrade-safeguard categories
+```
+
+For scripting and CI, `--format json` prints a machine-readable array, one
+object per category (`category`, `severity`, `trigger_description`,
+`remediation`):
+
+```bash
+soroban-upgrade-safeguard categories --format json
+```
+
+Both formats are generated from the same source of truth the comparison
+analysis uses, so the listing can never drift from the categories the tool
+actually emits. See [docs/finding-categories.md](docs/finding-categories.md) for
+the full documented taxonomy.
 
 ### Symlinked inputs
 

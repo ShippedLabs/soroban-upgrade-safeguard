@@ -81,7 +81,7 @@ fn report_schema_version_from_source() -> Option<String> {
         let line = line.trim();
         if line.starts_with("pub const REPORT_SCHEMA_VERSION: u32 =") {
             // Extract the numeric literal between '=' and ';'
-            let after_eq = line.splitn(2, '=').nth(1)?;
+            let (_, after_eq) = line.split_once('=')?;
             let value = after_eq.trim().trim_end_matches(';').trim();
             return Some(value.to_string());
         }

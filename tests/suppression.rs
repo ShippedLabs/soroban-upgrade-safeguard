@@ -441,10 +441,9 @@ fn explicit_cli_config_overrides_discovery_and_env_and_keeps_loaded_rules() {
         Value::String("ConfigData.threshold".to_string())
     );
     assert!(
-        json["findings_by_category"]["Struct Field Removed"][0]["suppressed"]
+        !json["findings_by_category"]["Struct Field Removed"][0]["suppressed"]
             .as_bool()
-            .unwrap_or(false)
-            == false,
+            .unwrap_or(false),
         "the explicit file should be the source of truth, not the env/discovered configs"
     );
 }

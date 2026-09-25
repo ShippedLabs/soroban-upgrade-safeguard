@@ -81,8 +81,7 @@ fn toml_manifest_resolves_paths_with_spaces() {
     std::fs::copy(wasm("v2.wasm"), artifacts_dir.join("v2.wasm")).expect("failed to copy v2.wasm");
     std::fs::copy(wasm("v3.wasm"), artifacts_dir.join("v3.wasm")).expect("failed to copy v3.wasm");
 
-    let manifest_content = format!(
-        r#"
+    let manifest_content = r#"
 [[pairs]]
 old = "build artifacts/v1.wasm"
 new = "build artifacts/v3.wasm"
@@ -93,7 +92,7 @@ old = "build artifacts/v1.wasm"
 new = "build artifacts/v2.wasm"
 name = "breaking_pair"
 "#
-    );
+    .to_string();
 
     let manifest = dir.join("manifest.toml");
     write_file(&manifest, &manifest_content);
@@ -148,22 +147,21 @@ fn json_manifest_resolves_paths_with_spaces() {
     std::fs::copy(wasm("v1.wasm"), artifacts_dir.join("v1.wasm")).expect("failed to copy v1.wasm");
     std::fs::copy(wasm("v3.wasm"), artifacts_dir.join("v3.wasm")).expect("failed to copy v3.wasm");
 
-    let manifest_content = format!(
-        r#"{{
+    let manifest_content = r#"{
     "pairs": [
-        {{
+        {
             "old": "release artifacts/v1.wasm",
             "new": "release artifacts/v3.wasm",
             "name": "safe_json_pair"
-        }},
-        {{
+        },
+        {
             "old": "release artifacts/v1.wasm",
             "new": "release artifacts/v3.wasm",
             "name": "warning_json_pair"
-        }}
+        }
     ]
-}}"#
-    );
+}"#
+    .to_string();
 
     let manifest = dir.join("manifest.json");
     write_file(&manifest, &manifest_content);
@@ -211,14 +209,13 @@ fn error_messages_preserve_unsplit_paths_with_spaces() {
     let bad_file = artifacts_dir.join("not_wasm.bin");
     std::fs::write(&bad_file, b"this is not a WASM file").expect("failed to write bad file");
 
-    let manifest_content = format!(
-        r#"
+    let manifest_content = r#"
 [[pairs]]
 old = "my build output/not_wasm.bin"
 new = "my build output/not_wasm.bin"
 name = "invalid_wasm"
 "#
-    );
+    .to_string();
 
     let manifest = dir.join("manifest.toml");
     write_file(&manifest, &manifest_content);
