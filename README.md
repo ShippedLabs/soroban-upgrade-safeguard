@@ -469,6 +469,22 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format json
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format markdown
 ```
 
+### Wrapping text output
+
+Finding messages in **text** output word-wrap to fit the terminal. `--width
+<COLUMNS>` overrides that detection with a fixed column count, useful when
+producing a text report for a fixed-width medium:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --width 100
+```
+
+Without `--width`, wrapping is detected only when stdout is a terminal: the
+`COLUMNS` environment variable if set and valid, else 80 columns. Piped or
+redirected output is left unwrapped unless `--width` is given explicitly.
+`--width` never affects JSON or Markdown output, which have no line-width
+concept.
+
 ### Multiple output formats
 
 `--output` accepts a `FORMAT:PATH` specification or a bare path, and can be
