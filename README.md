@@ -44,6 +44,26 @@ soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
 ```
 
+### Subcommands
+
+Running the tool with two WASM paths, as in the example above, compares
+them. The following subcommands do other jobs. Run
+`soroban-upgrade-safeguard <SUBCOMMAND> --help` to see a subcommand's
+flags.
+
+| Subcommand | What it does | Details |
+|------------|--------------|---------|
+| `extract` | Prints one build's decoded interface as JSON, or only its interface hash with `--hash-only` | [Inspecting a single build](#inspecting-a-single-build) |
+| `lockfile` | Writes a committed snapshot of one build's exported interface | [Pinning an interface with a lockfile](#pinning-an-interface-with-a-lockfile) |
+| `render` | Renders a saved JSON report as text or Markdown | [Re-rendering a saved report](#re-rendering-a-saved-report) |
+| `upgrade-report` | Migrates a saved JSON report to the latest schema version | [Report migrations](docs/report_migrations.md) |
+| `init` | Generates a `.safeguard.toml` suppression config from the current findings | [Suppressing known breaking changes](#suppressing-known-breaking-changes) |
+| `attest` | Creates a signed DSSE in-toto attestation for a saved report | [Signing and verifying reports](#signing-and-verifying-reports) |
+| `verify-attestation` | Verifies an attestation and every artifact it references, offline | [Signing and verifying reports](#signing-and-verifying-reports) |
+| `stream` | Runs in JSON Lines batch mode: reads one job per line on stdin and writes one result per line to stdout | `stream --help` |
+| `lint` | Checks one contract spec, and optionally a storage schema, for structural problems without comparing it to another build | [Lint rules reference](docs/lint_rules_reference.md) |
+| `preflight` | Checks RPC connectivity and the JSON-RPC response format without fetching any contract code | [RPC security checklist](docs/rpc-security-checklist.md) |
+
 ### Strict mode
 
 By default the command exits `0` unless it finds **Critical** breaking changes
@@ -712,13 +732,14 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format md
 ```
 
 An unknown name is rejected, and the error lists the supported values.
-Subcommands accept a smaller set of formats, with the same case-insensitive
-matching and no aliases:
+Subcommands that take `--format` use the same case-insensitive matching and
+also accept no aliases. Some of them accept fewer formats:
 
 | Subcommand | `--format` values | Default |
 |------------|-------------------|---------|
 | `render` | `text`, `markdown` | `text` |
 | `lint` | `text`, `json`, `markdown` | `text` |
+| `preflight` | `text`, `json`, `markdown`, `github-actions` | `text` |
 
 ### Wrapping text output
 
