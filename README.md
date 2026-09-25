@@ -445,7 +445,9 @@ most recently recorded live versions, for a contract with a long history
 where only the recent tail still matters.
 
 See [Persistent Compatibility Lineage Ledger](docs/lineage_model.md) for the
-full ledger file format and fields.
+full ledger file format and fields, and the
+[Lineage Tracking Walkthrough](docs/lineage-walkthrough.md) for a worked
+example that uses all four lineage flags across several releases.
 
 #### Recording a version
 
@@ -467,10 +469,10 @@ accepted but has nothing to write to, so it's a silent no-op. Recording
 happens **after** the comparison completes and is not gated on the verdict:
 a candidate that fails the comparison is still recorded if you asked for it,
 so a rejected build doesn't silently vanish from the history the next
-candidate gets checked against. Re-using an existing `<VERSION_ID>` overwrites
-that entry rather than adding a duplicate, which is useful for amending a
-just-recorded build but means a typoed tag can silently clobber history — get
-the ID right, or check the store's contents before you push it further.
+candidate gets checked against. Each `<VERSION_ID>` can be recorded only
+once. Currently, re-using an ID that is already in the store fails the run
+with an `invalid order 0` integrity error and leaves the file unchanged. To
+amend an existing entry, edit the store directly.
 
 #### Retiring a version
 
@@ -497,8 +499,8 @@ written back to `--lineage-store`'s path when `--record-version` is also
 given — so `--retire-version` alone updates the in-memory ledger for this
 run's validation but leaves the file on disk untouched, and the retirement
 won't apply to the *next* run either. To make a retirement durable, pair it
-with `--record-version` in the same invocation (recording any candidate,
-including one you've already recorded, is enough to trigger a save):
+with `--record-version` in the same invocation, usually when you record the
+next release:
 
 ```bash
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
@@ -1017,6 +1019,7 @@ More detailed guides live in the [docs](docs/) folder:
 - [Signed Attestations](docs/attestations.md): DSSE signing, the in-toto predicate, offline verification, and security guidance.
 - [RPC Security Checklist](docs/rpc-security-checklist.md): operational checklist for endpoint trust, HTTPS, expected-hash pinning, credentials, and report retention when fetching a baseline over RPC.
 - [Storage Schema Cookbook](docs/storage-schema-cookbook.md): worked examples for declaring storage schemas — common key enums, nested values, optional fields, and partial coverage.
+- [Lineage Tracking Walkthrough](docs/lineage-walkthrough.md): a worked example of recording historical versions, validating a candidate against them, retiring versions, and capping the number of live versions with `--lineage-store`.
 - [Troubleshooting Loader Failures](docs/loader-troubleshooting.md): what to do about malformed WASM, missing custom sections, unsupported formats, and resource-limit rejections.
 
 ## License
