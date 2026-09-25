@@ -677,6 +677,31 @@ struct Args {
     #[arg(long)]
     allow_oci_tags: bool,
 
+    /// Directory used to cache parsed WASM metadata (decoded XDR, interface
+    /// hashes, normalized specs) keyed by the WASM content hash.  Shared
+    /// across all input sources (local file, HTTPS, OCI, RPC).
+    /// Defaults to `$TMPDIR/soroban-upgrade-safeguard/metadata-cache/` or the
+    /// `SOROBAN_SAFEGUARD_METADATA_CACHE` environment variable if set.
+    #[arg(long, value_name = "DIR")]
+    metadata_cache_dir: Option<PathBuf>,
+
+    /// Do not read from or write to the parsed-metadata cache for this run.
+    /// The WASM is always re-decoded from scratch.
+    #[arg(long)]
+    no_metadata_cache: bool,
+
+    /// Delete every entry in the parsed-metadata cache and exit.
+    #[arg(long)]
+    clear_metadata_cache: bool,
+
+    /// Print hit, miss, and invalidation counts to stderr after the run.
+    #[arg(long)]
+    metadata_cache_stats: bool,
+
+    /// List all entries currently in the parsed-metadata cache and exit.
+    #[arg(long)]
+    inspect_metadata_cache: bool,
+
     /// Path to a persistent lineage store (JSON/TOML) tracking historical versions.
     #[arg(long, value_name = "PATH")]
     lineage_store: Option<PathBuf>,
@@ -715,6 +740,15 @@ fn oci_fetch_config(args: &Args) -> OciFetchConfig {
         no_cache: args.no_oci_cache,
         https_only: true,
         allow_tags: args.allow_oci_tags,
+    }
+}
+
+/// Build the metadata-cache configuration from the top-level CLI flags.
+fn metadata_cache_config(args: &Args) -> soroban_upgrade_safeguard::metadata_cache::MetadataCacheConfig {
+    soroban_upgrade_safeguard::metadata_cache::MetadataCacheConfig {
+        no_cache: args.no_metadata_cache,
+        cache_dir: args.metadata_cache_dir.clone(),
+        print_stats: args.metadata_cache_stats,
     }
 }
 
@@ -1944,6 +1978,28 @@ fn main() -> Result<()> {
         if !args.quiet {
             println!("Cleared OCI artifact cache at '{}'", dir.display());
         }
+        return Ok(());
+    }
+
+    if args.clear_metadata_cache {
+        let dir = args
+            .metadata_cache_dir
+            .clone()
+            .unwrap_or_else(soroban_upgrade_safeguard::metadata_cache::default_cache_dir);
+        soroban_upgrade_safeguard::metadata_cache::clear_cache(&dir)
+            .with_context(|| format!("Failed to clear metadata cache at '{}'", dir.display()))?;
+        if !args.quiet {
+            println!("Cleared parsed-metadata cache at '{}'", dir.display());
+        }
+        return Ok(());
+    }
+
+    if args.inspect_metadata_cache {
+        let dir = args
+            .metadata_cache_dir
+            .clone()
+            .unwrap_or_else(soroban_upgrade_safeguard::metadata_cache::default_cache_dir);
+        soroban_upgrade_safeguard::metadata_cache::print_cache_inspect(&dir);
         return Ok(());
     }
 
@@ -3434,6 +3490,14 @@ fn run_single(
 
         let remote_config = remote_fetch_config(args);
         let oci_config = oci_fetch_config(args);
+        let mc_config = metadata_cache_config(args);
+        // Log cache mode for diagnostic visibility when stats are requested.
+        if mc_config.print_stats && mc_config.no_cache {
+            eprintln!("metadata-cache: bypassed (--no-metadata-cache)");
+        } else if mc_config.print_stats {
+            let mc_dir = mc_config.resolved_cache_dir();
+            eprintln!("metadata-cache: active, dir='{}'", mc_dir.display());
+        }
 
         let new = load_wasm_input(
             new_wasm_path,
@@ -3624,6 +3688,18 @@ fn run_single(
     };
 
     let is_safe = run_comparison_tracked(&progress)?;
+
+    // Print metadata-cache stats if requested (after the run so the final
+    // hit/miss counts are available in a future extension; for now this
+    // prints the directory summary since the cache session object lives
+    // inside the analysis pipeline).
+    if args.metadata_cache_stats {
+        let mc_dir = args
+            .metadata_cache_dir
+            .clone()
+            .unwrap_or_else(soroban_upgrade_safeguard::metadata_cache::default_cache_dir);
+        soroban_upgrade_safeguard::metadata_cache::print_cache_inspect(&mc_dir);
+    }
 
     if args.watch && !watch_paths.is_empty() {
         run_watch_mode(
