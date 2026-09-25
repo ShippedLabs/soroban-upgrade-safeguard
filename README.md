@@ -80,6 +80,23 @@ not disable color. Pass `--no-color` to turn color off, or `--plain` for fully
 plain output (which implies both `--no-color` and `--ascii` and also strips
 the remaining decorative separators).
 
+### Controlling color output
+
+`--color` controls when ANSI color is emitted:
+
+- **`auto`** (default) — color only when stdout is a terminal and `NO_COLOR`
+  is not set.
+- **`always`** — color even when stdout is piped or redirected, for piping
+  into a viewer (e.g. `less -R`, `bat`) that renders ANSI itself.
+- **`never`** — never emit color.
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --color always | less -R
+```
+
+`--no-color` takes precedence over `--color`: if both are given, output is
+uncolored regardless of the `--color` value.
+
 ### Comparing against a deployed contract (RPC baseline)
 
 Fetch the baseline directly from an on-chain contract instead of a local file
