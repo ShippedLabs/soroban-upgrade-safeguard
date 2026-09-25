@@ -167,6 +167,24 @@ verifies the fetched bytecode against the on-chain contract instance hash on
 every run; this flag adds the second, independent check that the on-chain build
 is the specific one you reviewed.
 
+#### Local RPC endpoints
+
+Without `--allow-http-local`, only `https://` RPC URLs are accepted. Pass it
+to allow plain `http://` connections for RPC when the host is `localhost` or
+`127.0.0.1` — what a local test validator needs, since it typically has no
+TLS certificate:
+
+```bash
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url http://localhost:8000/soroban/rpc \
+  --allow-http-local \
+  ./wasm/v2.wasm
+```
+
+It only relaxes the check for a local host: a remote `http://` URL is
+rejected whether or not `--allow-http-local` is set.
+
 ### Validating against captured storage entries
 
 Structural comparison answers whether the *shapes* the new build declares are
