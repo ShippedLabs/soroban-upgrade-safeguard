@@ -341,8 +341,17 @@ A broken link or a symlink cycle is always an error, named as such, whether or
 not `--no-symlinks` is in effect.
 
 Because a resolved target is absolute, it can reveal a username or workspace
-layout. Use `--redact-paths` when a report is published somewhere the local
-filesystem layout should not be.
+layout. Pass `--redact-paths` when a report is published somewhere the local
+filesystem layout should not be exposed:
+
+```bash
+soroban-upgrade-safeguard ./wasm/current.wasm ./wasm/v2.wasm --redact-paths
+```
+
+It replaces local filesystem paths in report provenance — currently, resolved
+symlink targets — with a stable, non-identifying label. Interface hashes,
+contract IDs, and RPC endpoints are already sanitized and are unaffected by
+this flag.
 
 ### Suppressing known breaking changes
 
