@@ -14,6 +14,7 @@ use soroban_upgrade_safeguard::{
         InTotoSubject, SafeguardPredicateV1, VerificationFailure, VerificationFailureKind,
         VerificationPolicy,
     },
+    category,
     color::{should_disable_color, ColorMode},
     diff,
     limits::ResourcePolicy,
@@ -388,7 +389,8 @@ enum RenderFormat {
                       soroban-upgrade-safeguard render <REPORT_JSON> [OPTIONS]\n       \
                       soroban-upgrade-safeguard init [OPTIONS]\n       \
                       soroban-upgrade-safeguard stream [OPTIONS]\n       \
-                      soroban-upgrade-safeguard preflight --rpc-url <URL> [OPTIONS]",
+                      soroban-upgrade-safeguard preflight --rpc-url <URL> [OPTIONS]\n       \
+                      soroban-upgrade-safeguard categories [OPTIONS]",
     args_conflicts_with_subcommands = true,
     subcommand_negates_reqs = true,
 )]
@@ -740,6 +742,8 @@ enum Command {
     Lint(LintArgs),
     /// Validate RPC connectivity and JSON-RPC protocol shape without fetching contract code
     Preflight(PreflightArgs),
+    /// List every finding category with its severity and remediation guidance
+    Categories(CategoriesArgs),
 }
 
 /// `lint`: validate a single decoded contract spec (and optional storage
@@ -1035,6 +1039,33 @@ struct PreflightArgs {
     no_color: bool,
 }
 
+/// Output format for the `categories` listing.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum CategoriesFormat {
+    /// Human-readable listing (default).
+    #[default]
+    Text,
+    /// Machine-readable JSON array, one object per category.
+    Json,
+}
+
+/// `categories`: list every finding category with its default severity,
+/// what triggers it, and remediation guidance.
+///
+/// The listing is generated from [`category::FindingCategory::all()`] — the
+/// exact same enum the analysis uses when classifying findings — so it can
+/// never drift from the categories the tool actually emits.
+#[derive(ClapArgs, Debug)]
+struct CategoriesArgs {
+    /// Output format.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = CategoriesFormat::Text)]
+    format: CategoriesFormat,
+
+    /// Do not color output.
+    #[arg(long)]
+    no_color: bool,
+}
+
 fn rpc_config(url: &str, headers: &[String]) -> Result<RpcClientConfig> {
     let mut config = RpcClientConfig::new(url.to_string()).map_err(|e| anyhow::anyhow!(e))?;
     for spec in headers {
@@ -1211,6 +1242,124 @@ fn run_preflight(args: &PreflightArgs) -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn severity_colored(severity: diff::Severity) -> colored::ColoredString {
+    let plain = match severity {
+        diff::Severity::Critical => "Critical",
+        diff::Severity::Warning => "Warning",
+        diff::Severity::Info => "Info",
+    };
+    let line = format!("  Severity:   {plain:>9}");
+    match severity {
+        diff::Severity::Critical => line.red(),
+        diff::Severity::Warning => line.yellow(),
+        diff::Severity::Info => line.blue(),
+    }
+}
+
+/// Wrap `text` so the first line starts with `prefix` and every continuation
+/// line is indented to align under it, never exceeding `width` columns.
+fn wrap_with_prefix(prefix: &str, text: &str, width: usize) -> String {
+    let indent_width = prefix.chars().count();
+    let indent = " ".repeat(indent_width);
+    let available = width.saturating_sub(indent_width);
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let candidate_len = if current.is_empty() {
+            word.chars().count()
+        } else {
+            current.chars().count() + 1 + word.chars().count()
+        };
+        if !current.is_empty() && available > 0 && candidate_len > available {
+            lines.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+
+    let mut out = String::with_capacity(prefix.len() + text.len());
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 {
+            out.push_str(prefix);
+        } else {
+            out.push('\n');
+            out.push_str(&indent);
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+/// `categories`: list every finding category with its default severity and
+/// remediation guidance, in `--format` `text` or `json`. Both formats are
+/// generated from [`category::FindingCategory::all()`] — the single source of
+/// truth the analysis uses to classify findings — so the listing cannot drift
+/// from the categories the tool actually emits.
+fn run_categories(args: &CategoriesArgs) -> Result<()> {
+    if should_disable_color(
+        args.no_color,
+        ColorMode::Auto,
+        std::env::var_os("NO_COLOR").is_some(),
+        std::io::stdout().is_terminal(),
+    ) {
+        colored::control::set_override(false);
+    }
+
+    match args.format {
+        CategoriesFormat::Json => {
+            let entries: Vec<serde_json::Value> = category::FindingCategory::all()
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "category": c.as_str(),
+                        "severity": c.severity(),
+                        "trigger_description": c.trigger_description(),
+                        "remediation": c.remediation(),
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&entries)?);
+        }
+        CategoriesFormat::Text => print!("{}", render_categories_text()),
+    }
+    Ok(())
+}
+
+fn render_categories_text() -> String {
+    const WIDTH: usize = 80;
+    let mut out = String::new();
+    out.push_str("Every finding category, with its default severity, what triggers it, and\n");
+    out.push_str("remediation guidance. See docs/finding-categories.md for the full reference.\n");
+
+    let mut first = true;
+    for cat in category::FindingCategory::all() {
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        out.push_str(&format!(
+            "{}\n{}\n{}\n{}\n",
+            cat.as_str(),
+            severity_colored(cat.severity()),
+            wrap_with_prefix("  Trigger:    ", cat.trigger_description(), WIDTH),
+            wrap_with_prefix("  Remediation: ", cat.remediation(), WIDTH),
+        ));
+    }
+
+    out.push('\n');
+    out.push_str(
+        "Note: the `Environment` category may be promoted to `Warning` at runtime when the\n",
+    );
+    out.push_str("protocol version changes; `Info` is its default severity.\n");
+    out
 }
 
 fn print_preflight_line(label: &str, success: bool, detail: Option<String>) {
@@ -1960,6 +2109,7 @@ fn main() -> Result<()> {
         Some(Command::Stream(stream_args)) => return run_stream(stream_args),
         Some(Command::Lint(lint_args)) => return run_lint(lint_args),
         Some(Command::Preflight(preflight_args)) => return run_preflight(preflight_args),
+        Some(Command::Categories(categories_args)) => return run_categories(categories_args),
         None => {}
     }
 

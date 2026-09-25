@@ -262,6 +262,29 @@ RPC mode fetches the baseline from chain and verifies it cryptographically; mani
 directory, and glob modes run batch comparisons. The full usage strings and options
 match the CLI help output (`--help`) and the `override_usage` in `src/main.rs`.
 
+### Enumerating finding categories
+
+`categories` lists the full catalog of finding categories the analysis can
+emit, each with its default severity, what triggers it, and remediation
+guidance:
+
+```bash
+soroban-upgrade-safeguard categories
+```
+
+Pass `--format json` for a machine-readable array — one object per category
+with `category`, `severity`, `trigger_description`, and `remediation` — for
+scripting and CI:
+
+```bash
+soroban-upgrade-safeguard categories --format json
+```
+
+Both formats are generated from the same source of truth the analysis uses
+(`FindingCategory::all`), so the listing cannot drift from the categories the
+tool actually emits. The same data is maintained as a static reference in
+[finding-categories.md](finding-categories.md).
+
 Common flags: `--format <text|json|markdown|html|github-actions|junit>`, `--explain`, `--strict`, `--expect-bump <patch|minor|major>`, `--config <PATH>`, the resource-limit overrides `--max-xdr-depth`, `--max-xdr-len`, `--max-entries`, and `--max-walk-depth` (see [Resource Limits](#resource-limits-and-hardening-against-malicious-input)), the `https://` input overrides `--remote-max-bytes`, `--remote-timeout-secs`, `--remote-max-redirects`, `--remote-cache-dir`, `--no-remote-cache`, and `--clear-remote-cache` (see [Remote HTTPS inputs](#remote-https-inputs)), and `--no-symlinks` for local paths (see [Local file inputs](#local-file-inputs)).
 
 ### Report output destinations
@@ -850,6 +873,12 @@ interface and environment metadata; it must not be read as storage verified.
 ## Detection Categories
 
 The comparison stage looks for the following classes of change.
+
+Run `soroban-upgrade-safeguard categories` (or `--format json`) to enumerate the
+exact, current category strings with their default severities, triggers, and
+remediation — useful when writing suppression rules. The authoritative, always
+current list lives in `src/category.rs` and is mirrored in
+[finding-categories.md](finding-categories.md).
 
 ### Functions
 
