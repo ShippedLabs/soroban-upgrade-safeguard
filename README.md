@@ -44,6 +44,26 @@ soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
 ```
 
+### Subcommands
+
+Running the tool with two WASM paths, as in the example above, compares
+them. The following subcommands do other jobs. Run
+`soroban-upgrade-safeguard <SUBCOMMAND> --help` to see a subcommand's
+flags.
+
+| Subcommand | What it does | Details |
+|------------|--------------|---------|
+| `extract` | Prints one build's decoded interface as JSON, or only its interface hash with `--hash-only` | [Inspecting a single build](#inspecting-a-single-build) |
+| `lockfile` | Writes a committed snapshot of one build's exported interface | [Pinning an interface with a lockfile](#pinning-an-interface-with-a-lockfile) |
+| `render` | Renders a saved JSON report as text or Markdown | [Re-rendering a saved report](#re-rendering-a-saved-report) |
+| `upgrade-report` | Migrates a saved JSON report to the latest schema version | [Report migrations](docs/report_migrations.md) |
+| `init` | Generates a `.safeguard.toml` suppression config from the current findings | [Suppressing known breaking changes](#suppressing-known-breaking-changes) |
+| `attest` | Creates a signed DSSE in-toto attestation for a saved report | [Signing and verifying reports](#signing-and-verifying-reports) |
+| `verify-attestation` | Verifies an attestation and every artifact it references, offline | [Signing and verifying reports](#signing-and-verifying-reports) |
+| `stream` | Runs in JSON Lines batch mode: reads one job per line on stdin and writes one result per line to stdout | `stream --help` |
+| `lint` | Checks one contract spec, and optionally a storage schema, for structural problems without comparing it to another build | [Lint rules reference](docs/lint_rules_reference.md) |
+| `preflight` | Checks RPC connectivity and the JSON-RPC response format without fetching any contract code | [RPC security checklist](docs/rpc-security-checklist.md) |
+
 ### Strict mode
 
 By default the command exits `0` unless it finds **Critical** breaking changes
@@ -413,6 +433,54 @@ symlink targets — with a stable, non-identifying label. Interface hashes,
 contract IDs, and RPC endpoints are already sanitized and are unaffected by
 this flag.
 
+### Fetching inputs over HTTPS
+
+You can pass an `https://` URL anywhere the tool accepts a local WASM or
+spec path. This includes the positional WASM arguments,
+`--old-storage-schema` / `--new-storage-schema`, and manifest
+`pairs.old` / `pairs.new`. Each URL must end with the expected
+`#sha256=<hex>` digest. A URL without one is rejected before any request is
+made:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm \
+  "https://releases.example.com/v2/contract.wasm#sha256=3b1a2c9e..."
+```
+
+Every fetch is limited in size, time, and number of redirects. The
+following flags control these limits:
+
+| Flag | Default | What it limits |
+|------|---------|----------------|
+| `--remote-max-bytes <BYTES>` | `67108864` (64 MiB) | Size of the response body. The body is read only up to this limit, whatever `Content-Length` says, and a larger artifact fails the run. |
+| `--remote-timeout-secs <SECONDS>` | `30` | Total time for a single request. |
+| `--remote-max-redirects <COUNT>` | `5` | Number of redirects followed before the fetch fails. `0` means no redirects are followed. |
+
+The limits apply to every `https://` input in the run, and each input is
+limited separately. For example, you might raise the size limit for an
+unusually large artifact, and allow no redirects when the URL points
+straight at object storage:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm \
+  "https://releases.example.com/v2/contract.wasm#sha256=3b1a2c9e..." \
+  --remote-max-bytes 134217728 \
+  --remote-timeout-secs 60 \
+  --remote-max-redirects 0
+```
+
+Verified downloads are cached by digest, so the limits apply only when an
+artifact is actually downloaded. A cache hit skips the network entirely. To
+make every run download again, pass `--no-remote-cache`.
+`--show-config` prints the limits that are in effect, under `remote_fetch.*`,
+with `default` or `cli` next to each value to show where it came from. The
+following protections can't be turned off with any flag: every redirect
+must stay on `https://`, and `Authorization` and `Cookie` headers are never
+sent to a redirect target.
+
+See [Remote HTTPS Inputs](docs/remote-https-inputs.md) for the digest
+format, caching, and error messages.
+
 ### Validating against historical versions (lineage tracking)
 
 A two-build comparison only ever checks a candidate against its immediate
@@ -445,7 +513,9 @@ most recently recorded live versions, for a contract with a long history
 where only the recent tail still matters.
 
 See [Persistent Compatibility Lineage Ledger](docs/lineage_model.md) for the
-full ledger file format and fields.
+full ledger file format and fields, and the
+[Lineage Tracking Walkthrough](docs/lineage-walkthrough.md) for a worked
+example that uses all four lineage flags across several releases.
 
 #### Recording a version
 
@@ -467,10 +537,10 @@ accepted but has nothing to write to, so it's a silent no-op. Recording
 happens **after** the comparison completes and is not gated on the verdict:
 a candidate that fails the comparison is still recorded if you asked for it,
 so a rejected build doesn't silently vanish from the history the next
-candidate gets checked against. Re-using an existing `<VERSION_ID>` overwrites
-that entry rather than adding a duplicate, which is useful for amending a
-just-recorded build but means a typoed tag can silently clobber history — get
-the ID right, or check the store's contents before you push it further.
+candidate gets checked against. Each `<VERSION_ID>` can be recorded only
+once. Currently, re-using an ID that is already in the store fails the run
+with an `invalid order 0` integrity error and leaves the file unchanged. To
+amend an existing entry, edit the store directly.
 
 #### Retiring a version
 
@@ -497,8 +567,8 @@ written back to `--lineage-store`'s path when `--record-version` is also
 given — so `--retire-version` alone updates the in-memory ledger for this
 run's validation but leaves the file on disk untouched, and the retirement
 won't apply to the *next* run either. To make a retirement durable, pair it
-with `--record-version` in the same invocation (recording any candidate,
-including one you've already recorded, is enough to trigger a save):
+with `--record-version` in the same invocation, usually when you record the
+next release:
 
 ```bash
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
@@ -752,6 +822,39 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format json
 # Markdown, for PR descriptions and comments
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format markdown
 ```
+
+#### Accepted format names
+
+Format names are case-insensitive, so `JSON`, `Json`, and `json` are all
+accepted. Some formats also have a short alias. Aliases are accepted only
+in the `FORMAT` part of an [`--output`](#multiple-output-formats) spec,
+such as `md:report.md`, not as a `--format` value:
+
+| Format | `--format` value | Alias in `--output` | Output |
+|--------|------------------|---------------------|--------|
+| Text (default) | `text` | — | Colored, human-readable report |
+| JSON | `json` | — | One machine-readable JSON document |
+| Markdown | `markdown` | `md` | Markdown for PR descriptions and comments |
+| GitHub Actions | `github-actions` | `gha` | GitHub Actions workflow annotations |
+
+```bash
+# Equivalent: long name with --format, alias in an --output spec
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format markdown
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --output md
+
+# Rejected: --format does not accept aliases
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format md
+```
+
+An unknown name is rejected, and the error lists the supported values.
+Subcommands that take `--format` use the same case-insensitive matching and
+also accept no aliases. Some of them accept fewer formats:
+
+| Subcommand | `--format` values | Default |
+|------------|-------------------|---------|
+| `render` | `text`, `markdown` | `text` |
+| `lint` | `text`, `json`, `markdown` | `text` |
+| `preflight` | `text`, `json`, `markdown`, `github-actions` | `text` |
 
 ### Wrapping text output
 
@@ -1131,7 +1234,9 @@ More detailed guides live in the [docs](docs/) folder:
 - [Contributing](docs/contributing.md): development setup, project structure, testing, and how to add new detection rules.
 - [Signed Attestations](docs/attestations.md): DSSE signing, the in-toto predicate, offline verification, and security guidance.
 - [RPC Security Checklist](docs/rpc-security-checklist.md): operational checklist for endpoint trust, HTTPS, expected-hash pinning, credentials, and report retention when fetching a baseline over RPC.
+- [Remote HTTPS Inputs](docs/remote-https-inputs.md): digest-pinned `https://` inputs, fetch limits, caching, and error messages.
 - [Storage Schema Cookbook](docs/storage-schema-cookbook.md): worked examples for declaring storage schemas — common key enums, nested values, optional fields, and partial coverage.
+- [Lineage Tracking Walkthrough](docs/lineage-walkthrough.md): a worked example of recording historical versions, validating a candidate against them, retiring versions, and capping the number of live versions with `--lineage-store`.
 - [Troubleshooting Loader Failures](docs/loader-troubleshooting.md): what to do about malformed WASM, missing custom sections, unsupported formats, and resource-limit rejections.
 
 ## License

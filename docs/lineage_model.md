@@ -96,42 +96,22 @@ The lineage ledger file is portable, machine-readable, and human-editable. It ca
 
 ---
 
-## CLI Flag Reference & Environment Variables
+## CLI Flag Reference
 
-| CLI Flag | Environment Variable | Description |
-| :--- | :--- | :--- |
-| `--lineage-store <PATH>` | `SAFEGUARD_LINEAGE_STORE` | Path to lineage store file (`.json` or `.toml`). |
-| `--record-version <TAG>` | `SAFEGUARD_RECORD_VERSION` | Record candidate build as a new live version tag upon safe comparison. |
-| `--retire-version <TAG>` | `SAFEGUARD_RETIRE_VERSION` | Mark an existing historical version as `Retired`. |
-| `--max-live-versions <N>`| `SAFEGUARD_MAX_LIVE_VERSIONS`| Limit validation to the $N$ most recent live versions. |
+| CLI Flag | Description |
+| :--- | :--- |
+| `--lineage-store <PATH>` | Path to the lineage store file (`.json` or `.toml`). A missing file starts an empty in-memory store. |
+| `--record-version <TAG>` | Record the candidate (`<NEW_WASM>`) as a new `Live` entry and write the store back to `<PATH>`. Runs whatever the verdict. |
+| `--retire-version <TAG>` | Mark an existing entry as `Retired` before validation. Persisted only when `--record-version` is also given. |
+| `--max-live-versions <N>`| Limit validation to the `N` most recent live entries. Saved to the store's `policy` when `--record-version` is also given. |
+
+All four flags do nothing without `--lineage-store`. They have no
+environment-variable equivalents.
 
 ---
 
 ## Workflow Example
 
-### 1. Record Initial Build (`v1.0.0`)
-```bash
-soroban-upgrade-safeguard compare \
-  --new build/v1.wasm \
-  --lineage-store lineage.json \
-  --record-version v1.0.0
-```
-
-### 2. Validate & Record Subsequent Build (`v2.0.0`)
-```bash
-soroban-upgrade-safeguard compare \
-  --old build/v1.wasm \
-  --new build/v2.wasm \
-  --lineage-store lineage.json \
-  --record-version v2.0.0
-```
-
-### 3. Validate Candidate `v3.0.0` Against Full Lineage
-When comparing `v3.0.0`, the safeguard automatically reconstructs the XDR spec for all live historical versions (`v1.0.0` and `v2.0.0`) stored in `lineage.json` and reports any breaking changes targeting data types introduced by any live version.
-
-```bash
-soroban-upgrade-safeguard compare \
-  --old build/v2.wasm \
-  --new build/v3.wasm \
-  --lineage-store lineage.json
-```
+See the [Lineage Tracking Walkthrough](lineage-walkthrough.md) for an
+end-to-end example that records several releases, validates a candidate
+against all of them, retires a version, and caps the live set.
