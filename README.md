@@ -688,6 +688,38 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format json
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format markdown
 ```
 
+#### Accepted format names
+
+Format names are case-insensitive, so `JSON`, `Json`, and `json` are all
+accepted. Some formats also have a short alias. Aliases are accepted only
+in the `FORMAT` part of an [`--output`](#multiple-output-formats) spec,
+such as `md:report.md`, not as a `--format` value:
+
+| Format | `--format` value | Alias in `--output` | Output |
+|--------|------------------|---------------------|--------|
+| Text (default) | `text` | — | Colored, human-readable report |
+| JSON | `json` | — | One machine-readable JSON document |
+| Markdown | `markdown` | `md` | Markdown for PR descriptions and comments |
+| GitHub Actions | `github-actions` | `gha` | GitHub Actions workflow annotations |
+
+```bash
+# Equivalent: long name with --format, alias in an --output spec
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format markdown
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --output md
+
+# Rejected: --format does not accept aliases
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format md
+```
+
+An unknown name is rejected, and the error lists the supported values.
+Subcommands accept a smaller set of formats, with the same case-insensitive
+matching and no aliases:
+
+| Subcommand | `--format` values | Default |
+|------------|-------------------|---------|
+| `render` | `text`, `markdown` | `text` |
+| `lint` | `text`, `json`, `markdown` | `text` |
+
 ### Wrapping text output
 
 Finding messages in **text** output word-wrap to fit the terminal. `--width
