@@ -19,6 +19,7 @@ A powerful CLI tool to analyze and validate Soroban smart contract upgrades on t
 - **Re-renderable Reports**: `render` turns a saved JSON report back into text or Markdown, so a stored verdict can be presented any number of ways without the original WASM files.
 - **Multi-Format Output**: Emit the same report as JSON, Markdown, and text simultaneously — each to its own file or stdout — in a single run.
 - **Watch Mode**: Continuously monitor input WASM files for changes and automatically re-run the comparison on every build.
+- **Lineage Tracking**: Validate a candidate build against every historical version still marked live in a persistent lineage store, not just the immediate predecessor — catching a break in data an older release wrote that the immediate predecessor never touched.
 - **Provenance Metadata**: Every report includes the tool version, a timestamp, and input identifiers for full auditability (`--no-timestamp` for deterministic snapshot testing).
 - **Signed Attestations**: Bind reports, artifacts, extracted specs, policy, and verdicts in canonical in-toto statements with offline DSSE verification.
 - **GitHub Action**: Reusable action that posts the Markdown report as a PR comment and updates it in-place on subsequent pushes.
@@ -353,6 +354,100 @@ symlink targets — with a stable, non-identifying label. Interface hashes,
 contract IDs, and RPC endpoints are already sanitized and are unaffected by
 this flag.
 
+### Validating against historical versions (lineage tracking)
+
+A two-build comparison only ever checks a candidate against its immediate
+predecessor. That misses a real failure mode: a contract that accumulates
+deployed versions over time can have storage entries written by an *old*
+release (`v1.0.0`) that no intermediate release ever touched again. If a
+later candidate (`v4.0.0`) changes or removes a type `v1.0.0` wrote but
+`v3.0.0` never read, comparing only `v3.0.0` vs `v4.0.0` reports a clean
+pass — and the old entries fail to decode on-chain the moment something
+finally reads them.
+
+`--lineage-store <PATH>` points at a persistent JSON/TOML ledger of a
+contract's historical versions. When it's given, the candidate build is
+validated against **every version in the store still marked live**, not just
+the `<OLD_WASM>` you passed on the command line — each historical mismatch is
+reported as its own `Historical Lineage Break (<version_id>)` finding,
+attributed to the version whose data it would break:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v3.wasm ./wasm/v4.wasm \
+  --lineage-store ./lineage.json
+```
+
+If the path doesn't exist yet, the run starts from an empty in-memory ledger
+instead of failing — you don't need to hand-write one to get started. Nothing
+is written to disk from `--lineage-store` alone, though; see
+[Recording a version](#recording-a-version) below for how entries actually get
+persisted into the file. `--max-live-versions <N>` caps validation to the `N`
+most recently recorded live versions, for a contract with a long history
+where only the recent tail still matters.
+
+See [Persistent Compatibility Lineage Ledger](docs/lineage_model.md) for the
+full ledger file format and fields.
+
+#### Recording a version
+
+`--record-version <VERSION_ID>` records the candidate (`<NEW_WASM>`) as a new
+entry in the lineage store once the run finishes — its own wasm hash,
+interface hash, and full spec JSON, tagged with the ID you give it and marked
+`Live`. This is how a lineage builds up over time: run it once per release you
+ship, and later candidates get validated against everything you've recorded
+so far.
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --record-version v2.0.0
+```
+
+`--record-version` requires `--lineage-store` — without it, the flag is
+accepted but has nothing to write to, so it's a silent no-op. Recording
+happens **after** the comparison completes and is not gated on the verdict:
+a candidate that fails the comparison is still recorded if you asked for it,
+so a rejected build doesn't silently vanish from the history the next
+candidate gets checked against. Re-using an existing `<VERSION_ID>` overwrites
+that entry rather than adding a duplicate, which is useful for amending a
+just-recorded build but means a typoed tag can silently clobber history — get
+the ID right, or check the store's contents before you push it further.
+
+#### Retiring a version
+
+`--retire-version <VERSION_ID>` marks an existing entry in the lineage store
+as `Retired`, so later candidates stop being validated against it. Use it
+once you're confident nothing on-chain still depends on the data shape a
+given historical version wrote — a version you've since migrated away from,
+or one you know was never deployed widely enough to matter:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --retire-version v1.0.0
+```
+
+Like `--record-version`, it requires `--lineage-store` and is otherwise a
+silent no-op — and retiring a `<VERSION_ID>` that isn't in the store is *also*
+a silent no-op rather than an error, so a typo won't fail your run but won't
+retire anything either. Retiring happens **before** validation, so the
+version is already excluded from that same run's lineage check.
+
+**`--retire-version` on its own does not persist.** The store is only
+written back to `--lineage-store`'s path when `--record-version` is also
+given — so `--retire-version` alone updates the in-memory ledger for this
+run's validation but leaves the file on disk untouched, and the retirement
+won't apply to the *next* run either. To make a retirement durable, pair it
+with `--record-version` in the same invocation (recording any candidate,
+including one you've already recorded, is enough to trigger a save):
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --retire-version v1.0.0 \
+  --record-version v2.0.0
+```
+
 ### Suppressing known breaking changes
 
 If a breaking change is deliberate and already accounted for, list it in a
@@ -551,11 +646,35 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch
 
 Watch mode:
 - Monitors both WASM files for changes using filesystem notifications.
-- Debounces rapid writes (e.g. from build tools) with a 300ms window.
+- Debounces rapid writes (e.g. from build tools) with a 300ms window by default.
 - Clears the terminal screen and re-renders the report on each change.
 - Handles transient missing files gracefully (e.g. build tools that delete and recreate).
 - Keeps the process running regardless of comparison verdict (non-zero exit codes do NOT exit the watcher).
 - Exit with `Ctrl+C`.
+
+#### Tuning the debounce window
+
+A build tool rarely produces one clean filesystem event per build — a
+write-to-temp-then-rename, or several passes over an output directory, can
+each fire their own notification. The debounce window coalesces a burst of
+events for the same underlying change into a single re-run instead of
+triggering one per event. `--watch-debounce-ms <MILLISECONDS>` overrides the
+300ms default, between a 10ms floor and a 60000ms (60s) ceiling — out-of-range
+or non-numeric values are rejected before watch mode starts:
+
+```bash
+# A build pipeline that touches the output file several times in quick
+# succession: widen the window so those all collapse into one re-run.
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch --watch-debounce-ms 750
+
+# A fast, single-write build: tighten it for a snappier turnaround.
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch --watch-debounce-ms 50
+```
+
+Too low and a single logical change can trigger several re-runs before the
+build finishes writing; too high and watch mode feels unresponsive to a
+genuine edit. The flag applies to every form of watch mode — a single pair, a
+directory comparison, or a batch manifest.
 
 Watch mode also works at repository scale, for both directory comparisons and
 batch manifests. In that case it builds an input dependency graph instead of
