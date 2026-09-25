@@ -413,6 +413,54 @@ symlink targets — with a stable, non-identifying label. Interface hashes,
 contract IDs, and RPC endpoints are already sanitized and are unaffected by
 this flag.
 
+### Fetching inputs over HTTPS
+
+You can pass an `https://` URL anywhere the tool accepts a local WASM or
+spec path. This includes the positional WASM arguments,
+`--old-storage-schema` / `--new-storage-schema`, and manifest
+`pairs.old` / `pairs.new`. Each URL must end with the expected
+`#sha256=<hex>` digest. A URL without one is rejected before any request is
+made:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm \
+  "https://releases.example.com/v2/contract.wasm#sha256=3b1a2c9e..."
+```
+
+Every fetch is limited in size, time, and number of redirects. The
+following flags control these limits:
+
+| Flag | Default | What it limits |
+|------|---------|----------------|
+| `--remote-max-bytes <BYTES>` | `67108864` (64 MiB) | Size of the response body. The body is read only up to this limit, whatever `Content-Length` says, and a larger artifact fails the run. |
+| `--remote-timeout-secs <SECONDS>` | `30` | Total time for a single request. |
+| `--remote-max-redirects <COUNT>` | `5` | Number of redirects followed before the fetch fails. `0` means no redirects are followed. |
+
+The limits apply to every `https://` input in the run, and each input is
+limited separately. For example, you might raise the size limit for an
+unusually large artifact, and allow no redirects when the URL points
+straight at object storage:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm \
+  "https://releases.example.com/v2/contract.wasm#sha256=3b1a2c9e..." \
+  --remote-max-bytes 134217728 \
+  --remote-timeout-secs 60 \
+  --remote-max-redirects 0
+```
+
+Verified downloads are cached by digest, so the limits apply only when an
+artifact is actually downloaded. A cache hit skips the network entirely. To
+make every run download again, pass `--no-remote-cache`.
+`--show-config` prints the limits that are in effect, under `remote_fetch.*`,
+with `default` or `cli` next to each value to show where it came from. The
+following protections can't be turned off with any flag: every redirect
+must stay on `https://`, and `Authorization` and `Cookie` headers are never
+sent to a redirect target.
+
+See [Remote HTTPS Inputs](docs/remote-https-inputs.md) for the digest
+format, caching, and error messages.
+
 ### Validating against historical versions (lineage tracking)
 
 A two-build comparison only ever checks a candidate against its immediate
@@ -1018,6 +1066,7 @@ More detailed guides live in the [docs](docs/) folder:
 - [Contributing](docs/contributing.md): development setup, project structure, testing, and how to add new detection rules.
 - [Signed Attestations](docs/attestations.md): DSSE signing, the in-toto predicate, offline verification, and security guidance.
 - [RPC Security Checklist](docs/rpc-security-checklist.md): operational checklist for endpoint trust, HTTPS, expected-hash pinning, credentials, and report retention when fetching a baseline over RPC.
+- [Remote HTTPS Inputs](docs/remote-https-inputs.md): digest-pinned `https://` inputs, fetch limits, caching, and error messages.
 - [Storage Schema Cookbook](docs/storage-schema-cookbook.md): worked examples for declaring storage schemas — common key enums, nested values, optional fields, and partial coverage.
 - [Lineage Tracking Walkthrough](docs/lineage-walkthrough.md): a worked example of recording historical versions, validating a candidate against them, retiring versions, and capping the number of live versions with `--lineage-store`.
 - [Troubleshooting Loader Failures](docs/loader-troubleshooting.md): what to do about malformed WASM, missing custom sections, unsupported formats, and resource-limit rejections.
