@@ -369,6 +369,41 @@ that entry rather than adding a duplicate, which is useful for amending a
 just-recorded build but means a typoed tag can silently clobber history — get
 the ID right, or check the store's contents before you push it further.
 
+#### Retiring a version
+
+`--retire-version <VERSION_ID>` marks an existing entry in the lineage store
+as `Retired`, so later candidates stop being validated against it. Use it
+once you're confident nothing on-chain still depends on the data shape a
+given historical version wrote — a version you've since migrated away from,
+or one you know was never deployed widely enough to matter:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --retire-version v1.0.0
+```
+
+Like `--record-version`, it requires `--lineage-store` and is otherwise a
+silent no-op — and retiring a `<VERSION_ID>` that isn't in the store is *also*
+a silent no-op rather than an error, so a typo won't fail your run but won't
+retire anything either. Retiring happens **before** validation, so the
+version is already excluded from that same run's lineage check.
+
+**`--retire-version` on its own does not persist.** The store is only
+written back to `--lineage-store`'s path when `--record-version` is also
+given — so `--retire-version` alone updates the in-memory ledger for this
+run's validation but leaves the file on disk untouched, and the retirement
+won't apply to the *next* run either. To make a retirement durable, pair it
+with `--record-version` in the same invocation (recording any candidate,
+including one you've already recorded, is enough to trigger a save):
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --retire-version v1.0.0 \
+  --record-version v2.0.0
+```
+
 ### Suppressing known breaking changes
 
 If a breaking change is deliberate and already accounted for, list it in a
@@ -551,11 +586,35 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch
 
 Watch mode:
 - Monitors both WASM files for changes using filesystem notifications.
-- Debounces rapid writes (e.g. from build tools) with a 300ms window.
+- Debounces rapid writes (e.g. from build tools) with a 300ms window by default.
 - Clears the terminal screen and re-renders the report on each change.
 - Handles transient missing files gracefully (e.g. build tools that delete and recreate).
 - Keeps the process running regardless of comparison verdict (non-zero exit codes do NOT exit the watcher).
 - Exit with `Ctrl+C`.
+
+#### Tuning the debounce window
+
+A build tool rarely produces one clean filesystem event per build — a
+write-to-temp-then-rename, or several passes over an output directory, can
+each fire their own notification. The debounce window coalesces a burst of
+events for the same underlying change into a single re-run instead of
+triggering one per event. `--watch-debounce-ms <MILLISECONDS>` overrides the
+300ms default, between a 10ms floor and a 60000ms (60s) ceiling — out-of-range
+or non-numeric values are rejected before watch mode starts:
+
+```bash
+# A build pipeline that touches the output file several times in quick
+# succession: widen the window so those all collapse into one re-run.
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch --watch-debounce-ms 750
+
+# A fast, single-write build: tighten it for a snappier turnaround.
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch --watch-debounce-ms 50
+```
+
+Too low and a single logical change can trigger several re-runs before the
+build finishes writing; too high and watch mode feels unresponsive to a
+genuine edit. The flag applies to every form of watch mode — a single pair, a
+directory comparison, or a batch manifest.
 
 Watch mode also works at repository scale, for both directory comparisons and
 batch manifests. In that case it builds an input dependency graph instead of
