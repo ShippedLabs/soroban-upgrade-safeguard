@@ -139,13 +139,17 @@ fn profile_all_families_present_in_by_family_map() {
 
 #[test]
 fn delta_absolute_and_pct_computed_correctly() {
-    let mut old = WasmComplexityProfile::default();
-    old.defined_functions = 10;
-    old.total_instructions = 1000;
+    let old = WasmComplexityProfile {
+        defined_functions: 10,
+        total_instructions: 1000,
+        ..Default::default()
+    };
 
-    let mut new = WasmComplexityProfile::default();
-    new.defined_functions = 12;
-    new.total_instructions = 1200;
+    let new = WasmComplexityProfile {
+        defined_functions: 12,
+        total_instructions: 1200,
+        ..Default::default()
+    };
 
     let delta = WasmComplexityDelta::compute(&old, &new);
     assert_eq!(delta.defined_functions.absolute, 2);
@@ -157,8 +161,10 @@ fn delta_absolute_and_pct_computed_correctly() {
 #[test]
 fn delta_pct_is_none_when_old_is_zero() {
     let old = WasmComplexityProfile::default(); // zeros
-    let mut new = WasmComplexityProfile::default();
-    new.total_instructions = 500;
+    let new = WasmComplexityProfile {
+        total_instructions: 500,
+        ..Default::default()
+    };
 
     let delta = WasmComplexityDelta::compute(&old, &new);
     assert!(
@@ -169,10 +175,14 @@ fn delta_pct_is_none_when_old_is_zero() {
 
 #[test]
 fn delta_decrease_shows_negative_absolute() {
-    let mut old = WasmComplexityProfile::default();
-    old.total_instructions = 1000;
-    let mut new = WasmComplexityProfile::default();
-    new.total_instructions = 800;
+    let old = WasmComplexityProfile {
+        total_instructions: 1000,
+        ..Default::default()
+    };
+    let new = WasmComplexityProfile {
+        total_instructions: 800,
+        ..Default::default()
+    };
 
     let delta = WasmComplexityDelta::compute(&old, &new);
     assert_eq!(delta.total_instructions.absolute, -200);
@@ -197,10 +207,14 @@ fn delta_is_deterministic_for_same_inputs() {
 
 #[test]
 fn absolute_limit_violation_detected() {
-    let mut old = WasmComplexityProfile::default();
-    old.total_instructions = 100;
-    let mut new = WasmComplexityProfile::default();
-    new.total_instructions = 200;
+    let old = WasmComplexityProfile {
+        total_instructions: 100,
+        ..Default::default()
+    };
+    let new = WasmComplexityProfile {
+        total_instructions: 200,
+        ..Default::default()
+    };
 
     let delta = WasmComplexityDelta::compute(&old, &new);
     let budget = make_budget(vec![budget("total_instructions", Some(150), None)]);
@@ -213,10 +227,14 @@ fn absolute_limit_violation_detected() {
 
 #[test]
 fn pct_limit_violation_detected() {
-    let mut old = WasmComplexityProfile::default();
-    old.total_instructions = 100;
-    let mut new = WasmComplexityProfile::default();
-    new.total_instructions = 130; // 30% growth
+    let old = WasmComplexityProfile {
+        total_instructions: 100,
+        ..Default::default()
+    };
+    let new = WasmComplexityProfile {
+        total_instructions: 130, // 30% growth
+        ..Default::default()
+    };
 
     let delta = WasmComplexityDelta::compute(&old, &new);
     let budget = make_budget(vec![budget("total_instructions", None, Some(20.0))]);
@@ -228,10 +246,14 @@ fn pct_limit_violation_detected() {
 
 #[test]
 fn no_violation_within_budget() {
-    let mut old = WasmComplexityProfile::default();
-    old.total_instructions = 100;
-    let mut new = WasmComplexityProfile::default();
-    new.total_instructions = 110; // 10% growth
+    let old = WasmComplexityProfile {
+        total_instructions: 100,
+        ..Default::default()
+    };
+    let new = WasmComplexityProfile {
+        total_instructions: 110, // 10% growth
+        ..Default::default()
+    };
 
     let delta = WasmComplexityDelta::compute(&old, &new);
     let budget = make_budget(vec![budget("total_instructions", Some(200), Some(20.0))]);

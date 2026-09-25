@@ -1700,7 +1700,7 @@ mod tests {
         let lines = wrapped_finding_lines(&text);
 
         let mut expected = vec!["🔴 abcdefgh abcdefgh".to_string()];
-        expected.extend(std::iter::repeat("  abcdefgh abcdefgh".to_string()).take(9));
+        expected.extend(std::iter::repeat_n("  abcdefgh abcdefgh".to_string(), 9));
         assert_eq!(lines, expected, "full text was:\n{text}");
     }
 
@@ -1710,8 +1710,8 @@ mod tests {
         let text = report.generate_summary_text_with_width(false, Some(DEFAULT_TEXT_WIDTH));
         let lines = wrapped_finding_lines(&text);
 
-        let eight_words = vec!["abcdefgh"; 8].join(" ");
-        let four_words = vec!["abcdefgh"; 4].join(" ");
+        let eight_words = ["abcdefgh"; 8].join(" ");
+        let four_words = ["abcdefgh"; 4].join(" ");
         let expected = vec![
             format!("🔴 {eight_words}"),
             format!("  {eight_words}"),

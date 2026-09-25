@@ -5,7 +5,7 @@
 //! ASCII filesystem names.
 
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn wasm(name: &str) -> PathBuf {
@@ -29,7 +29,7 @@ struct Run {
     code: i32,
 }
 
-fn run_with_output(old: &str, new: &str, format: &str, output: &PathBuf) -> Run {
+fn run_with_output(old: &str, new: &str, format: &str, output: &Path) -> Run {
     let output_res = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
         .arg(wasm(old))
         .arg(wasm(new))

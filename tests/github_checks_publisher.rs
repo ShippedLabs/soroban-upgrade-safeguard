@@ -252,13 +252,7 @@ fn annotation_severity_mapping_is_correct() {
 
     let critical_count = by_category
         .values()
-        .flat_map(|v| {
-            v.as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-        })
+        .flat_map(|v| v.as_array().unwrap_or(&vec![]).to_vec())
         .filter(|f| {
             !f["suppressed"].as_bool().unwrap_or(false)
                 && f["severity"].as_str() == Some("critical")
@@ -527,7 +521,6 @@ fn default_check_name_is_soroban_upgrade_safeguard() {
     // This mirrors the default in action.yml.
     // If the default changes there it must change here too.
     let default_name = "Soroban Upgrade Safeguard";
-    assert!(!default_name.is_empty());
     assert_eq!(default_name, "Soroban Upgrade Safeguard");
 }
 
