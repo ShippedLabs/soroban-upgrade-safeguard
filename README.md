@@ -80,6 +80,23 @@ not disable color. Pass `--no-color` to turn color off, or `--plain` for fully
 plain output (which implies both `--no-color` and `--ascii` and also strips
 the remaining decorative separators).
 
+### Controlling color output
+
+`--color` controls when ANSI color is emitted:
+
+- **`auto`** (default) — color only when stdout is a terminal and `NO_COLOR`
+  is not set.
+- **`always`** — color even when stdout is piped or redirected, for piping
+  into a viewer (e.g. `less -R`, `bat`) that renders ANSI itself.
+- **`never`** — never emit color.
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --color always | less -R
+```
+
+`--no-color` takes precedence over `--color`: if both are given, output is
+uncolored regardless of the `--color` value.
+
 ### Comparing against a deployed contract (RPC baseline)
 
 Fetch the baseline directly from an on-chain contract instead of a local file
@@ -149,6 +166,24 @@ comparison was run against for the audit trail. Note that RPC mode already
 verifies the fetched bytecode against the on-chain contract instance hash on
 every run; this flag adds the second, independent check that the on-chain build
 is the specific one you reviewed.
+
+#### Local RPC endpoints
+
+Without `--allow-http-local`, only `https://` RPC URLs are accepted. Pass it
+to allow plain `http://` connections for RPC when the host is `localhost` or
+`127.0.0.1` — what a local test validator needs, since it typically has no
+TLS certificate:
+
+```bash
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url http://localhost:8000/soroban/rpc \
+  --allow-http-local \
+  ./wasm/v2.wasm
+```
+
+It only relaxes the check for a local host: a remote `http://` URL is
+rejected whether or not `--allow-http-local` is set.
 
 ### Validating against captured storage entries
 
@@ -306,8 +341,17 @@ A broken link or a symlink cycle is always an error, named as such, whether or
 not `--no-symlinks` is in effect.
 
 Because a resolved target is absolute, it can reveal a username or workspace
-layout. Use `--redact-paths` when a report is published somewhere the local
-filesystem layout should not be.
+layout. Pass `--redact-paths` when a report is published somewhere the local
+filesystem layout should not be exposed:
+
+```bash
+soroban-upgrade-safeguard ./wasm/current.wasm ./wasm/v2.wasm --redact-paths
+```
+
+It replaces local filesystem paths in report provenance — currently, resolved
+symlink targets — with a stable, non-identifying label. Interface hashes,
+contract IDs, and RPC endpoints are already sanitized and are unaffected by
+this flag.
 
 ### Suppressing known breaking changes
 
@@ -424,6 +468,22 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format json
 # Markdown, for PR descriptions and comments
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format markdown
 ```
+
+### Wrapping text output
+
+Finding messages in **text** output word-wrap to fit the terminal. `--width
+<COLUMNS>` overrides that detection with a fixed column count, useful when
+producing a text report for a fixed-width medium:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --width 100
+```
+
+Without `--width`, wrapping is detected only when stdout is a terminal: the
+`COLUMNS` environment variable if set and valid, else 80 columns. Piped or
+redirected output is left unwrapped unless `--width` is given explicitly.
+`--width` never affects JSON or Markdown output, which have no line-width
+concept.
 
 ### Multiple output formats
 
