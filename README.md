@@ -19,6 +19,7 @@ A powerful CLI tool to analyze and validate Soroban smart contract upgrades on t
 - **Re-renderable Reports**: `render` turns a saved JSON report back into text or Markdown, so a stored verdict can be presented any number of ways without the original WASM files.
 - **Multi-Format Output**: Emit the same report as JSON, Markdown, and text simultaneously — each to its own file or stdout — in a single run.
 - **Watch Mode**: Continuously monitor input WASM files for changes and automatically re-run the comparison on every build.
+- **Lineage Tracking**: Validate a candidate build against every historical version still marked live in a persistent lineage store, not just the immediate predecessor — catching a break in data an older release wrote that the immediate predecessor never touched.
 - **Provenance Metadata**: Every report includes the tool version, a timestamp, and input identifiers for full auditability (`--no-timestamp` for deterministic snapshot testing).
 - **Signed Attestations**: Bind reports, artifacts, extracted specs, policy, and verdicts in canonical in-toto statements with offline DSSE verification.
 - **GitHub Action**: Reusable action that posts the Markdown report as a PR comment and updates it in-place on subsequent pushes.
@@ -308,6 +309,65 @@ not `--no-symlinks` is in effect.
 Because a resolved target is absolute, it can reveal a username or workspace
 layout. Use `--redact-paths` when a report is published somewhere the local
 filesystem layout should not be.
+
+### Validating against historical versions (lineage tracking)
+
+A two-build comparison only ever checks a candidate against its immediate
+predecessor. That misses a real failure mode: a contract that accumulates
+deployed versions over time can have storage entries written by an *old*
+release (`v1.0.0`) that no intermediate release ever touched again. If a
+later candidate (`v4.0.0`) changes or removes a type `v1.0.0` wrote but
+`v3.0.0` never read, comparing only `v3.0.0` vs `v4.0.0` reports a clean
+pass — and the old entries fail to decode on-chain the moment something
+finally reads them.
+
+`--lineage-store <PATH>` points at a persistent JSON/TOML ledger of a
+contract's historical versions. When it's given, the candidate build is
+validated against **every version in the store still marked live**, not just
+the `<OLD_WASM>` you passed on the command line — each historical mismatch is
+reported as its own `Historical Lineage Break (<version_id>)` finding,
+attributed to the version whose data it would break:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v3.wasm ./wasm/v4.wasm \
+  --lineage-store ./lineage.json
+```
+
+If the path doesn't exist yet, the run starts from an empty in-memory ledger
+instead of failing — you don't need to hand-write one to get started. Nothing
+is written to disk from `--lineage-store` alone, though; see
+[Recording a version](#recording-a-version) below for how entries actually get
+persisted into the file. `--max-live-versions <N>` caps validation to the `N`
+most recently recorded live versions, for a contract with a long history
+where only the recent tail still matters.
+
+See [Persistent Compatibility Lineage Ledger](docs/lineage_model.md) for the
+full ledger file format and fields.
+
+#### Recording a version
+
+`--record-version <VERSION_ID>` records the candidate (`<NEW_WASM>`) as a new
+entry in the lineage store once the run finishes — its own wasm hash,
+interface hash, and full spec JSON, tagged with the ID you give it and marked
+`Live`. This is how a lineage builds up over time: run it once per release you
+ship, and later candidates get validated against everything you've recorded
+so far.
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --record-version v2.0.0
+```
+
+`--record-version` requires `--lineage-store` — without it, the flag is
+accepted but has nothing to write to, so it's a silent no-op. Recording
+happens **after** the comparison completes and is not gated on the verdict:
+a candidate that fails the comparison is still recorded if you asked for it,
+so a rejected build doesn't silently vanish from the history the next
+candidate gets checked against. Re-using an existing `<VERSION_ID>` overwrites
+that entry rather than adding a duplicate, which is useful for amending a
+just-recorded build but means a typoed tag can silently clobber history — get
+the ID right, or check the store's contents before you push it further.
 
 ### Suppressing known breaking changes
 
