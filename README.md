@@ -19,6 +19,7 @@ A powerful CLI tool to analyze and validate Soroban smart contract upgrades on t
 - **Re-renderable Reports**: `render` turns a saved JSON report back into text or Markdown, so a stored verdict can be presented any number of ways without the original WASM files.
 - **Multi-Format Output**: Emit the same report as JSON, Markdown, and text simultaneously — each to its own file or stdout — in a single run.
 - **Watch Mode**: Continuously monitor input WASM files for changes and automatically re-run the comparison on every build.
+- **Lineage Tracking**: Validate a candidate build against every historical version still marked live in a persistent lineage store, not just the immediate predecessor — catching a break in data an older release wrote that the immediate predecessor never touched.
 - **Provenance Metadata**: Every report includes the tool version, a timestamp, and input identifiers for full auditability (`--no-timestamp` for deterministic snapshot testing).
 - **Signed Attestations**: Bind reports, artifacts, extracted specs, policy, and verdicts in canonical in-toto statements with offline DSSE verification.
 - **Finding Category Catalog**: `categories` lists every finding category with its severity, trigger, and remediation — in human-readable text or machine-readable JSON — generated from the same source of truth the analysis uses, so it can never drift.
@@ -65,6 +66,23 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --strict
 A manifest can enable strict mode per pair (`strict = true`), but it cannot
 disable `--strict` passed on the command line.
 
+### Remediation guidance
+
+Pass `--explain` to include a concise remediation explanation alongside each
+finding. Instead of only describing what changed, the output tells you what to
+do about it:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --explain
+```
+
+The guidance appears in text, Markdown, and GitHub Actions output — every
+format that has a natural place for per-finding detail. It is especially useful
+when reading a report for the first time: rather than cross-referencing the
+finding categories documentation, the explanation for each issue is right there
+in the output. A manifest can also enable it per run (`explain = true`), and
+`--explain` passed on the command line cannot be disabled by a manifest.
+
 ### ASCII output
 
 Terminals and log viewers that cannot render emoji can use `--ascii` to
@@ -80,6 +98,23 @@ stays readable in any log viewer. `--ascii` only swaps the markers — it does
 not disable color. Pass `--no-color` to turn color off, or `--plain` for fully
 plain output (which implies both `--no-color` and `--ascii` and also strips
 the remaining decorative separators).
+
+### Controlling color output
+
+`--color` controls when ANSI color is emitted:
+
+- **`auto`** (default) — color only when stdout is a terminal and `NO_COLOR`
+  is not set.
+- **`always`** — color even when stdout is piped or redirected, for piping
+  into a viewer (e.g. `less -R`, `bat`) that renders ANSI itself.
+- **`never`** — never emit color.
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --color always | less -R
+```
+
+`--no-color` takes precedence over `--color`: if both are given, output is
+uncolored regardless of the `--color` value.
 
 ### Comparing against a deployed contract (RPC baseline)
 
@@ -108,6 +143,108 @@ authenticated-endpoint guidance to use before pointing this at production,
 and the [RPC Security Checklist](docs/rpc-security-checklist.md) for an
 operational checklist covering endpoint trust, credentials, and report
 retention.
+
+#### Authenticating to a private RPC endpoint
+
+If your RPC provider requires an authentication header, use `--rpc-header
+NAME=ENV_VAR` to attach it. The flag takes the literal header name and the name
+of an environment variable whose value is the secret — the secret is **never
+passed on the command line**, only read from the environment at runtime:
+
+```bash
+export STELLAR_RPC_TOKEN=my-secret-token
+
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url https://my-private-rpc.example.com \
+  --rpc-header "Authorization=STELLAR_RPC_TOKEN" \
+  ./wasm/v2.wasm
+```
+
+This keeps credentials out of shell history, process listings, and CI logs.
+The flag can be repeated to attach multiple headers. The environment variable
+must be set when the tool runs; if it is absent, the run fails with an error
+that names the missing variable without printing any value.
+
+#### Non-standard JSON-RPC providers
+
+Some RPC providers do not echo the request `id` back in their responses, which
+violates the JSON-RPC 2.0 spec. By default the tool rejects such responses to
+avoid silently processing an unrelated reply. Pass `--rpc-allow-id-mismatch`
+to accept a response whose `id` is missing or does not match the request's:
+
+```bash
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url https://non-standard-provider.example.com \
+  --rpc-allow-id-mismatch \
+  ./wasm/v2.wasm
+```
+
+This flag is **off by default**. Only use it when you have confirmed that your
+specific provider does not echo request IDs correctly — do not enable it as a
+general workaround, since the ID check exists to guard against receiving a
+response meant for a different request.
+
+#### Pinning the expected baseline hash
+
+Fetching a baseline over RPC means trusting the endpoint to answer with the
+bytes actually deployed. `--expected-wasm-hash` removes that trust: it asserts
+the SHA-256 of the on-chain WASM baseline, so the comparison fails if the
+fetched — or locally loaded — baseline is not the bytes you expected.
+
+The value is a 64-character hex SHA-256 digest, upper or lower case:
+
+```bash
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --expected-wasm-hash 31fc0a23f04c6fc647ac44ba791228d8f0f12308685f0ac3798d37c79518906b \
+  ./wasm/v2.wasm
+```
+
+On a mismatch the run **fails immediately with exit code 1, before any
+comparison is performed**, and prints both digests so you can see which build
+you actually got:
+
+```
+Error: Baseline hash mismatch for 'CABCD1234...'
+  expected: 0000000000000000000000000000000000000000000000000000000000000000
+  actual:   31fc0a23f04c6fc647ac44ba791228d8f0f12308685f0ac3798d37c79518906b
+```
+
+Failing before the comparison is deliberate: a report built against an
+unverified baseline is exactly what this flag exists to prevent, so no verdict
+is emitted at all rather than one that looks authoritative but compares the
+candidate to the wrong build.
+
+A value that is not a 64-character hex digest is rejected as a **configuration
+error**, worded differently from a mismatch — a wrong flag and a wrong
+deployment need to send you to different places.
+
+The flag also works with a local baseline, where it pins which build a
+comparison was run against for the audit trail. Note that RPC mode already
+verifies the fetched bytecode against the on-chain contract instance hash on
+every run; this flag adds the second, independent check that the on-chain build
+is the specific one you reviewed.
+
+#### Local RPC endpoints
+
+Without `--allow-http-local`, only `https://` RPC URLs are accepted. Pass it
+to allow plain `http://` connections for RPC when the host is `localhost` or
+`127.0.0.1` — what a local test validator needs, since it typically has no
+TLS certificate:
+
+```bash
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url http://localhost:8000/soroban/rpc \
+  --allow-http-local \
+  ./wasm/v2.wasm
+```
+
+It only relaxes the check for a local host: a remote `http://` URL is
+rejected whether or not `--allow-http-local` is set.
 
 ### Validating against captured storage entries
 
@@ -241,6 +378,158 @@ analysis uses, so the listing can never drift from the categories the tool
 actually emits. See [docs/finding-categories.md](docs/finding-categories.md) for
 the full documented taxonomy.
 
+### Symlinked inputs
+
+By default a symlinked WASM input is **followed** — through however many hops
+the chain has — and the resolved target is recorded in the report's provenance,
+so a verdict can always be traced to the bytes it actually judged:
+
+```
+Symlink:  ./wasm/current.wasm -> /builds/2024-06-11/token.wasm
+```
+
+The same pair appears in Markdown, and in JSON as `provenance.symlinks[]` with
+`requested` and `resolved` entries. This matters because a path like
+`./wasm/current.wasm` can point at a different build tomorrow; without the
+resolved target, two reports that name the same input could describe different
+bytecode with nothing to tell them apart.
+
+`--no-symlinks` rejects such an input instead of following it, for pipelines
+where an input must be a direct file:
+
+```bash
+soroban-upgrade-safeguard ./wasm/current.wasm ./wasm/v2.wasm --no-symlinks
+```
+
+```
+Error: Symlink input rejected by policy: './wasm/current.wasm' resolves to
+'/builds/2024-06-11/token.wasm'. Pass a direct file, or drop --no-symlinks to
+allow symlinked inputs.
+```
+
+The rejection names the resolved target as well as the link, so a failure tells
+you what would have been analyzed rather than only that something was refused.
+It exits non-zero without comparing anything.
+
+Two limits are worth knowing:
+
+- The check applies to the **final component** of the path, including a chain of
+  several links. A symlinked *parent directory* is not rejected, so
+  `--no-symlinks` is not a guarantee that no part of the path traversed a link.
+- It applies only to local paths. Reading from stdin (`-`), an RPC baseline, an
+  `https://` reference, or an `oci://` reference has no symlink to resolve, and
+  the flag has no effect on them.
+
+A broken link or a symlink cycle is always an error, named as such, whether or
+not `--no-symlinks` is in effect.
+
+Because a resolved target is absolute, it can reveal a username or workspace
+layout. Pass `--redact-paths` when a report is published somewhere the local
+filesystem layout should not be exposed:
+
+```bash
+soroban-upgrade-safeguard ./wasm/current.wasm ./wasm/v2.wasm --redact-paths
+```
+
+It replaces local filesystem paths in report provenance — currently, resolved
+symlink targets — with a stable, non-identifying label. Interface hashes,
+contract IDs, and RPC endpoints are already sanitized and are unaffected by
+this flag.
+
+### Validating against historical versions (lineage tracking)
+
+A two-build comparison only ever checks a candidate against its immediate
+predecessor. That misses a real failure mode: a contract that accumulates
+deployed versions over time can have storage entries written by an *old*
+release (`v1.0.0`) that no intermediate release ever touched again. If a
+later candidate (`v4.0.0`) changes or removes a type `v1.0.0` wrote but
+`v3.0.0` never read, comparing only `v3.0.0` vs `v4.0.0` reports a clean
+pass — and the old entries fail to decode on-chain the moment something
+finally reads them.
+
+`--lineage-store <PATH>` points at a persistent JSON/TOML ledger of a
+contract's historical versions. When it's given, the candidate build is
+validated against **every version in the store still marked live**, not just
+the `<OLD_WASM>` you passed on the command line — each historical mismatch is
+reported as its own `Historical Lineage Break (<version_id>)` finding,
+attributed to the version whose data it would break:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v3.wasm ./wasm/v4.wasm \
+  --lineage-store ./lineage.json
+```
+
+If the path doesn't exist yet, the run starts from an empty in-memory ledger
+instead of failing — you don't need to hand-write one to get started. Nothing
+is written to disk from `--lineage-store` alone, though; see
+[Recording a version](#recording-a-version) below for how entries actually get
+persisted into the file. `--max-live-versions <N>` caps validation to the `N`
+most recently recorded live versions, for a contract with a long history
+where only the recent tail still matters.
+
+See [Persistent Compatibility Lineage Ledger](docs/lineage_model.md) for the
+full ledger file format and fields.
+
+#### Recording a version
+
+`--record-version <VERSION_ID>` records the candidate (`<NEW_WASM>`) as a new
+entry in the lineage store once the run finishes — its own wasm hash,
+interface hash, and full spec JSON, tagged with the ID you give it and marked
+`Live`. This is how a lineage builds up over time: run it once per release you
+ship, and later candidates get validated against everything you've recorded
+so far.
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --record-version v2.0.0
+```
+
+`--record-version` requires `--lineage-store` — without it, the flag is
+accepted but has nothing to write to, so it's a silent no-op. Recording
+happens **after** the comparison completes and is not gated on the verdict:
+a candidate that fails the comparison is still recorded if you asked for it,
+so a rejected build doesn't silently vanish from the history the next
+candidate gets checked against. Re-using an existing `<VERSION_ID>` overwrites
+that entry rather than adding a duplicate, which is useful for amending a
+just-recorded build but means a typoed tag can silently clobber history — get
+the ID right, or check the store's contents before you push it further.
+
+#### Retiring a version
+
+`--retire-version <VERSION_ID>` marks an existing entry in the lineage store
+as `Retired`, so later candidates stop being validated against it. Use it
+once you're confident nothing on-chain still depends on the data shape a
+given historical version wrote — a version you've since migrated away from,
+or one you know was never deployed widely enough to matter:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --retire-version v1.0.0
+```
+
+Like `--record-version`, it requires `--lineage-store` and is otherwise a
+silent no-op — and retiring a `<VERSION_ID>` that isn't in the store is *also*
+a silent no-op rather than an error, so a typo won't fail your run but won't
+retire anything either. Retiring happens **before** validation, so the
+version is already excluded from that same run's lineage check.
+
+**`--retire-version` on its own does not persist.** The store is only
+written back to `--lineage-store`'s path when `--record-version` is also
+given — so `--retire-version` alone updates the in-memory ledger for this
+run's validation but leaves the file on disk untouched, and the retirement
+won't apply to the *next* run either. To make a retirement durable, pair it
+with `--record-version` in the same invocation (recording any candidate,
+including one you've already recorded, is enough to trigger a save):
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --lineage-store ./lineage.json \
+  --retire-version v1.0.0 \
+  --record-version v2.0.0
+```
+
 ### Suppressing known breaking changes
 
 If a breaking change is deliberate and already accounted for, list it in a
@@ -290,6 +579,74 @@ asks for a specific config and the other for none, and guessing which was meant
 is exactly the wrong behavior for a safety gate. `--search-parent-config` is
 rejected alongside `--no-config` for the same reason. To run against a known
 config instead of the ambient one, pass `--config <PATH>` on its own.
+
+#### Seeing what actually resolved
+
+With config arriving from flags, environment variables, a config file, and — in
+batch mode — a manifest, "which layer won?" stops being obvious. `--show-config`
+answers it directly: it prints the fully resolved configuration with the origin
+of every value, then **exits without analyzing any WASM inputs**. No positional
+arguments are needed, and nothing is loaded, parsed, or compared.
+
+```bash
+soroban-upgrade-safeguard --show-config
+```
+
+Each line is a dotted path, the resolved value, and the layer that decided it:
+
+```
+config_file = .safeguard.toml  (auto-discovered .safeguard.toml)
+input.expected_wasm_hash = <none>  (default)
+input.no_symlinks = false  (default)
+batch.max_pairs = 500  (default)
+output.format = text  (default)
+output.strict = true  (cli)
+output.no_color = true  (env (NO_COLOR))
+suppression_policy.max_suppressions = 10  (config file)
+```
+
+The source label is the whole point: `cli`, `env (VAR_NAME)`, `config file`, or
+`default`. A value you expected to come from your `.safeguard.toml` showing up as
+`(default)` is the fastest way to catch a config that never loaded, a mistyped
+key, or a flag quietly overriding the file.
+
+**Secrets are never printed.** RPC header values are not even resolved during
+`--show-config` — only the name of the environment variable that would supply
+them at run time, with the value shown as `<redacted>`:
+
+```
+input.rpc_headers[0].name = Authorization  (cli)
+input.rpc_headers[0].value_from_env = STELLAR_RPC_TOKEN  (cli)
+input.rpc_headers[0].value = <redacted>  (cli)
+```
+
+That makes the output safe to redirect into a CI log or paste into a bug report.
+
+`--format json` produces the same data machine-readable, as a nested tree whose
+leaves are `{"value": ..., "source": ...}` objects — useful for asserting on
+resolved config in CI, or diffing what two environments actually resolve:
+
+```bash
+soroban-upgrade-safeguard --show-config --format json > resolved-config.json
+```
+
+Any other `--format` prints the text listing above.
+
+#### Validating a config without any WASM inputs
+
+While editing or authoring a `.safeguard.toml`, you often want to know whether
+the file is structurally valid without running a full comparison. `--validate-config`
+does exactly that: it parses and validates the suppression config at the given
+path, reports any errors, and then exits — no WASM inputs are needed or loaded.
+
+```bash
+soroban-upgrade-safeguard --validate-config .safeguard.toml
+```
+
+This is the flag to reach for while iterating on suppression rules: it gives
+immediate feedback on syntax mistakes, unknown fields, or malformed `target`
+patterns before you point the tool at real WASM files.
+
 ### Output format
 
 By default, and whenever `--format` is omitted, the report prints as
@@ -304,15 +661,42 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format json
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format markdown
 ```
 
+### Wrapping text output
+
+Finding messages in **text** output word-wrap to fit the terminal. `--width
+<COLUMNS>` overrides that detection with a fixed column count, useful when
+producing a text report for a fixed-width medium:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --width 100
+```
+
+Without `--width`, wrapping is detected only when stdout is a terminal: the
+`COLUMNS` environment variable if set and valid, else 80 columns. Piped or
+redirected output is left unwrapped unless `--width` is given explicitly.
+`--width` never affects JSON or Markdown output, which have no line-width
+concept.
+
 ### Multiple output formats
 
-Emit the same report in several formats and destinations in a single run:
+`--output` accepts a `FORMAT:PATH` specification or a bare path, and can be
+repeated to write several destinations in a single run:
+
+- **`FORMAT:PATH`** (e.g. `json:report.json`) writes that format to that
+  file, regardless of `--format`.
+- **A bare path** (e.g. `report.md`) writes to that file using the format
+  selected by `--format`, or **text** (the default) if `--format` is omitted.
 
 ```bash
 # Write JSON to a file, Markdown to another, and print text to stdout
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
   --output json:report.json \
   --output markdown:report.md
+
+# A bare path resolves its format from --format: this writes Markdown to report.md
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm \
+  --format markdown \
+  --output report.md
 
 # Write to stdout only (default)
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
@@ -359,11 +743,35 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch
 
 Watch mode:
 - Monitors both WASM files for changes using filesystem notifications.
-- Debounces rapid writes (e.g. from build tools) with a 300ms window.
+- Debounces rapid writes (e.g. from build tools) with a 300ms window by default.
 - Clears the terminal screen and re-renders the report on each change.
 - Handles transient missing files gracefully (e.g. build tools that delete and recreate).
 - Keeps the process running regardless of comparison verdict (non-zero exit codes do NOT exit the watcher).
 - Exit with `Ctrl+C`.
+
+#### Tuning the debounce window
+
+A build tool rarely produces one clean filesystem event per build — a
+write-to-temp-then-rename, or several passes over an output directory, can
+each fire their own notification. The debounce window coalesces a burst of
+events for the same underlying change into a single re-run instead of
+triggering one per event. `--watch-debounce-ms <MILLISECONDS>` overrides the
+300ms default, between a 10ms floor and a 60000ms (60s) ceiling — out-of-range
+or non-numeric values are rejected before watch mode starts:
+
+```bash
+# A build pipeline that touches the output file several times in quick
+# succession: widen the window so those all collapse into one re-run.
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch --watch-debounce-ms 750
+
+# A fast, single-write build: tighten it for a snappier turnaround.
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --watch --watch-debounce-ms 50
+```
+
+Too low and a single logical change can trigger several re-runs before the
+build finishes writing; too high and watch mode feels unresponsive to a
+genuine edit. The flag applies to every form of watch mode — a single pair, a
+directory comparison, or a batch manifest.
 
 Watch mode also works at repository scale, for both directory comparisons and
 batch manifests. In that case it builds an input dependency graph instead of
@@ -517,6 +925,38 @@ explicitly, since two teams' `v2.wasm` files would otherwise collide.
 For a stable identifier meant for tooling rather than people — one that survives
 a name being reworded — use the separate [`id`](docs/batch_manifests.md#pair-ids)
 field.
+
+#### Capping how many pairs a manifest may contain
+
+[`--max-pairs <N>`](docs/batch_manifests.md#--max-pairs) bounds the total number
+of pairs a composed manifest may contain — every pair from every included file,
+summed together. The default is **500**: generous enough for any manifest a
+person would compose by hand, including a large monorepo, while still catching a
+runaway one.
+
+The check runs as soon as the composition is parsed, **before any WASM is
+loaded** for any pair. A bad template loop or a script gone wrong can emit
+thousands of pairs, and the failure should be a configuration error naming the
+count — not the tool grinding through comparisons until something else gives
+out:
+
+```bash
+soroban-upgrade-safeguard --manifest release.toml --max-pairs 50
+```
+
+```
+Manifest composition contains 812 pairs, exceeding the maximum of 500 (--max-pairs).
+  root: /repo/release.toml
+Raise --max-pairs if this many pairs is intentional, or check for a manifest
+generation mistake.
+```
+
+The limit **cannot be raised from inside a manifest**. There is no
+`[defaults].max_pairs` and no per-pair equivalent, and because the manifest
+schema rejects unknown keys, writing one is a hard parse error rather than a
+setting that is quietly ignored. The ceiling exists to guard against the
+manifest itself going wrong, so the command line is the only place it can be
+set — a file cannot raise the limit that is there to bound it.
 
 See [Batch Manifests](docs/batch_manifests.md) for the full schema, includes,
 schema coverage rules, path rules, and JSON provenance.
