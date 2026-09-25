@@ -421,7 +421,9 @@ pub fn classify_finding_axes(
         | "Function Signature Changed"
         | "Parameter Reordered"
         | "Parameter Type Changed"
-        | "Return Type Changed" => {
+         | "Return Type Changed"
+        | "Map Key Type Changed"
+        | "Map Value Type Changed" => {
             axes.push(CompatibilityAxis::CallAbi);
         }
 
@@ -498,6 +500,8 @@ pub fn classify_finding_axes(
                         | "Union Case Type Changed"
                         | "Cascading Layout Break"
                         | "Type Kind Changed"
+                        | "Map Key Type Changed"
+                        | "Map Value Type Changed"
                 );
 
                 if is_layout_break {
@@ -1014,40 +1018,49 @@ fn check_function_signature(
             let p_name = old_input.name.to_string();
             if let Some(new_type) = new_by_name.get(&p_name) {
                 if !types_equal(&old_input.type_, new_type) {
-                    let (category, detail) = if let Some(bytesn_msg) =
-                        describe_bytesn_size_change(&old_input.type_, new_type)
-                    {
-                        (
-                            FindingCategory::BytesNSizeChanged.as_str().to_string(),
-                            bytesn_msg,
-                        )
-                    } else {
-                        (
-                            FindingCategory::ParameterTypeChanged.as_str().to_string(),
-                            describe_nested_type_change(&old_input.type_, new_type).unwrap_or_else(
-                                || {
-                                    format!(
-                                        "type changed from `{}` to `{}`",
-                                        crate::mapper::type_to_string(&old_input.type_),
-                                        crate::mapper::type_to_string(new_type)
-                                    )
-                                },
+                    let map_findings = emit_map_specific_findings(
+                        &old_input.type_,
+                        new_type,
+                        &format!("{}.{}", name, p_name),
+                        None,
+                        &format!("Function '{}': parameter {} ('{}')", name, i, p_name),
+                        report,
+                    );
+                    if map_findings == 0 {
+                        let (category, detail) = if let Some(bytesn_msg) =
+                            describe_bytesn_size_change(&old_input.type_, new_type)
+                        {
+                            (
+                                FindingCategory::BytesNSizeChanged.as_str().to_string(),
+                                bytesn_msg,
+                            )
+                        } else {
+                            (
+                                FindingCategory::ParameterTypeChanged.as_str().to_string(),
+                                describe_nested_type_change(&old_input.type_, new_type)
+                                    .unwrap_or_else(|| {
+                                        format!(
+                                            "type changed from `{}` to `{}`",
+                                            crate::mapper::type_to_string(&old_input.type_),
+                                            crate::mapper::type_to_string(new_type)
+                                        )
+                                    }),
+                            )
+                        };
+                        report.findings.push(Finding {
+                            axes: Vec::new(),
+                            severity: Severity::Critical,
+                            category,
+                            message: format!(
+                                "Function '{}': parameter {} ('{}') {}.",
+                                name, i, p_name, detail
                             ),
-                        )
-                    };
-                    report.findings.push(Finding {
-                        axes: Vec::new(),
-                        severity: Severity::Critical,
-                        category,
-                        message: format!(
-                            "Function '{}': parameter {} ('{}') {}.",
-                            name, i, p_name, detail
-                        ),
-                        type_name: None,
-                        target: Some(format!("{}.{}", name, p_name)),
-                        change: None,
-                        root_target: None,
-                    });
+                            type_name: None,
+                            target: Some(format!("{}.{}", name, p_name)),
+                            change: None,
+                            root_target: None,
+                        });
+                    }
                 }
             }
         }
@@ -1074,39 +1087,49 @@ fn check_function_signature(
             }
 
             if !types_equal(&old_input.type_, &new_input.type_) {
-                let (category, detail) = if let Some(bytesn_msg) =
-                    describe_bytesn_size_change(&old_input.type_, &new_input.type_)
-                {
-                    (
-                        FindingCategory::BytesNSizeChanged.as_str().to_string(),
-                        bytesn_msg,
-                    )
-                } else {
-                    (
-                        FindingCategory::ParameterTypeChanged.as_str().to_string(),
-                        describe_nested_type_change(&old_input.type_, &new_input.type_)
-                            .unwrap_or_else(|| {
-                                format!(
-                                    "type changed from `{}` to `{}`",
-                                    crate::mapper::type_to_string(&old_input.type_),
-                                    crate::mapper::type_to_string(&new_input.type_)
-                                )
-                            }),
-                    )
-                };
-                report.findings.push(Finding {
-                    axes: Vec::new(),
-                    severity: Severity::Critical,
-                    category,
-                    message: format!(
-                        "Function '{}': parameter {} ('{}') {}.",
-                        name, i, old_name, detail
-                    ),
-                    type_name: None,
-                    target: Some(format!("{}.{}", name, old_name)),
-                    change: None,
-                    root_target: None,
-                });
+                let map_findings = emit_map_specific_findings(
+                    &old_input.type_,
+                    &new_input.type_,
+                    &format!("{}.{}", name, old_name),
+                    None,
+                    &format!("Function '{}': parameter {} ('{}')", name, i, old_name),
+                    report,
+                );
+                if map_findings == 0 {
+                    let (category, detail) = if let Some(bytesn_msg) =
+                        describe_bytesn_size_change(&old_input.type_, &new_input.type_)
+                    {
+                        (
+                            FindingCategory::BytesNSizeChanged.as_str().to_string(),
+                            bytesn_msg,
+                        )
+                    } else {
+                        (
+                            FindingCategory::ParameterTypeChanged.as_str().to_string(),
+                            describe_nested_type_change(&old_input.type_, &new_input.type_)
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "type changed from `{}` to `{}`",
+                                        crate::mapper::type_to_string(&old_input.type_),
+                                        crate::mapper::type_to_string(&new_input.type_)
+                                    )
+                                }),
+                        )
+                    };
+                    report.findings.push(Finding {
+                        axes: Vec::new(),
+                        severity: Severity::Critical,
+                        category,
+                        message: format!(
+                            "Function '{}': parameter {} ('{}') {}.",
+                            name, i, old_name, detail
+                        ),
+                        type_name: None,
+                        target: Some(format!("{}.{}", name, old_name)),
+                        change: None,
+                        root_target: None,
+                    });
+                }
             }
         }
     }
@@ -1134,34 +1157,46 @@ fn check_function_signature(
     } else {
         for (i, (old_out, new_out)) in old_outputs.iter().zip(new_outputs.iter()).enumerate() {
             if !types_equal(old_out, new_out) {
-                let (category, detail) =
-                    if let Some(bytesn_msg) = describe_bytesn_size_change(old_out, new_out) {
-                        (
-                            FindingCategory::BytesNSizeChanged.as_str().to_string(),
-                            bytesn_msg,
-                        )
-                    } else {
-                        (
-                            FindingCategory::ReturnTypeChanged.as_str().to_string(),
-                            describe_nested_type_change(old_out, new_out).unwrap_or_else(|| {
-                                format!(
-                                    "changed from `{}` to `{}`",
-                                    crate::mapper::type_to_string(old_out),
-                                    crate::mapper::type_to_string(new_out)
-                                )
-                            }),
-                        )
-                    };
-                report.findings.push(Finding {
-                    axes: Vec::new(),
-                    severity: Severity::Critical,
-                    category,
-                    message: format!("Function '{}': return type {} {}.", name, i, detail),
-                    type_name: None,
-                    target: Some(name.to_string()),
-                    change: None,
-                    root_target: None,
-                });
+                let map_findings = emit_map_specific_findings(
+                    old_out,
+                    new_out,
+                    name,
+                    None,
+                    &format!("Function '{}': return type {}", name, i),
+                    report,
+                );
+                if map_findings == 0 {
+                    let (category, detail) =
+                        if let Some(bytesn_msg) = describe_bytesn_size_change(old_out, new_out) {
+                            (
+                                FindingCategory::BytesNSizeChanged.as_str().to_string(),
+                                bytesn_msg,
+                            )
+                        } else {
+                            (
+                                FindingCategory::ReturnTypeChanged.as_str().to_string(),
+                                describe_nested_type_change(old_out, new_out).unwrap_or_else(
+                                    || {
+                                        format!(
+                                            "changed from `{}` to `{}`",
+                                            crate::mapper::type_to_string(old_out),
+                                            crate::mapper::type_to_string(new_out)
+                                        )
+                                    },
+                                ),
+                            )
+                        };
+                    report.findings.push(Finding {
+                        axes: Vec::new(),
+                        severity: Severity::Critical,
+                        category,
+                        message: format!("Function '{}': return type {} {}.", name, i, detail),
+                        type_name: None,
+                        target: Some(name.to_string()),
+                        change: None,
+                        root_target: None,
+                    });
+                }
             }
         }
     }
@@ -1315,44 +1350,59 @@ fn check_struct_fields(
 
         // Field type changed
         if !types_equal(&old_field.type_, &new_field.type_) {
-            let (category, detail) = if let Some(bytesn_msg) =
-                describe_bytesn_size_change(&old_field.type_, &new_field.type_)
-            {
-                (
-                    FindingCategory::BytesNSizeChanged.as_str().to_string(),
-                    bytesn_msg,
-                )
-            } else {
-                (
-                    if is_evt {
-                        FindingCategory::EventSchemaTypeChanged.as_str().to_string()
-                    } else {
-                        FindingCategory::StructFieldTypeChanged.as_str().to_string()
-                    },
-                    describe_nested_type_change(&old_field.type_, &new_field.type_).unwrap_or_else(
-                        || {
-                            format!(
-                                "type changed from `{}` to `{}`",
-                                crate::mapper::type_to_string(&old_field.type_),
-                                crate::mapper::type_to_string(&new_field.type_)
-                            )
-                        },
-                    ),
-                )
-            };
-            report.findings.push(Finding {
-                axes: Vec::new(),
-                severity: Severity::Critical,
-                category,
-                message: format!(
-                    "{} '{}': field '{}' (position {}) {}.",
-                    msg_prefix, name, old_name, i, detail
+            // Emit map-specific findings first; suppress the generic outer
+            // finding when a map-specific one already precisely explains the
+            // change (avoids duplicate outer-container noise).
+            let map_findings = emit_map_specific_findings(
+                &old_field.type_,
+                &new_field.type_,
+                &format!("{}.{}", name, old_name),
+                Some(name),
+                &format!(
+                    "{} '{}': field '{}' (position {})",
+                    msg_prefix, name, old_name, i
                 ),
-                type_name: Some(name.to_string()),
-                target: Some(format!("{}.{}", name, old_name)),
-                change: None,
-                root_target: None,
-            });
+                report,
+            );
+            if map_findings == 0 {
+                let (category, detail) = if let Some(bytesn_msg) =
+                    describe_bytesn_size_change(&old_field.type_, &new_field.type_)
+                {
+                    (
+                        FindingCategory::BytesNSizeChanged.as_str().to_string(),
+                        bytesn_msg,
+                    )
+                } else {
+                    (
+                        if is_evt {
+                            FindingCategory::EventSchemaTypeChanged.as_str().to_string()
+                        } else {
+                            FindingCategory::StructFieldTypeChanged.as_str().to_string()
+                        },
+                        describe_nested_type_change(&old_field.type_, &new_field.type_)
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "type changed from `{}` to `{}`",
+                                    crate::mapper::type_to_string(&old_field.type_),
+                                    crate::mapper::type_to_string(&new_field.type_)
+                                )
+                            }),
+                    )
+                };
+                report.findings.push(Finding {
+                    axes: Vec::new(),
+                    severity: Severity::Critical,
+                    category,
+                    message: format!(
+                        "{} '{}': field '{}' (position {}) {}.",
+                        msg_prefix, name, old_name, i, detail
+                    ),
+                    type_name: Some(name.to_string()),
+                    target: Some(format!("{}.{}", name, old_name)),
+                    change: None,
+                    root_target: None,
+                });
+            }
         }
     }
 
@@ -2039,6 +2089,261 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
     }
 }
 
+/// Determine whether a `ScSpecTypeDef` is a top-level `Map<K, V>`.
+fn as_map(t: &ScSpecTypeDef) -> Option<&stellar_xdr::curr::ScSpecTypeMap> {
+    match t {
+        ScSpecTypeDef::Map(m) => Some(m),
+        _ => None,
+    }
+}
+
+/// When both old and new types are `Map<K, V>` and their key types differ,
+/// produce a `MapKeyTypeChanged` finding descriptor.  Returns `None` when the
+/// outer types are not both Maps, or when only the value changed.
+///
+/// The caller is responsible for also checking the value position via
+/// `map_value_change_detail`.
+fn map_key_change_detail(old: &ScSpecTypeDef, new: &ScSpecTypeDef) -> Option<String> {
+    let (old_map, new_map) = (as_map(old)?, as_map(new)?);
+    if old_map.key_type == new_map.key_type {
+        return None;
+    }
+    Some(
+        describe_nested_type_change(&old_map.key_type, &new_map.key_type).unwrap_or_else(|| {
+            format!(
+                "map key type changed from `{}` to `{}`",
+                crate::mapper::type_to_string(&old_map.key_type),
+                crate::mapper::type_to_string(&new_map.key_type),
+            )
+        }),
+    )
+}
+
+/// When both old and new types are `Map<K, V>` and their value types differ
+/// (while the key type is identical), produce a `MapValueTypeChanged` finding
+/// descriptor.  Returns `None` when the outer types are not both Maps, when
+/// neither position changed, or when the key already changed (key takes
+/// priority in the outer generic finding — map-specific findings still emit
+/// for each changed position independently).
+fn map_value_change_detail(old: &ScSpecTypeDef, new: &ScSpecTypeDef) -> Option<String> {
+    let (old_map, new_map) = (as_map(old)?, as_map(new)?);
+    if old_map.value_type == new_map.value_type {
+        return None;
+    }
+    Some(
+        describe_nested_type_change(&old_map.value_type, &new_map.value_type).unwrap_or_else(
+            || {
+                format!(
+                    "map value type changed from `{}` to `{}`",
+                    crate::mapper::type_to_string(&old_map.value_type),
+                    crate::mapper::type_to_string(&new_map.value_type),
+                )
+            },
+        ),
+    )
+}
+
+/// The canonical XDR ordering class of a map key type.
+///
+/// Soroban maps are ordered by the key's XDR representation.  When the key
+/// type changes, the ordering class may change with it, making previously
+/// sorted entries appear in a different order under the new key type.  This
+/// affects iterators, range scans, and any code that assumes a stable
+/// iteration order.
+///
+/// The classification below is conservative: if a key type is not recognized
+/// as belonging to a specific ordered class it is placed in `Unordered` so
+/// that any change involving it is flagged as a potential ordering break.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MapKeyOrderingClass {
+    /// Numeric wire encoding: `U32`, `I32`, `U64`, `I64`, `U128`, `I128`,
+    /// `U256`, `I256`, `Timepoint`, `Duration`.  Values are ordered by their
+    /// numeric magnitude.
+    Numeric,
+    /// Lexicographic byte encoding: `Bytes`, `BytesN`, `String`, `Symbol`.
+    /// Values are ordered by their UTF-8 / raw-byte representation.
+    Lexicographic,
+    /// `Address` — encoded as a 32-byte Stellar public key or contract ID.
+    /// Effectively lexicographic, but kept separate because its semantics
+    /// differ from plain byte strings.
+    Address,
+    /// `Bool` — two values, ordered false < true.
+    Bool,
+    /// A user-defined type (`Udt`), `Val`, or any container type used as a
+    /// key.  Ordering depends on the full XDR encoding of the UDT, which is
+    /// not inspectable without the full type definition.
+    Unordered,
+}
+
+impl MapKeyOrderingClass {
+    fn of(t: &ScSpecTypeDef) -> Self {
+        match t {
+            ScSpecTypeDef::U32
+            | ScSpecTypeDef::I32
+            | ScSpecTypeDef::U64
+            | ScSpecTypeDef::I64
+            | ScSpecTypeDef::U128
+            | ScSpecTypeDef::I128
+            | ScSpecTypeDef::U256
+            | ScSpecTypeDef::I256
+            | ScSpecTypeDef::Timepoint
+            | ScSpecTypeDef::Duration => MapKeyOrderingClass::Numeric,
+
+            ScSpecTypeDef::Bytes | ScSpecTypeDef::BytesN(_) => MapKeyOrderingClass::Lexicographic,
+            ScSpecTypeDef::String | ScSpecTypeDef::Symbol => MapKeyOrderingClass::Lexicographic,
+
+            ScSpecTypeDef::Address => MapKeyOrderingClass::Address,
+            ScSpecTypeDef::Bool => MapKeyOrderingClass::Bool,
+
+            // Containers and UDTs used as keys have opaque ordering.
+            ScSpecTypeDef::Udt(_)
+            | ScSpecTypeDef::Val
+            | ScSpecTypeDef::Error
+            | ScSpecTypeDef::Void
+            | ScSpecTypeDef::Option(_)
+            | ScSpecTypeDef::Result(_)
+            | ScSpecTypeDef::Vec(_)
+            | ScSpecTypeDef::Map(_)
+            | ScSpecTypeDef::Tuple(_) => MapKeyOrderingClass::Unordered,
+        }
+    }
+
+    /// Whether a key of this class participates in a well-defined canonical
+    /// ordering that clients and range-scan iterators may rely on.
+    fn is_well_ordered(self) -> bool {
+        matches!(
+            self,
+            MapKeyOrderingClass::Numeric
+                | MapKeyOrderingClass::Lexicographic
+                | MapKeyOrderingClass::Address
+                | MapKeyOrderingClass::Bool
+        )
+    }
+
+    /// A short human-readable label used in ordering-change messages.
+    fn label(self) -> &'static str {
+        match self {
+            MapKeyOrderingClass::Numeric => "numeric",
+            MapKeyOrderingClass::Lexicographic => "lexicographic",
+            MapKeyOrderingClass::Address => "address",
+            MapKeyOrderingClass::Bool => "boolean",
+            MapKeyOrderingClass::Unordered => "unordered/opaque",
+        }
+    }
+}
+
+/// When the key type of a map changes, determine whether the ordering
+/// semantics also changed.
+///
+/// Returns `Some(message)` when the ordering class of the key changed (or
+/// when either side has an unsupported / opaque key type), `None` when both
+/// sides belong to the same ordering class.
+fn map_key_ordering_change_detail(old_key: &ScSpecTypeDef, new_key: &ScSpecTypeDef) -> Option<String> {
+    let old_class = MapKeyOrderingClass::of(old_key);
+    let new_class = MapKeyOrderingClass::of(new_key);
+
+    if old_class == new_class {
+        return None;
+    }
+
+    let old_label = crate::mapper::type_to_string(old_key);
+    let new_label = crate::mapper::type_to_string(new_key);
+
+    if !old_class.is_well_ordered() || !new_class.is_well_ordered() {
+        // At least one side has an unsupported/opaque key type.
+        Some(format!(
+            "map key ordering changed from `{}` ({}) to `{}` ({}); \
+             one or both key types have unsupported or opaque ordering semantics",
+            old_label, old_class.label(),
+            new_label, new_class.label(),
+        ))
+    } else {
+        // Both sides are well-ordered but belong to different classes.
+        Some(format!(
+            "map key ordering changed from `{}` ({} order) to `{}` ({} order); \
+             existing range scans and iterators that assumed {} ordering will \
+             produce a different traversal sequence under the new key type",
+            old_label, old_class.label(),
+            new_label, new_class.label(),
+            old_class.label(),
+        ))
+    }
+}
+
+/// Emit zero, one, or two map-specific findings when `old_type` and `new_type`
+/// are both `Map<K, V>`.  Returns the number of findings pushed so the caller
+/// can decide whether to suppress the enclosing generic finding.
+///
+/// - A key-type change → `MapKeyTypeChanged` (Critical, StorageLayout + CallAbi).
+///   The message distinguishes:
+///   - Pure key-domain changes (entries become unreachable).
+///   - Ordering-semantic changes (iteration order changes across the key class
+///     boundary — e.g. numeric → lexicographic).
+///   - Unsupported key types (either side uses Val, UDT, or a container).
+/// - A value-type change → `MapValueTypeChanged` (Critical, StorageLayout).
+/// - Both changed → both findings are pushed.
+///
+/// The `target` should be the stable target string of the enclosing field,
+/// parameter, or return type (e.g. `"Data.balances"` or `"transfer.amounts"`).
+/// The `type_name` is the UDT that owns the field, if any.
+fn emit_map_specific_findings(
+    old_type: &ScSpecTypeDef,
+    new_type: &ScSpecTypeDef,
+    target: &str,
+    type_name: Option<&str>,
+    context_label: &str,
+    report: &mut DiffReport,
+) -> usize {
+    let mut pushed = 0;
+
+    if let Some(detail) = map_key_change_detail(old_type, new_type) {
+        // Also check whether the ordering class changed.
+        let ordering_note = if let (Some(old_map), Some(new_map)) = (as_map(old_type), as_map(new_type)) {
+            map_key_ordering_change_detail(&old_map.key_type, &new_map.key_type)
+                .map(|note| format!(" Additionally, {}", note))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        report.findings.push(Finding {
+            axes: Vec::new(),
+            severity: Severity::Critical,
+            category: FindingCategory::MapKeyTypeChanged.as_str().to_string(),
+            message: format!(
+                "{}: {}. Key-domain changes make existing entries unreachable and \
+                 may alter canonical ordering semantics.{}",
+                context_label, detail, ordering_note
+            ),
+            type_name: type_name.map(str::to_string),
+            target: Some(target.to_string()),
+            change: None,
+            root_target: None,
+        });
+        pushed += 1;
+    }
+
+    if let Some(detail) = map_value_change_detail(old_type, new_type) {
+        report.findings.push(Finding {
+            axes: Vec::new(),
+            severity: Severity::Critical,
+            category: FindingCategory::MapValueTypeChanged.as_str().to_string(),
+            message: format!(
+                "{}: {}. Existing entries serialized under the old value type \
+                 cannot be decoded by the new layout.",
+                context_label, detail
+            ),
+            type_name: type_name.map(str::to_string),
+            target: Some(target.to_string()),
+            change: None,
+            root_target: None,
+        });
+        pushed += 1;
+    }
+
+    pushed
+}
+
 /// When two `ScSpecUdtUnionCaseV0` values are both tuples with the same length
 /// and differ only in one inner type, produce a concise description of the
 /// innermost difference.  Returns `None` when the outer structures differ,
@@ -2194,7 +2499,7 @@ fn union_case_bytesn_size_change(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_xdr::curr::{ScEnvMetaEntry, ScSpecTypeUdt, StringM, VecM};
+    use stellar_xdr::curr::{ScEnvMetaEntry, ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeUdt, ScSpecTypeVec, StringM, VecM};
     use wasmparser::ValType;
 
     /// Helper: build a minimal ContractSpec with the given structs.
@@ -3430,16 +3735,26 @@ mod tests {
         )]);
 
         let report = compare(&old, &new);
+        // A value-only map change now produces MapValueTypeChanged, not
+        // the generic StructFieldTypeChanged.
         let fc = report
             .findings
             .iter()
-            .find(|f| f.category == "Struct Field Type Changed")
-            .expect("Expected field type change");
+            .find(|f| f.category == "Map Value Type Changed")
+            .expect("Expected Map Value Type Changed finding");
         assert!(
             fc.message
-                .contains("the value type of Map changed from `u32` to `u64`"),
+                .contains("map value type changed from `u32` to `u64`"),
             "Message was: {}",
             fc.message
+        );
+        // The generic outer finding must NOT also be present (no duplicate noise).
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.category == "Struct Field Type Changed"),
+            "Generic Struct Field Type Changed should be suppressed when map-specific finding exists"
         );
     }
 
@@ -3460,6 +3775,337 @@ mod tests {
             "Message was: {}",
             fc.message
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Map key / value type change tests
+    // ---------------------------------------------------------------
+
+    fn make_map_field(key: ScSpecTypeDef, value: ScSpecTypeDef) -> ScSpecTypeDef {
+        ScSpecTypeDef::Map(Box::new(stellar_xdr::curr::ScSpecTypeMap {
+            key_type: Box::new(key),
+            value_type: Box::new(value),
+        }))
+    }
+
+    #[test]
+    fn map_key_change_emits_map_key_type_changed() {
+        // Map<Symbol, u64> → Map<String, u64>: key-type change
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Symbol, ScSpecTypeDef::U64))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::String, ScSpecTypeDef::U64))],
+        )]);
+
+        let report = compare(&old, &new);
+        let key_finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Map Key Type Changed")
+            .expect("Expected Map Key Type Changed");
+        assert!(
+            key_finding.message.contains("Symbol") && key_finding.message.contains("String"),
+            "Message: {}",
+            key_finding.message
+        );
+        assert_eq!(key_finding.target.as_deref(), Some("Data.m"));
+        assert_eq!(key_finding.severity, Severity::Critical);
+        // Generic StructFieldTypeChanged must be suppressed
+        assert!(
+            !report.findings.iter().any(|f| f.category == "Struct Field Type Changed"),
+            "Generic finding should be suppressed"
+        );
+    }
+
+    #[test]
+    fn map_value_change_emits_map_value_type_changed() {
+        // Map<Address, u32> → Map<Address, u64>: value-type change only
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Address, ScSpecTypeDef::U32))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Address, ScSpecTypeDef::U64))],
+        )]);
+
+        let report = compare(&old, &new);
+        let val_finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Map Value Type Changed")
+            .expect("Expected Map Value Type Changed");
+        assert!(
+            val_finding.message.contains("u32") && val_finding.message.contains("u64"),
+            "Message: {}",
+            val_finding.message
+        );
+        assert_eq!(val_finding.target.as_deref(), Some("Data.m"));
+        assert_eq!(val_finding.severity, Severity::Critical);
+        // No Map Key Type Changed finding (key did not change)
+        assert!(
+            !report.findings.iter().any(|f| f.category == "Map Key Type Changed"),
+            "No key finding expected when only value changed"
+        );
+        // Generic outer finding suppressed
+        assert!(
+            !report.findings.iter().any(|f| f.category == "Struct Field Type Changed"),
+            "Generic finding should be suppressed"
+        );
+    }
+
+    #[test]
+    fn map_both_key_and_value_changed_emits_two_findings() {
+        // Map<Symbol, u32> → Map<String, u64>: both positions change
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Symbol, ScSpecTypeDef::U32))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::String, ScSpecTypeDef::U64))],
+        )]);
+
+        let report = compare(&old, &new);
+        let key_count = report
+            .findings
+            .iter()
+            .filter(|f| f.category == "Map Key Type Changed")
+            .count();
+        let val_count = report
+            .findings
+            .iter()
+            .filter(|f| f.category == "Map Value Type Changed")
+            .count();
+        assert_eq!(key_count, 1, "expected exactly one MapKeyTypeChanged");
+        assert_eq!(val_count, 1, "expected exactly one MapValueTypeChanged");
+        // Generic outer finding must still be suppressed
+        assert!(
+            !report.findings.iter().any(|f| f.category == "Struct Field Type Changed"),
+            "Generic finding should be suppressed when map-specific findings exist"
+        );
+    }
+
+    #[test]
+    fn map_unchanged_produces_no_map_findings() {
+        // Same Map on both sides — no map findings, no generic finding either
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Address, ScSpecTypeDef::U64))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Address, ScSpecTypeDef::U64))],
+        )]);
+
+        let report = compare(&old, &new);
+        assert!(
+            !report.findings.iter().any(|f| {
+                f.category == "Map Key Type Changed" || f.category == "Map Value Type Changed"
+            }),
+            "No map findings expected for unchanged map"
+        );
+    }
+
+    #[test]
+    fn map_key_change_on_function_param_emits_map_key_finding() {
+        let mut spec_old = ContractSpec::default();
+        spec_old.functions.insert(
+            "do_thing".to_string(),
+            ScSpecFunctionV0 {
+                doc: StringM::default(),
+                name: "do_thing".try_into().unwrap(),
+                inputs: VecM::try_from(vec![ScSpecFunctionInputV0 {
+                    doc: StringM::default(),
+                    name: "lookup".try_into().unwrap(),
+                    type_: make_map_field(ScSpecTypeDef::Symbol, ScSpecTypeDef::U64),
+                }])
+                .unwrap(),
+                outputs: VecM::default(),
+            },
+        );
+        let mut spec_new = ContractSpec::default();
+        spec_new.functions.insert(
+            "do_thing".to_string(),
+            ScSpecFunctionV0 {
+                doc: StringM::default(),
+                name: "do_thing".try_into().unwrap(),
+                inputs: VecM::try_from(vec![ScSpecFunctionInputV0 {
+                    doc: StringM::default(),
+                    name: "lookup".try_into().unwrap(),
+                    type_: make_map_field(ScSpecTypeDef::String, ScSpecTypeDef::U64),
+                }])
+                .unwrap(),
+                outputs: VecM::default(),
+            },
+        );
+
+        let report = compare(&spec_old, &spec_new);
+        let key_finding = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Map Key Type Changed")
+            .expect("Expected Map Key Type Changed on function parameter");
+        assert_eq!(key_finding.target.as_deref(), Some("do_thing.lookup"));
+        assert_eq!(key_finding.severity, Severity::Critical);
+        // Generic ParameterTypeChanged must be suppressed
+        assert!(
+            !report.findings.iter().any(|f| f.category == "Parameter Type Changed"),
+            "Generic Parameter Type Changed should be suppressed"
+        );
+    }
+
+    #[test]
+    fn non_map_field_still_uses_generic_finding() {
+        // u32 -> u64 is not a map change; generic finding must still appear
+        let old = spec_with_structs(vec![("Data", vec![("val", ScSpecTypeDef::U32)])]);
+        let new = spec_with_structs(vec![("Data", vec![("val", ScSpecTypeDef::U64)])]);
+        let report = compare(&old, &new);
+        assert!(
+            report.findings.iter().any(|f| f.category == "Struct Field Type Changed"),
+            "Non-map field changes should still use generic finding"
+        );
+        assert!(
+            !report.findings.iter().any(|f| {
+                f.category == "Map Key Type Changed" || f.category == "Map Value Type Changed"
+            }),
+            "No map findings for non-map field"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Map ordering-semantics unit tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn map_key_ordering_change_numeric_to_lexicographic_noted_in_message() {
+        // Map<u32, u64> → Map<Symbol, u64>: ordering class changes
+        // from numeric to lexicographic — the message must call this out.
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::U32, ScSpecTypeDef::U64))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Symbol, ScSpecTypeDef::U64))],
+        )]);
+        let report = compare(&old, &new);
+        let f = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Map Key Type Changed")
+            .expect("expected MapKeyTypeChanged");
+        // The ordering note should mention the ordering change
+        assert!(
+            f.message.contains("numeric") || f.message.contains("ordering"),
+            "message should mention ordering change, got: {}",
+            f.message
+        );
+    }
+
+    #[test]
+    fn map_key_ordering_change_same_class_no_ordering_note() {
+        // Map<Symbol, u64> → Map<String, u64>: both are lexicographic,
+        // no ordering-semantic change note.
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Symbol, ScSpecTypeDef::U64))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::String, ScSpecTypeDef::U64))],
+        )]);
+        let report = compare(&old, &new);
+        let f = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Map Key Type Changed")
+            .expect("expected MapKeyTypeChanged");
+        // Both are lexicographic — no "ordering changed" note expected
+        // (just the standard domain-change message)
+        assert!(
+            !f.message.contains("ordering changed from"),
+            "no ordering note expected when class is unchanged, got: {}",
+            f.message
+        );
+    }
+
+    #[test]
+    fn map_key_ordering_class_of_udt_is_unordered() {
+        // Map<u32, u64> → Map<MyToken, u64>: UDT keys are unordered/opaque
+        let udt_key = ScSpecTypeDef::Udt(stellar_xdr::curr::ScSpecTypeUdt {
+            name: "MyToken".try_into().unwrap(),
+        });
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::U32, ScSpecTypeDef::U64))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(udt_key, ScSpecTypeDef::U64))],
+        )]);
+        let report = compare(&old, &new);
+        let f = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Map Key Type Changed")
+            .expect("expected MapKeyTypeChanged");
+        // Must mention unsupported/opaque ordering
+        assert!(
+            f.message.contains("unsupported") || f.message.contains("opaque"),
+            "UDT key message should mention unsupported ordering, got: {}",
+            f.message
+        );
+    }
+
+    #[test]
+    fn map_key_ordering_address_to_numeric_is_noted() {
+        // Map<Address, u64> → Map<U64, u64>: address → numeric ordering change
+        let old = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::Address, ScSpecTypeDef::U64))],
+        )]);
+        let new = spec_with_structs(vec![(
+            "Data",
+            vec![("m", make_map_field(ScSpecTypeDef::U64, ScSpecTypeDef::U64))],
+        )]);
+        let report = compare(&old, &new);
+        let f = report
+            .findings
+            .iter()
+            .find(|f| f.category == "Map Key Type Changed")
+            .expect("expected MapKeyTypeChanged");
+        // Address is its own class; changing to numeric must note the ordering change
+        assert!(
+            f.message.contains("address") || f.message.contains("numeric") || f.message.contains("ordering"),
+            "address→numeric message should note ordering change, got: {}",
+            f.message
+        );
+    }
+
+    #[test]
+    fn map_ordering_class_query_primitives() {
+        // Direct unit test of MapKeyOrderingClass::of
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::U32), MapKeyOrderingClass::Numeric);
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::I64), MapKeyOrderingClass::Numeric);
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::Symbol), MapKeyOrderingClass::Lexicographic);
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::String), MapKeyOrderingClass::Lexicographic);
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::Bytes), MapKeyOrderingClass::Lexicographic);
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::Address), MapKeyOrderingClass::Address);
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::Bool), MapKeyOrderingClass::Bool);
+        assert_eq!(MapKeyOrderingClass::of(&ScSpecTypeDef::Val), MapKeyOrderingClass::Unordered);
+    }
+
+    #[test]
+    fn map_key_nested_container_is_unordered() {
+        use stellar_xdr::curr::ScSpecTypeVec;
+        let vec_key = ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
+            element_type: Box::new(ScSpecTypeDef::U32),
+        }));
+        assert_eq!(MapKeyOrderingClass::of(&vec_key), MapKeyOrderingClass::Unordered);
     }
 
     // ---------------------------------------------------------------
