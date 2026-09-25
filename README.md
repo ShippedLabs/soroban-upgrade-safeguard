@@ -65,6 +65,23 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --strict
 A manifest can enable strict mode per pair (`strict = true`), but it cannot
 disable `--strict` passed on the command line.
 
+### Remediation guidance
+
+Pass `--explain` to include a concise remediation explanation alongside each
+finding. Instead of only describing what changed, the output tells you what to
+do about it:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --explain
+```
+
+The guidance appears in text, Markdown, and GitHub Actions output — every
+format that has a natural place for per-finding detail. It is especially useful
+when reading a report for the first time: rather than cross-referencing the
+finding categories documentation, the explanation for each issue is right there
+in the output. A manifest can also enable it per run (`explain = true`), and
+`--explain` passed on the command line cannot be disabled by a manifest.
+
 ### ASCII output
 
 Terminals and log viewers that cannot render emoji can use `--ascii` to
@@ -125,6 +142,48 @@ authenticated-endpoint guidance to use before pointing this at production,
 and the [RPC Security Checklist](docs/rpc-security-checklist.md) for an
 operational checklist covering endpoint trust, credentials, and report
 retention.
+
+#### Authenticating to a private RPC endpoint
+
+If your RPC provider requires an authentication header, use `--rpc-header
+NAME=ENV_VAR` to attach it. The flag takes the literal header name and the name
+of an environment variable whose value is the secret — the secret is **never
+passed on the command line**, only read from the environment at runtime:
+
+```bash
+export STELLAR_RPC_TOKEN=my-secret-token
+
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url https://my-private-rpc.example.com \
+  --rpc-header "Authorization=STELLAR_RPC_TOKEN" \
+  ./wasm/v2.wasm
+```
+
+This keeps credentials out of shell history, process listings, and CI logs.
+The flag can be repeated to attach multiple headers. The environment variable
+must be set when the tool runs; if it is absent, the run fails with an error
+that names the missing variable without printing any value.
+
+#### Non-standard JSON-RPC providers
+
+Some RPC providers do not echo the request `id` back in their responses, which
+violates the JSON-RPC 2.0 spec. By default the tool rejects such responses to
+avoid silently processing an unrelated reply. Pass `--rpc-allow-id-mismatch`
+to accept a response whose `id` is missing or does not match the request's:
+
+```bash
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url https://non-standard-provider.example.com \
+  --rpc-allow-id-mismatch \
+  ./wasm/v2.wasm
+```
+
+This flag is **off by default**. Only use it when you have confirmed that your
+specific provider does not echo request IDs correctly — do not enable it as a
+general workaround, since the ID check exists to guard against receiving a
+response meant for a different request.
 
 #### Pinning the expected baseline hash
 
@@ -549,6 +608,21 @@ soroban-upgrade-safeguard --show-config --format json > resolved-config.json
 ```
 
 Any other `--format` prints the text listing above.
+
+#### Validating a config without any WASM inputs
+
+While editing or authoring a `.safeguard.toml`, you often want to know whether
+the file is structurally valid without running a full comparison. `--validate-config`
+does exactly that: it parses and validates the suppression config at the given
+path, reports any errors, and then exits — no WASM inputs are needed or loaded.
+
+```bash
+soroban-upgrade-safeguard --validate-config .safeguard.toml
+```
+
+This is the flag to reach for while iterating on suppression rules: it gives
+immediate feedback on syntax mistakes, unknown fields, or malformed `target`
+patterns before you point the tool at real WASM files.
 
 ### Output format
 
