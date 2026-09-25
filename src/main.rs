@@ -3505,6 +3505,18 @@ fn run_single(
                     progress,
                 )?
             };
+
+            // `--expected-wasm-hash` pins the baseline's exact bytes. Checked
+            // here, once `old` is resolved, so one check covers both an
+            // RPC-fetched baseline and a locally loaded one — the two ways the
+            // wrong build can end up on the left-hand side of a comparison.
+            // It must run before `compare_contracts`: a report produced against
+            // an unverified baseline is the thing this flag exists to prevent,
+            // so failing early beats emitting a verdict nobody should trust.
+            if let Some(expected) = &args.expected_wasm_hash {
+                verify_expected_wasm_hash(expected, &old.sha256, &old.path)?;
+            }
+
             compare_contracts(
                 &ContractComparison {
                     old_bytes: &old.bytes,
@@ -4109,6 +4121,41 @@ fn run_watch_mode(
 
 fn is_stdin_wasm_path(path: &Path) -> bool {
     path == Path::new("-")
+}
+
+/// Assert that the resolved baseline matches the digest pinned with
+/// `--expected-wasm-hash`.
+///
+/// `actual` is [`loader::WasmModule::sha256`], which in RPC mode is the
+/// on-chain contract code hash already verified against the instance entry.
+/// Comparing against it turns "the endpoint answered" into "the endpoint
+/// answered with the build I expected" — the difference a compromised or
+/// merely misconfigured RPC endpoint turns on.
+///
+/// Matching is case-insensitive so a digest pasted from a block explorer in
+/// upper case still matches. A malformed value is rejected as a configuration
+/// error rather than reported as a mismatch: telling someone their deployment
+/// is wrong when in fact their flag is wrong sends them to debug the wrong
+/// thing, and on a security control that misdirection is the expensive kind.
+fn verify_expected_wasm_hash(expected: &str, actual: &str, path: &str) -> Result<()> {
+    let expected = expected.trim();
+    if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+        anyhow::bail!(
+            "--expected-wasm-hash must be a 64-character hex SHA-256 digest, but got \
+             '{expected}' ({} characters)",
+            expected.len(),
+        );
+    }
+    if !expected.eq_ignore_ascii_case(actual) {
+        anyhow::bail!(
+            "Baseline hash mismatch for '{path}'\n  \
+             expected: {expected}\n  \
+             actual:   {actual}\n\
+             The baseline is not the bytes you pinned, so this comparison would judge the \
+             candidate against the wrong build."
+        );
+    }
+    Ok(())
 }
 
 /// Loads a WASM input that may be `-` for stdin, a local file path, an

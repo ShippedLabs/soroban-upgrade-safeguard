@@ -108,72 +108,47 @@ and the [RPC Security Checklist](docs/rpc-security-checklist.md) for an
 operational checklist covering endpoint trust, credentials, and report
 retention.
 
-### Remote HTTPS inputs
+#### Pinning the expected baseline hash
 
-Anywhere the tool accepts a local WASM path, it also accepts a `https://` URL
-carrying a `#sha256=<hex>` fragment with the expected digest, so a release
-pipeline that publishes artifacts to object storage does not need a separate
-download-and-verify step:
+Fetching a baseline over RPC means trusting the endpoint to answer with the
+bytes actually deployed. `--expected-wasm-hash` removes that trust: it asserts
+the SHA-256 of the on-chain WASM baseline, so the comparison fails if the
+fetched — or locally loaded — baseline is not the bytes you expected.
 
-```bash
-soroban-upgrade-safeguard old.wasm \
-  "https://releases.example.com/v2/contract.wasm#sha256=3b1a2c9e4d5f60718293847566172839405162738495061728394051627384"
-```
-
-The digest is mandatory and the fragment is never sent over the wire. See
-[Remote HTTPS inputs](docs/documentation.md#remote-https-inputs) for the full
-reference syntax and transport policy.
-
-Verified downloads are cached content-addressed by digest, so a re-run reuses
-the bytes instead of re-fetching them:
-
-- `--remote-cache-dir <DIR>` sets the cache location, overriding the
-  `SOROBAN_SAFEGUARD_REMOTE_CACHE` environment variable and the default (a
-  `soroban-upgrade-safeguard/remote-cache` directory under the OS temp dir).
-- `--no-remote-cache` bypasses reading and writing the cache for a single
-  run, without deleting anything already cached.
-- `--clear-remote-cache` deletes every cached artifact under the cache
-  directory and exits without running a comparison.
-
-### OCI registry inputs
-
-Anywhere the tool accepts a local WASM path, it also accepts an `oci://`
-reference to an artifact published to an OCI-compatible registry:
+The value is a 64-character hex SHA-256 digest, upper or lower case:
 
 ```bash
-soroban-upgrade-safeguard old.wasm \
-  "oci://ghcr.io/example/contracts@sha256:3b1a2c9e4d5f60718293847566172839405162738495061728394051627384"
+soroban-upgrade-safeguard \
+  --contract-id CABCD1234... \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --expected-wasm-hash 31fc0a23f04c6fc647ac44ba791228d8f0f12308685f0ac3798d37c79518906b \
+  ./wasm/v2.wasm
 ```
 
-A pinned `@sha256:<hex>` digest is required by default, and the manifest is
-verified against it before anything downstream is trusted. Pass
-`--allow-oci-tags` to allow an `oci://` input to reference a mutable tag
-(e.g. `oci://ghcr.io/example/contracts:v1.2.3`) instead of a pinned digest;
-the resolved digest is printed so the reference can be pinned afterward.
-Off by default.
+On a mismatch the run **fails immediately with exit code 1, before any
+comparison is performed**, and prints both digests so you can see which build
+you actually got:
 
-Fetches are bounded by:
+```
+Error: Baseline hash mismatch for 'CABCD1234...'
+  expected: 0000000000000000000000000000000000000000000000000000000000000000
+  actual:   31fc0a23f04c6fc647ac44ba791228d8f0f12308685f0ac3798d37c79518906b
+```
 
-- `--oci-max-bytes <BYTES>`: maximum bytes accepted for any `oci://`
-  manifest or layer download (default 64 MiB).
-- `--oci-timeout-secs <SECONDS>`: timeout, in seconds, for any single
-  `oci://` registry request (default 30).
-- `--oci-cache-dir <DIR>`: directory used to cache verified `oci://` input
-  layers by digest (default: a `soroban-upgrade-safeguard/oci-cache`
-  directory under the OS temp dir).
+Failing before the comparison is deliberate: a report built against an
+unverified baseline is exactly what this flag exists to prevent, so no verdict
+is emitted at all rather than one that looks authoritative but compares the
+candidate to the wrong build.
 
-Verified layers are cached content-addressed by digest, so a re-run skips the
-blob download:
+A value that is not a 64-character hex digest is rejected as a **configuration
+error**, worded differently from a mismatch — a wrong flag and a wrong
+deployment need to send you to different places.
 
-- The `SOROBAN_SAFEGUARD_OCI_CACHE` environment variable overrides the
-  default cache location; `--oci-cache-dir` overrides both.
-- `--no-oci-cache` bypasses reading and writing the cache for a single run,
-  without deleting anything already cached.
-- `--clear-oci-cache` deletes every cached `oci://` artifact under the cache
-  directory and exits without running a comparison.
-
-See [OCI registry inputs](docs/documentation.md#oci-registry-inputs) for the
-full reference syntax, layer selection, and registry authentication.
+The flag also works with a local baseline, where it pins which build a
+comparison was run against for the audit trail. Note that RPC mode already
+verifies the fetched bytecode against the on-chain contract instance hash on
+every run; this flag adds the second, independent check that the on-chain build
+is the specific one you reviewed.
 
 ### Validating against captured storage entries
 
@@ -285,6 +260,55 @@ cat ./wasm/v2.wasm | soroban-upgrade-safeguard ./wasm/v1.wasm -
 Only one positional input may be `-`; using `-` for both `OLD_WASM` and
 `NEW_WASM` is rejected because stdin can only be consumed once.
 
+### Symlinked inputs
+
+By default a symlinked WASM input is **followed** — through however many hops
+the chain has — and the resolved target is recorded in the report's provenance,
+so a verdict can always be traced to the bytes it actually judged:
+
+```
+Symlink:  ./wasm/current.wasm -> /builds/2024-06-11/token.wasm
+```
+
+The same pair appears in Markdown, and in JSON as `provenance.symlinks[]` with
+`requested` and `resolved` entries. This matters because a path like
+`./wasm/current.wasm` can point at a different build tomorrow; without the
+resolved target, two reports that name the same input could describe different
+bytecode with nothing to tell them apart.
+
+`--no-symlinks` rejects such an input instead of following it, for pipelines
+where an input must be a direct file:
+
+```bash
+soroban-upgrade-safeguard ./wasm/current.wasm ./wasm/v2.wasm --no-symlinks
+```
+
+```
+Error: Symlink input rejected by policy: './wasm/current.wasm' resolves to
+'/builds/2024-06-11/token.wasm'. Pass a direct file, or drop --no-symlinks to
+allow symlinked inputs.
+```
+
+The rejection names the resolved target as well as the link, so a failure tells
+you what would have been analyzed rather than only that something was refused.
+It exits non-zero without comparing anything.
+
+Two limits are worth knowing:
+
+- The check applies to the **final component** of the path, including a chain of
+  several links. A symlinked *parent directory* is not rejected, so
+  `--no-symlinks` is not a guarantee that no part of the path traversed a link.
+- It applies only to local paths. Reading from stdin (`-`), an RPC baseline, an
+  `https://` reference, or an `oci://` reference has no symlink to resolve, and
+  the flag has no effect on them.
+
+A broken link or a symlink cycle is always an error, named as such, whether or
+not `--no-symlinks` is in effect.
+
+Because a resolved target is absolute, it can reveal a username or workspace
+layout. Use `--redact-paths` when a report is published somewhere the local
+filesystem layout should not be.
+
 ### Suppressing known breaking changes
 
 If a breaking change is deliberate and already accounted for, list it in a
@@ -334,6 +358,59 @@ asks for a specific config and the other for none, and guessing which was meant
 is exactly the wrong behavior for a safety gate. `--search-parent-config` is
 rejected alongside `--no-config` for the same reason. To run against a known
 config instead of the ambient one, pass `--config <PATH>` on its own.
+
+#### Seeing what actually resolved
+
+With config arriving from flags, environment variables, a config file, and — in
+batch mode — a manifest, "which layer won?" stops being obvious. `--show-config`
+answers it directly: it prints the fully resolved configuration with the origin
+of every value, then **exits without analyzing any WASM inputs**. No positional
+arguments are needed, and nothing is loaded, parsed, or compared.
+
+```bash
+soroban-upgrade-safeguard --show-config
+```
+
+Each line is a dotted path, the resolved value, and the layer that decided it:
+
+```
+config_file = .safeguard.toml  (auto-discovered .safeguard.toml)
+input.expected_wasm_hash = <none>  (default)
+input.no_symlinks = false  (default)
+batch.max_pairs = 500  (default)
+output.format = text  (default)
+output.strict = true  (cli)
+output.no_color = true  (env (NO_COLOR))
+suppression_policy.max_suppressions = 10  (config file)
+```
+
+The source label is the whole point: `cli`, `env (VAR_NAME)`, `config file`, or
+`default`. A value you expected to come from your `.safeguard.toml` showing up as
+`(default)` is the fastest way to catch a config that never loaded, a mistyped
+key, or a flag quietly overriding the file.
+
+**Secrets are never printed.** RPC header values are not even resolved during
+`--show-config` — only the name of the environment variable that would supply
+them at run time, with the value shown as `<redacted>`:
+
+```
+input.rpc_headers[0].name = Authorization  (cli)
+input.rpc_headers[0].value_from_env = STELLAR_RPC_TOKEN  (cli)
+input.rpc_headers[0].value = <redacted>  (cli)
+```
+
+That makes the output safe to redirect into a CI log or paste into a bug report.
+
+`--format json` produces the same data machine-readable, as a nested tree whose
+leaves are `{"value": ..., "source": ...}` objects — useful for asserting on
+resolved config in CI, or diffing what two environments actually resolve:
+
+```bash
+soroban-upgrade-safeguard --show-config --format json > resolved-config.json
+```
+
+Any other `--format` prints the text listing above.
+
 ### Output format
 
 By default, and whenever `--format` is omitted, the report prints as
@@ -572,6 +649,38 @@ explicitly, since two teams' `v2.wasm` files would otherwise collide.
 For a stable identifier meant for tooling rather than people — one that survives
 a name being reworded — use the separate [`id`](docs/batch_manifests.md#pair-ids)
 field.
+
+#### Capping how many pairs a manifest may contain
+
+[`--max-pairs <N>`](docs/batch_manifests.md#--max-pairs) bounds the total number
+of pairs a composed manifest may contain — every pair from every included file,
+summed together. The default is **500**: generous enough for any manifest a
+person would compose by hand, including a large monorepo, while still catching a
+runaway one.
+
+The check runs as soon as the composition is parsed, **before any WASM is
+loaded** for any pair. A bad template loop or a script gone wrong can emit
+thousands of pairs, and the failure should be a configuration error naming the
+count — not the tool grinding through comparisons until something else gives
+out:
+
+```bash
+soroban-upgrade-safeguard --manifest release.toml --max-pairs 50
+```
+
+```
+Manifest composition contains 812 pairs, exceeding the maximum of 500 (--max-pairs).
+  root: /repo/release.toml
+Raise --max-pairs if this many pairs is intentional, or check for a manifest
+generation mistake.
+```
+
+The limit **cannot be raised from inside a manifest**. There is no
+`[defaults].max_pairs` and no per-pair equivalent, and because the manifest
+schema rejects unknown keys, writing one is a hard parse error rather than a
+setting that is quietly ignored. The ceiling exists to guard against the
+manifest itself going wrong, so the command line is the only place it can be
+set — a file cannot raise the limit that is there to bound it.
 
 See [Batch Manifests](docs/batch_manifests.md) for the full schema, includes,
 schema coverage rules, path rules, and JSON provenance.
