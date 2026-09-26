@@ -350,6 +350,31 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format json \
   | soroban-upgrade-safeguard render - --format text
 ```
 
+### Upgrading a saved report
+
+`upgrade-report` migrates a saved JSON report to the latest schema version, so
+an older stored report stays consumable as the format evolves. Running it on a
+report already at the latest version is safe — the document is re-emitted
+unchanged with no modifications:
+
+```bash
+soroban-upgrade-safeguard upgrade-report report.json
+
+# Write the upgraded report to a file instead of stdout
+soroban-upgrade-safeguard upgrade-report report.json --output report-upgraded.json
+
+# Read from stdin, write to stdout — useful in pipelines
+soroban-upgrade-safeguard upgrade-report -
+```
+
+The command prints a migration summary to stderr: either how many schema steps
+were applied, or a note that the report was already at the latest version. The
+exit code is non-zero only if the input cannot be parsed at all.
+
+See [Report Schema Compatibility](docs/report_schema_compatibility.md) for the
+schema version history and the compatibility policy that governs what each
+version is allowed to change.
+
 ### Signing and verifying reports
 
 ```bash
@@ -376,6 +401,36 @@ cat ./wasm/v2.wasm | soroban-upgrade-safeguard ./wasm/v1.wasm -
 Only one positional input may be `-`; using `-` for both `OLD_WASM` and
 `NEW_WASM` is rejected because stdin can only be consumed once.
 
+### Validating a single contract spec (lint)
+
+`lint` validates one contract spec, and optionally a storage schema, for graph
+and schema integrity — independent of any comparison against another build. Use
+it to check a single artifact in isolation, for example to catch structural
+problems before including a build in a multi-contract release:
+
+```bash
+soroban-upgrade-safeguard lint ./wasm/v1.wasm
+```
+
+Pass `--storage-schema` to also validate a declared storage schema alongside the
+spec. The schema file may be JSON or TOML, inferred from the extension:
+
+```bash
+soroban-upgrade-safeguard lint ./wasm/v1.wasm --storage-schema ./schemas/v1.json
+```
+
+Exit codes differ from the comparison command:
+
+- `0`: no findings, or only warning/info findings without `--strict`.
+- `2`: at least one error-severity finding (the artifact is structurally
+  invalid).
+- `3`: only warning/info findings, but `--strict` was passed.
+
+`--format json` or `--format markdown` produces machine-readable output.
+`--explain` includes a remediation explanation alongside each finding. See
+[Lint Rules Reference](docs/lint_rules_reference.md) for the full set of checks
+`lint` runs.
+
 ### Listing finding categories
 
 Enumerate every finding category the analysis may emit, with its default
@@ -397,6 +452,33 @@ Both formats are generated from the same source of truth the comparison
 analysis uses, so the listing can never drift from the categories the tool
 actually emits. See [docs/finding-categories.md](docs/finding-categories.md) for
 the full documented taxonomy.
+
+### Checking RPC connectivity (preflight)
+
+`preflight` validates RPC connectivity and the JSON-RPC response format without
+fetching any contract code. Use it to diagnose an endpoint before a real run,
+confirm authentication headers work, or verify that a provider echoes request
+IDs correctly — none of which require a contract ID:
+
+```bash
+soroban-upgrade-safeguard preflight --rpc-url https://soroban-testnet.stellar.org
+```
+
+The check confirms three things in sequence:
+
+- **Transport**: the endpoint responds to an HTTP request (status code reported).
+- **Protocol**: the response is valid JSON-RPC 2.0 with a matching request `id`.
+- **Capability**: a lightweight probe method (`getLatestLedger`) succeeds and
+  returns the latest ledger sequence number.
+
+No contract code is fetched during a preflight check. A passing result confirms
+endpoint connectivity only — it does not verify that any specific contract or
+network is compatible with your build. See
+[RPC Security Checklist](docs/rpc-security-checklist.md) for the operational
+checklist covering endpoint trust, credentials, and report retention.
+
+`--format json` emits a machine-readable summary of the three checks. The
+command exits non-zero when any check fails.
 
 ### Symlinked inputs
 
@@ -531,9 +613,27 @@ If the path doesn't exist yet, the run starts from an empty in-memory ledger
 instead of failing — you don't need to hand-write one to get started. Nothing
 is written to disk from `--lineage-store` alone, though; see
 [Recording a version](#recording-a-version) below for how entries actually get
-persisted into the file. `--max-live-versions <N>` caps validation to the `N`
-most recently recorded live versions, for a contract with a long history
-where only the recent tail still matters.
+persisted into the file.
+
+#### Capping the live-version window
+
+`--max-live-versions <N>` limits validation to the `N` most recently recorded
+live versions, ordered by when they were added to the store. Use it when a
+contract has accumulated a long history but only the recent tail still matters
+for on-chain compatibility, to bound the validation cost without retiring older
+entries:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v3.wasm ./wasm/v4.wasm \
+  --lineage-store ./lineage.json \
+  --max-live-versions 5
+```
+
+Versions beyond the cap are excluded from that run's lineage check only —
+`--max-live-versions` does not remove or retire anything from the store. Already
+retired versions do not count toward the cap: the limit applies exclusively to
+live entries, so retiring several old versions first has the same effect as
+lowering `--max-live-versions` by that amount.
 
 See [Persistent Compatibility Lineage Ledger](docs/lineage_model.md) for the
 full ledger file format and fields, and the
