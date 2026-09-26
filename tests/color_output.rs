@@ -130,6 +130,33 @@ fn color_always_forces_color_for_non_tty_stdout() {
 }
 
 #[test]
+fn color_rejects_invalid_value() {
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg(wasm("v1.wasm"))
+        .arg(wasm("v2.wasm"))
+        .arg("--color")
+        .arg("bogus")
+        .output()
+        .expect("failed to run binary");
+
+    assert!(
+        !output.status.success(),
+        "an invalid --color value must be rejected"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not valid UTF-8");
+    assert!(
+        stderr.contains("--color"),
+        "error must mention --color. stderr:\n{stderr}"
+    );
+    for valid in ["auto", "always", "never"] {
+        assert!(
+            stderr.contains(valid),
+            "error must list valid --color value '{valid}'. stderr:\n{stderr}"
+        );
+    }
+}
+
+#[test]
 fn color_never_disables_color() {
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
         .arg(wasm("v1.wasm"))
