@@ -1247,10 +1247,24 @@ The tool parses the `contractspecv0` custom sections from both WASM files, decod
 - **🟡 WARNING**: Changes that might affect external systems but won't necessarily corrupt local storage (e.g., adding elective parameters if supported).
 - **🔵 INFO**: Informational logs about additions or non-breaking modifications.
 
+For the exact categories emitted at each severity — the strings to use in suppression rules — see the [Finding Category Reference](docs/finding-categories.md).
+
+## Exit Codes
+
+The codes in this table apply to the default comparison command and to all subcommands **except `lint`**, which uses its own separate set. See [Lint Rules Reference — Exit codes](docs/lint_rules_reference.md#exit-codes) for those.
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success. No unsuppressed Critical findings. With `--strict`, also no Warning findings. `--show-config` and `--validate-config` exit `0` after printing or validating configuration without loading any WASM. |
+| `1` | Failure. At least one unsuppressed Critical finding; or, with `--strict`, at least one Warning finding. Also returned for configuration errors (invalid flags, missing inputs, unknown format names), a baseline hash mismatch (via `--expected-wasm-hash`), a symlink input rejected by `--no-symlinks`, or an interface drift detected by `--interface-lockfile`. |
+
+Watch mode (`--watch`) keeps the process running regardless of comparison verdict — a `1` from a comparison cycle does **not** terminate the watcher.
+
 ## Documentation
 
 More detailed guides live in the [docs](docs/) folder:
 
+- [Which subcommand do I want?](docs/subcommand-guide.md): a task-oriented guide mapping common goals to the right subcommand.
 - [Documentation](docs/documentation.md): full explanation of how the analysis pipeline works, severity levels, cascading layout breaks, and CI integration.
 - [Finding Category Reference](docs/finding-categories.md): every category emitted by the tool, with severity, trigger, and remediation guidance — the exact strings to use in suppression rules.
 - [Batch Manifests](docs/batch_manifests.md): the manifest schema, composing manifests with `include`, shared `[defaults]`, per-pair overrides, precedence, and resolution provenance.
@@ -1261,6 +1275,7 @@ More detailed guides live in the [docs](docs/) folder:
 - [Storage Schema Cookbook](docs/storage-schema-cookbook.md): worked examples for declaring storage schemas — common key enums, nested values, optional fields, and partial coverage.
 - [Lineage Tracking Walkthrough](docs/lineage-walkthrough.md): a worked example of recording historical versions, validating a candidate against them, retiring versions, and capping the number of live versions with `--lineage-store`.
 - [Troubleshooting Loader Failures](docs/loader-troubleshooting.md): what to do about malformed WASM, missing custom sections, unsupported formats, and resource-limit rejections.
+- [Report Provenance Fields](docs/report-provenance.md): every field in the `provenance` block of a saved JSON report, with its type, meaning, and notes on which fields are omitted by `--no-timestamp` and `--redact-paths`.
 
 ## License
 
