@@ -422,6 +422,9 @@ soroban-upgrade-safeguard lint ./wasm/v1.wasm --storage-schema ./schemas/v1.json
 Exit codes differ from the comparison command:
 
 - `0`: no findings, or only warning/info findings without `--strict`.
+- `1`: not a lint finding — a configuration or usage error (invalid flags, an
+  unreadable input, a malformed `--storage-schema`, or an RPC fetch failure),
+  same meaning as the comparison command's `1`.
 - `2`: at least one error-severity finding (the artifact is structurally
   invalid).
 - `3`: only warning/info findings, but `--strict` was passed.
@@ -1372,6 +1375,7 @@ More detailed guides live in the [docs](docs/) folder:
 - [Signed Attestations](docs/attestations.md): DSSE signing, the in-toto predicate, offline verification, and security guidance.
 - [RPC Security Checklist](docs/rpc-security-checklist.md): operational checklist for endpoint trust, HTTPS, expected-hash pinning, credentials, and report retention when fetching a baseline over RPC.
 - [Remote HTTPS Inputs](docs/remote-https-inputs.md): digest-pinned `https://` inputs, fetch limits, caching, and error messages.
+- [Environment Variables](docs/environment-variables.md): every environment variable the CLI reads, its precedence against the equivalent flag, and how to relocate caches in a sandboxed or ephemeral environment.
 - [Storage Schema Cookbook](docs/storage-schema-cookbook.md): worked examples for declaring storage schemas — common key enums, nested values, optional fields, and partial coverage.
 - [Lineage Tracking Walkthrough](docs/lineage-walkthrough.md): a worked example of recording historical versions, validating a candidate against them, retiring versions, and capping the number of live versions with `--lineage-store`.
 - [Troubleshooting Loader Failures](docs/loader-troubleshooting.md): what to do about malformed WASM, missing custom sections, unsupported formats, and resource-limit rejections.
