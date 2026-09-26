@@ -583,9 +583,27 @@ If the path doesn't exist yet, the run starts from an empty in-memory ledger
 instead of failing — you don't need to hand-write one to get started. Nothing
 is written to disk from `--lineage-store` alone, though; see
 [Recording a version](#recording-a-version) below for how entries actually get
-persisted into the file. `--max-live-versions <N>` caps validation to the `N`
-most recently recorded live versions, for a contract with a long history
-where only the recent tail still matters.
+persisted into the file.
+
+#### Capping the live-version window
+
+`--max-live-versions <N>` limits validation to the `N` most recently recorded
+live versions, ordered by when they were added to the store. Use it when a
+contract has accumulated a long history but only the recent tail still matters
+for on-chain compatibility, to bound the validation cost without retiring older
+entries:
+
+```bash
+soroban-upgrade-safeguard ./wasm/v3.wasm ./wasm/v4.wasm \
+  --lineage-store ./lineage.json \
+  --max-live-versions 5
+```
+
+Versions beyond the cap are excluded from that run's lineage check only —
+`--max-live-versions` does not remove or retire anything from the store. Already
+retired versions do not count toward the cap: the limit applies exclusively to
+live entries, so retiring several old versions first has the same effect as
+lowering `--max-live-versions` by that amount.
 
 See [Persistent Compatibility Lineage Ledger](docs/lineage_model.md) for the
 full ledger file format and fields, and the
