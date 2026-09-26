@@ -19,8 +19,13 @@ soroban-upgrade-safeguard lint <WASM> [--storage-schema SCHEMA] [--format text|m
 | Code | Meaning |
 |---|---|
 | `0` | Clean, or only warning/info findings without `--strict`. |
+| `1` | Not a lint finding: a configuration or usage error (invalid flags, an unreadable or missing WASM/`--storage-schema` file, a malformed storage schema, or an RPC fetch failure with `--contract-id`/`--rpc-url`). Same meaning as the comparison command's `1`. |
 | `2` | At least one error-severity finding: the artifact is structurally invalid. |
 | `3` | Only warning/info findings, but `--strict` was passed. |
+
+A CI job gating on lint's exit code should treat anything other than `0` as
+non-passing, rather than special-casing only `2` and `3` — `1` can still occur
+before any lint rule ever runs.
 
 ## Rules
 
