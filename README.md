@@ -350,6 +350,31 @@ soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm --format json \
   | soroban-upgrade-safeguard render - --format text
 ```
 
+### Upgrading a saved report
+
+`upgrade-report` migrates a saved JSON report to the latest schema version, so
+an older stored report stays consumable as the format evolves. Running it on a
+report already at the latest version is safe — the document is re-emitted
+unchanged with no modifications:
+
+```bash
+soroban-upgrade-safeguard upgrade-report report.json
+
+# Write the upgraded report to a file instead of stdout
+soroban-upgrade-safeguard upgrade-report report.json --output report-upgraded.json
+
+# Read from stdin, write to stdout — useful in pipelines
+soroban-upgrade-safeguard upgrade-report -
+```
+
+The command prints a migration summary to stderr: either how many schema steps
+were applied, or a note that the report was already at the latest version. The
+exit code is non-zero only if the input cannot be parsed at all.
+
+See [Report Schema Compatibility](docs/report_schema_compatibility.md) for the
+schema version history and the compatibility policy that governs what each
+version is allowed to change.
+
 ### Signing and verifying reports
 
 ```bash
@@ -397,6 +422,33 @@ Both formats are generated from the same source of truth the comparison
 analysis uses, so the listing can never drift from the categories the tool
 actually emits. See [docs/finding-categories.md](docs/finding-categories.md) for
 the full documented taxonomy.
+
+### Checking RPC connectivity (preflight)
+
+`preflight` validates RPC connectivity and the JSON-RPC response format without
+fetching any contract code. Use it to diagnose an endpoint before a real run,
+confirm authentication headers work, or verify that a provider echoes request
+IDs correctly — none of which require a contract ID:
+
+```bash
+soroban-upgrade-safeguard preflight --rpc-url https://soroban-testnet.stellar.org
+```
+
+The check confirms three things in sequence:
+
+- **Transport**: the endpoint responds to an HTTP request (status code reported).
+- **Protocol**: the response is valid JSON-RPC 2.0 with a matching request `id`.
+- **Capability**: a lightweight probe method (`getLatestLedger`) succeeds and
+  returns the latest ledger sequence number.
+
+No contract code is fetched during a preflight check. A passing result confirms
+endpoint connectivity only — it does not verify that any specific contract or
+network is compatible with your build. See
+[RPC Security Checklist](docs/rpc-security-checklist.md) for the operational
+checklist covering endpoint trust, credentials, and report retention.
+
+`--format json` emits a machine-readable summary of the three checks. The
+command exits non-zero when any check fails.
 
 ### Symlinked inputs
 
