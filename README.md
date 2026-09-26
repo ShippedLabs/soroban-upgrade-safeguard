@@ -401,6 +401,36 @@ cat ./wasm/v2.wasm | soroban-upgrade-safeguard ./wasm/v1.wasm -
 Only one positional input may be `-`; using `-` for both `OLD_WASM` and
 `NEW_WASM` is rejected because stdin can only be consumed once.
 
+### Validating a single contract spec (lint)
+
+`lint` validates one contract spec, and optionally a storage schema, for graph
+and schema integrity — independent of any comparison against another build. Use
+it to check a single artifact in isolation, for example to catch structural
+problems before including a build in a multi-contract release:
+
+```bash
+soroban-upgrade-safeguard lint ./wasm/v1.wasm
+```
+
+Pass `--storage-schema` to also validate a declared storage schema alongside the
+spec. The schema file may be JSON or TOML, inferred from the extension:
+
+```bash
+soroban-upgrade-safeguard lint ./wasm/v1.wasm --storage-schema ./schemas/v1.json
+```
+
+Exit codes differ from the comparison command:
+
+- `0`: no findings, or only warning/info findings without `--strict`.
+- `2`: at least one error-severity finding (the artifact is structurally
+  invalid).
+- `3`: only warning/info findings, but `--strict` was passed.
+
+`--format json` or `--format markdown` produces machine-readable output.
+`--explain` includes a remediation explanation alongside each finding. See
+[Lint Rules Reference](docs/lint_rules_reference.md) for the full set of checks
+`lint` runs.
+
 ### Listing finding categories
 
 Enumerate every finding category the analysis may emit, with its default
