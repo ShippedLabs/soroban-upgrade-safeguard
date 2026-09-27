@@ -377,16 +377,65 @@ version is allowed to change.
 
 ### Signing and verifying reports
 
+Safeguard supports signing and verifying analysis reports using DSSE (Dead Simple Signing Envelope) envelopes wrapping canonical in-toto statements.
+
+#### Complete Attest-then-Verify Worked Example
+
+##### 1. Producer: Generate report and sign attestation
+
+The producer generates a deterministic JSON report and signs it with an unencrypted Ed25519 PKCS#8 private key:
+
 ```bash
+# Step 1: Generate deterministic report
+soroban-upgrade-safeguard old.wasm new.wasm \
+  --format json --no-timestamp > report.json
+
+# Step 2: Create signed DSSE attestation
 soroban-upgrade-safeguard attest report.json \
   --old-wasm old.wasm --new-wasm new.wasm \
-  --private-key signing-key.pk8 --key-id release-key \
+  --private-key signing-key.pk8 --key-id release-2026 \
   --output report.dsse.json
-
-soroban-upgrade-safeguard verify-attestation report.dsse.json \
-  --trusted-key release-key=public-key.raw \
-  --report report.json --old-wasm old.wasm --new-wasm new.wasm
 ```
+
+The producer provides the resulting artifacts to the consumer:
+- `report.dsse.json`: The signed DSSE envelope containing the canonical in-toto statement
+- `report.json`: The raw analysis report
+- `old.wasm` & `new.wasm`: The original contract builds
+- `release-public-key.raw`: The trusted raw 32-byte Ed25519 public key distributed out-of-band
+
+##### 2. Consumer: Verify attestation offline
+
+A downstream consumer or automated deployment pipeline verifies the attestation and all referenced artifacts completely **offline** (no RPC or network access required):
+
+```bash
+soroban-upgrade-safeguard verify-attestation report.dsse.json \
+  --trusted-key release-2026=release-public-key.raw \
+  --report report.json \
+  --old-wasm old.wasm \
+  --new-wasm new.wasm
+```
+
+#### What `verify-attestation` checks offline
+
+When executing `verify-attestation`, Safeguard runs entirely offline and performs the following verification checks:
+
+1. **Envelope & Canonicalization**: Validates that the DSSE envelope structure is valid and the payload adheres to canonical in-toto JSON serialization.
+2. **Cryptographic Signature**: Validates the Ed25519 signature over the DSSE pre-authentication encoding (PAE) of the payload using the trusted key.
+3. **Signer Identity Match**: Verifies that the envelope's signing `keyid` matches an identity explicitly trusted via `--trusted-key <key-id>=<public-key-path>`.
+4. **Artifact Integrity (SHA-256)**: Re-hashes every referenced artifact on disk (`report.json`, `old.wasm`, `new.wasm`, and storage schemas if present) and confirms that each digest matches the corresponding subject digest in the signed statement.
+5. **Policy Expiration**: If a policy document was bound with `--policy`, verifies that current time has not exceeded the policy's valid duration.
+
+#### Exit behavior and failure modes
+
+- **Success (`exit 0`)**: If all checks succeed, Safeguard prints structured JSON confirming the verified subjects, signer identity, and verdicts to stdout and exits with code `0`.
+- **Failure (`exit 1`)**: If any check fails, Safeguard exits non-zero (`exit 1`) and outputs a structured error describing the exact failure condition:
+  - `missing_artifact`: A referenced artifact file cannot be located on disk.
+  - `artifact_digest_mismatch`: An artifact's local SHA-256 digest does not match the digest recorded in the signed attestation.
+  - `untrusted_signer`: The `keyid` present in the envelope was not supplied in `--trusted-key`.
+  - `invalid_signature`: The signature failed cryptographic verification against the trusted public key.
+  - `non_canonical_payload`: The payload format does not match canonical in-toto JSON serialization.
+  - `invalid_statement`: Malformed statement structure or missing mandatory in-toto predicate fields.
+  - `expired_policy`: The bound policy has expired.
 
 See the [attestation guide](docs/attestations.md) for predicate details,
 resolved policy binding, offline verification, and key-handling guidance.

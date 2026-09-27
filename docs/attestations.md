@@ -26,20 +26,46 @@ schema files can be supplied as a matched `--old-storage-schema` and
 
 ## Verify offline
 
-The verifier needs only the envelope, trusted raw 32-byte Ed25519 public key,
-and the referenced artifacts. It checks payload canonicalization, the DSSE
-signature, signer identity, every SHA-256 digest, and policy expiry.
+The `verify-attestation` command verifies a DSSE attestation envelope and all referenced artifacts completely offline. A downstream verifier needs only the envelope, the trusted raw 32-byte Ed25519 public key, and the referenced build artifacts.
+
+### Worked example: Consumer verification workflow
+
+A consumer receives an attestation bundle containing:
+1. `report.dsse.json` (signed DSSE envelope)
+2. `release-public-key.raw` (trusted 32-byte raw public key)
+3. `report.json` (unmodified analysis report)
+4. `old.wasm` & `new.wasm` (original contract artifacts)
+
+To verify the integrity and provenance of the analysis offline:
 
 ```bash
 soroban-upgrade-safeguard verify-attestation report.dsse.json \
   --trusted-key release-2026=release-public-key.raw \
-  --report report.json --old-wasm old.wasm --new-wasm new.wasm
+  --report report.json \
+  --old-wasm old.wasm \
+  --new-wasm new.wasm
 ```
 
-Verification prints structured JSON and exits non-zero when it cannot trust the
-verdict. Failure kinds are intentionally distinct: `missing_artifact`,
-`artifact_digest_mismatch`, `untrusted_signer`, `invalid_signature`,
-`non_canonical_payload`, `invalid_statement`, and `expired_policy`.
+### What `verify-attestation` checks offline
+
+`verify-attestation` runs with zero network dependencies and validates:
+1. **DSSE Envelope Canonicalization**: Verifies that the payload contains a valid in-toto statement following canonical JSON serialization rules.
+2. **Cryptographic Signature**: Validates the Ed25519 signature over the pre-authentication encoding (PAE) using the provided public key.
+3. **Signer Identity Match**: Verifies that the `keyid` specified in the envelope matches an identity supplied in `--trusted-key`.
+4. **Artifact Integrity Digests**: Computes SHA-256 hashes for all local files (`report.json`, `old.wasm`, `new.wasm`, and storage schemas if present) and matches them against statement subjects.
+5. **Policy Expiration**: Confirms that the current verification timestamp is within the bound policy's validity window (if `--policy` was included).
+
+### Exit behavior and failure modes
+
+- **Success (`exit 0`)**: Verification succeeded. Structured JSON describing the verified verdict and subjects is printed to stdout.
+- **Verification Failure (`exit 1`)**: When any check fails, the CLI outputs structured JSON to stderr/stdout detailing the failure reason and exits non-zero (`1`). Failure kinds are intentionally distinct:
+  - `missing_artifact`: A required artifact file was not found on disk.
+  - `artifact_digest_mismatch`: Local file SHA-256 does not match the signed digest.
+  - `untrusted_signer`: Envelope key identity was not passed in `--trusted-key`.
+  - `invalid_signature`: Cryptographic signature verification failed.
+  - `non_canonical_payload`: Payload deviates from canonical JSON encoding.
+  - `invalid_statement`: Malformed statement schema or missing fields.
+  - `expired_policy`: The evaluation falls outside the policy validity window.
 
 ## Predicate and security guidance
 
