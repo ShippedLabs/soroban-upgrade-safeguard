@@ -680,6 +680,12 @@ struct Args {
     oci_max_bytes: usize,
 
     /// Timeout, in seconds, for any single `oci://` registry request.
+    ///
+    /// A value of 0 is a defined failure, not an unbounded wait: the
+    /// deadline is computed from when the request starts, so a
+    /// zero-second budget is already exhausted before the connection can
+    /// complete, and every request fails immediately with a timeout
+    /// error. There is no "0 means unlimited" special case.
     #[arg(long, value_name = "SECONDS", default_value_t = oci::DEFAULT_TIMEOUT_SECS)]
     oci_timeout_secs: u64,
 

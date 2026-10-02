@@ -129,6 +129,19 @@ soroban-upgrade-safeguard \
 - Built-in versioning with tags and digests
 - Can reference by tag (`oci://registry/image:v1`) or digest (`oci://registry/image@sha256:...`)
 
+**Size and timeout limits:**
+- `--oci-max-bytes` (default: see `--help`)
+- `--oci-timeout-secs` (default: see `--help`) — bounds every single
+  registry request (manifest fetch, blob fetch, each retry).
+  **`--oci-timeout-secs 0` is a defined failure, not an unbounded wait**:
+  the timeout is measured from when the request starts, so a zero-second
+  budget is already exhausted before the connection — let alone a
+  response — can complete. Every `oci://` request fails immediately with
+  a timeout error (reported as a transport error naming the failed URL)
+  rather than hanging or silently succeeding. There's no "0 means
+  unlimited" special case; use a large explicit value (e.g. `--oci-timeout-secs 3600`)
+  if you actually want a long budget.
+
 **See also:** Check `soroban-upgrade-safeguard --help` for OCI-specific flags and authentication options.
 
 ## Choosing between sources
