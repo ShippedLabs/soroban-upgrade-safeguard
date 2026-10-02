@@ -1,0 +1,27 @@
+{
+  "name": "soroban-upgrade-safeguard",
+  "version": "0.1.0",
+  "description": "Native Node.js bindings for the soroban-upgrade-safeguard Soroban contract-upgrade safety analyzer.",
+  "license": "MIT",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "safeguard-error.js"
+  ],
+  "napi": {
+    "binaryName": "soroban_upgrade_safeguard"
+  },
+  "scripts": {
+    "build": "napi build --release",
+    "build:debug": "napi build",
+    "test": "node --test __test__"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2"
+  },
+  "engines": {
+    "node": ">= 16"
+  }
+}

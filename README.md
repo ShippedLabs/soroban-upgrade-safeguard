@@ -1567,6 +1567,8 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Named Policy Profiles](docs/named_policy_profiles.md): selecting named policy profiles from configuration and the CLI to apply pre-defined sets of compatibility rules.
 - [Configuration Resolution](docs/config-resolution.md): the precedence order for resolving a suppression config — CLI flag, environment variable, and default file discovery.
 - [Configuration Schema & Compatibility](docs/config_schema_compatibility.md): JSON Schemas for safeguard configuration and batch manifests, editor auto-completion catalog, and schema compatibility policy.
+- [Native Language Bindings](docs/bindings.md): Python (PyO3) and Node.js (napi-rs) bindings for the comparison engine — scope, installation, error/report conversion model, version compatibility, and current limitations.
+- [Impact Graph Export](docs/impact-graph.md): `--impact-graph`'s versioned node/edge graph of functions, types, storage, events, findings, and policy decisions — format, node/edge kind reference, resource limits, and an example Graphviz consumer.
 
 ## License
 

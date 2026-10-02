@@ -17,6 +17,11 @@ pub mod attestation;
 mod attestation;
 
 #[cfg(feature = "unstable")]
+pub mod binding_api;
+#[cfg(not(feature = "unstable"))]
+mod binding_api;
+
+#[cfg(feature = "unstable")]
 pub mod budget;
 #[cfg(not(feature = "unstable"))]
 mod budget;
@@ -83,6 +88,11 @@ mod empirical;
 pub mod error;
 #[cfg(not(feature = "unstable"))]
 mod error;
+
+#[cfg(feature = "unstable")]
+pub mod impact_graph;
+#[cfg(not(feature = "unstable"))]
+mod impact_graph;
 
 pub mod interface_hash;
 pub mod logging;
@@ -205,6 +215,11 @@ pub mod runtime_surface;
 mod runtime_surface;
 
 #[cfg(feature = "unstable")]
+pub mod snapshot_manifest;
+#[cfg(not(feature = "unstable"))]
+mod snapshot_manifest;
+
+#[cfg(feature = "unstable")]
 pub mod spec;
 #[cfg(not(feature = "unstable"))]
 mod spec;
@@ -285,6 +300,12 @@ pub use crate::storage_schema::{
 use std::path::Path;
 
 use anyhow::{Context, Result};
+
+/// The engine's own version, as reported by its `Cargo.toml`. Native
+/// bindings (`bindings/python`, `bindings/node`) expose this so callers can
+/// check which engine build they're actually running against; see
+/// `docs/bindings.md` for the version-compatibility policy this backs.
+pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 use crate::spec::ContractSpec;
 use crate::suppression::SuppressionConfig;

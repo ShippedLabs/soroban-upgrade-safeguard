@@ -1,0 +1,20 @@
+[package]
+name = "soroban-upgrade-safeguard-python"
+version = "0.1.0"
+edition = "2021"
+description = "Python bindings for the soroban-upgrade-safeguard comparison engine."
+license = "MIT"
+publish = false
+
+[lib]
+# The compiled extension module's import name, loaded by
+# `python/soroban_upgrade_safeguard/__init__.py` as `soroban_upgrade_safeguard._native`.
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-upgrade-safeguard = { path = "../.." }
+# PyO3 and pythonize are version-paired upstream (same X.Y release train);
+# bump them together.
+pyo3 = { version = "0.22", features = ["extension-module"] }
+pythonize = "0.22"

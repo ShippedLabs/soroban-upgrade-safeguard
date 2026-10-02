@@ -7,3 +7,10 @@
 *.swp
 *.swo
 *~
+
+# Native bindings build artifacts (bindings/python, bindings/node)
+bindings/python/*.so
+bindings/python/**/__pycache__/
+bindings/python/.pytest_cache/
+bindings/node/*.node
+bindings/node/node_modules/

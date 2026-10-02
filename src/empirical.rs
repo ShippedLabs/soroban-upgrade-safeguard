@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use stellar_xdr::curr::{ContractDataEntry, ScSpecTypeDef, ScSpecUdtUnionCaseV0, ScVal};
 
 use crate::diff::Finding;
+use crate::snapshot_manifest::SnapshotManifest;
 use crate::spec::ContractSpec;
 use serde_json::Value;
 use std::path::Path;
@@ -20,20 +21,50 @@ pub struct EmpiricalFinding {
 }
 
 /// Helper to load storage entries from a JSON file offline.
+///
+/// Discards any integrity manifest the file may carry; use
+/// [`load_empirical_snapshot`] to see it. Kept for callers that only need
+/// the entries and predate the manifest format.
 pub fn load_empirical_entries(path: &Path) -> Result<Vec<ContractDataEntry>, crate::error::Error> {
-    let content = std::fs::read_to_string(path).map_err(|e| crate::error::Error::FileAccess {
+    load_empirical_snapshot(path).map(|(entries, _manifest)| entries)
+}
+
+/// Load storage entries from a local snapshot, along with its integrity
+/// manifest when the snapshot carries one.
+///
+/// `path` may be a plain JSON file, a gzip-compressed JSON file, or a
+/// bundle directory (see [`crate::bundle`]) containing one — see
+/// [`crate::snapshot_manifest::read_snapshot_bytes`] for the exact rules.
+/// The JSON itself is either the legacy shape (a bare array of base64 XDR
+/// strings, or `{"entries": [...]}`), or that same `entries` array
+/// alongside a `manifest` object (see [`crate::snapshot_manifest`]).
+pub fn load_empirical_snapshot(
+    path: &Path,
+) -> Result<(Vec<ContractDataEntry>, Option<SnapshotManifest>), crate::error::Error> {
+    let raw = crate::snapshot_manifest::read_snapshot_bytes(path)?;
+    let content = std::str::from_utf8(&raw).map_err(|e| crate::error::Error::FileAccess {
         path: path.to_path_buf(),
-        details: format!("Failed to read empirical file: {}", e),
+        details: format!("Empirical snapshot is not valid UTF-8: {}", e),
         source: Some(Box::new(e)),
     })?;
 
     let val: Value =
-        serde_json::from_str(&content).map_err(|e| crate::error::Error::XdrDecoding {
+        serde_json::from_str(content).map_err(|e| crate::error::Error::XdrDecoding {
             entry_index: None,
             byte_offset: None,
             details: format!("Failed to parse empirical JSON: {}", e),
             source: Some(Box::new(e)),
         })?;
+
+    let manifest: Option<SnapshotManifest> = match val.get("manifest") {
+        Some(m) => Some(serde_json::from_value(m.clone()).map_err(|e| {
+            crate::error::Error::Integrity {
+                details: format!("Failed to parse snapshot manifest: {}", e),
+                source: Some(Box::new(e)),
+            }
+        })?),
+        None => None,
+    };
 
     let mut raw_strings = Vec::new();
     if let Some(arr) = val.as_array() {
@@ -80,7 +111,7 @@ pub fn load_empirical_entries(path: &Path) -> Result<Vec<ContractDataEntry>, cra
         }
     }
 
-    Ok(contract_entries)
+    Ok((contract_entries, manifest))
 }
 
 /// Helper to check if a type is an Option.

@@ -581,6 +581,34 @@ pub struct SafetyReport {
     #[cfg(not(feature = "unstable"))]
     pub(crate) empirical_findings: Vec<crate::empirical::EmpiricalFinding>,
 
+    /// Coverage and integrity status of the empirical storage snapshot's
+    /// manifest, when empirical validation loaded a local snapshot file.
+    /// `None` when empirical validation did not run, or ran against a live
+    /// RPC sample rather than a manifest-bearing local snapshot.
+    #[cfg(feature = "unstable")]
+    pub snapshot_integrity: Option<crate::snapshot_manifest::SnapshotIntegrityReport>,
+    /// Coverage and integrity status of the empirical storage snapshot's
+    /// manifest, when empirical validation loaded a local snapshot file.
+    /// `None` when empirical validation did not run, or ran against a live
+    /// RPC sample rather than a manifest-bearing local snapshot.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) snapshot_integrity: Option<crate::snapshot_manifest::SnapshotIntegrityReport>,
+
+    /// The upgrade's impact graph (functions, types, storage, events,
+    /// findings, and policy decisions, with their dependency/cascade/
+    /// reference edges), when `--impact-graph` requested it. `None`
+    /// otherwise — computing it is opt-in since it's extra work most runs
+    /// don't need.
+    #[cfg(feature = "unstable")]
+    pub impact_graph: Option<crate::impact_graph::ImpactGraph>,
+    /// The upgrade's impact graph (functions, types, storage, events,
+    /// findings, and policy decisions, with their dependency/cascade/
+    /// reference edges), when `--impact-graph` requested it. `None`
+    /// otherwise — computing it is opt-in since it's extra work most runs
+    /// don't need.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) impact_graph: Option<crate::impact_graph::ImpactGraph>,
+
     /// Configured compatibility budgets ([`crate::budget`]) that were
     /// exceeded. Always gates `is_safe`, independent of `--strict` and axis
     /// gate policy, since a budget is an explicit opt-in the team configured.
@@ -1016,6 +1044,16 @@ impl SafetyReport {
         &self.empirical_findings
     }
 
+    pub fn impact_graph(&self) -> Option<&crate::impact_graph::ImpactGraph> {
+        self.impact_graph.as_ref()
+    }
+
+    pub fn snapshot_integrity(
+        &self,
+    ) -> Option<&crate::snapshot_manifest::SnapshotIntegrityReport> {
+        self.snapshot_integrity.as_ref()
+    }
+
     pub fn budget_violations(&self) -> &[crate::budget::BudgetViolation] {
         &self.budget_violations
     }
@@ -1407,6 +1445,8 @@ impl SafetyReport {
             gated_axes,
             empirical: false,
             empirical_findings: Vec::new(),
+            snapshot_integrity: None,
+            impact_graph: None,
             budget_violations: Vec::new(),
             rpc_provenance: None,
             old_symlink: None,
@@ -1762,6 +1802,8 @@ impl SafetyReport {
             gated_axes,
             empirical: false,
             empirical_findings: Vec::new(),
+            snapshot_integrity: None,
+            impact_graph: None,
             budget_violations,
             rpc_provenance: None,
             old_symlink: None,
@@ -1927,6 +1969,8 @@ impl SafetyReport {
             call_abi: self.call_abi.clone(),
             empirical: self.empirical,
             empirical_findings: self.empirical_findings.clone(),
+            snapshot_integrity: self.snapshot_integrity.clone(),
+            impact_graph: self.impact_graph.clone(),
             budget_violations: self.budget_violations.clone(),
             migration: None,
             migrated_count: self.migrated_count,
@@ -2124,6 +2168,8 @@ mod tests {
             gated_axes: HashSet::new(),
             empirical: false,
             empirical_findings: Vec::new(),
+            snapshot_integrity: None,
+            impact_graph: None,
             budget_violations: Vec::new(),
             settings: ReportSettings::default(),
             complexity_old: None,
