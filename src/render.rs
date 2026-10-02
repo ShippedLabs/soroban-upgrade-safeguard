@@ -183,6 +183,16 @@ pub struct RenderableReport {
     pub empirical: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub empirical_findings: Vec<crate::empirical::EmpiricalFinding>,
+    /// Coverage and integrity status of the empirical storage snapshot's
+    /// manifest. `None` when empirical validation did not run, or ran
+    /// against a live RPC sample rather than a manifest-bearing local
+    /// snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_integrity: Option<crate::snapshot_manifest::SnapshotIntegrityReport>,
+    /// The upgrade's impact graph, present only when `--impact-graph`
+    /// requested it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact_graph: Option<crate::impact_graph::ImpactGraph>,
     /// Configured compatibility budgets ([`crate::budget`]) that were exceeded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub budget_violations: Vec<crate::budget::BudgetViolation>,
@@ -670,6 +680,55 @@ impl RenderableReport {
                 }
             ));
             output.push_str("Limits: Stellar RPC does not support wildcard ledger enumeration. Coverage is bounded to instance storage or offline files.\n");
+
+            if let Some(integrity) = &self.snapshot_integrity {
+                use crate::snapshot_manifest::SnapshotIntegrity;
+                output.push_str("\nSnapshot Integrity:\n");
+                let status_label = match integrity.integrity {
+                    SnapshotIntegrity::Verified => "verified".green().to_string(),
+                    SnapshotIntegrity::Unverified => "unverified (no manifest)".yellow().to_string(),
+                    SnapshotIntegrity::Failed => "failed".red().bold().to_string(),
+                };
+                output.push_str(&format!("  - Status: {}\n", status_label));
+                output.push_str(&format!(
+                    "  - Coverage: {}/{} entries verified\n",
+                    integrity.entries_verified, integrity.entries_total
+                ));
+                if let Some(cid) = &integrity.contract_id {
+                    output.push_str(&format!("  - Contract: {cid}\n"));
+                }
+                if let Some(ledger) = integrity.ledger_sequence {
+                    output.push_str(&format!("  - Ledger sequence: {ledger}\n"));
+                }
+                for issue in &integrity.issues {
+                    output.push_str(&format!("  - ⚠️  {issue}\n"));
+                }
+            }
+        }
+
+        if let Some(graph) = &self.impact_graph {
+            output.push('\n');
+            output.push_str(&"========================================\n".bold().to_string());
+            output.push_str(&"    IMPACT GRAPH\n".bold().cyan().to_string());
+            output.push_str(&"========================================\n".bold().to_string());
+            output.push_str(&format!(
+                "Nodes: {}  Edges: {}\n",
+                graph.limits.node_count, graph.limits.edge_count
+            ));
+            if graph.limits.truncated {
+                output.push_str(
+                    &format!(
+                        "⚠️  Truncated to fit limits (max {} nodes / {} edges; full graph had {} nodes / {} edges)\n",
+                        graph.limits.max_nodes,
+                        graph.limits.max_edges,
+                        graph.limits.total_nodes,
+                        graph.limits.total_edges
+                    )
+                    .yellow()
+                    .to_string(),
+                );
+            }
+            output.push_str("See --format json for the full graph (nodes, edges, and their kinds).\n");
         }
 
         if !self.budget_violations.is_empty() {
@@ -1088,6 +1147,52 @@ impl RenderableReport {
             output.push_str(&format!("- **Decoded Successfully**: {}\n", successes));
             output.push_str(&format!("- **Failed to Decode**: {}\n", failures));
             output.push_str("- **Limits**: Stellar RPC does not support wildcard ledger enumeration. Coverage is bounded to instance storage or offline files.\n\n");
+
+            if let Some(integrity) = &self.snapshot_integrity {
+                use crate::snapshot_manifest::SnapshotIntegrity;
+                output.push_str("#### Snapshot Integrity\n\n");
+                let status_label = match integrity.integrity {
+                    SnapshotIntegrity::Verified => "✅ verified",
+                    SnapshotIntegrity::Unverified => "⚠️ unverified (no manifest)",
+                    SnapshotIntegrity::Failed => "🔴 failed",
+                };
+                output.push_str(&format!("- **Status**: {}\n", status_label));
+                output.push_str(&format!(
+                    "- **Coverage**: {}/{} entries verified\n",
+                    integrity.entries_verified, integrity.entries_total
+                ));
+                if let Some(cid) = &integrity.contract_id {
+                    output.push_str(&format!("- **Contract**: `{cid}`\n"));
+                }
+                if let Some(ledger) = integrity.ledger_sequence {
+                    output.push_str(&format!("- **Ledger sequence**: {ledger}\n"));
+                }
+                if !integrity.issues.is_empty() {
+                    output.push_str("- **Issues**:\n");
+                    for issue in &integrity.issues {
+                        output.push_str(&format!("  - {issue}\n"));
+                    }
+                }
+                output.push('\n');
+            }
+        }
+
+        if let Some(graph) = &self.impact_graph {
+            output.push_str("### 🕸️ Impact Graph\n\n");
+            output.push_str(&format!(
+                "- **Nodes**: {}\n- **Edges**: {}\n",
+                graph.limits.node_count, graph.limits.edge_count
+            ));
+            if graph.limits.truncated {
+                output.push_str(&format!(
+                    "- **Truncated**: yes (max {} nodes / {} edges; full graph had {} nodes / {} edges)\n",
+                    graph.limits.max_nodes,
+                    graph.limits.max_edges,
+                    graph.limits.total_nodes,
+                    graph.limits.total_edges
+                ));
+            }
+            output.push_str("- See `--format json` for the full graph (nodes, edges, and their kinds).\n\n");
         }
 
         if !self.budget_violations.is_empty() {

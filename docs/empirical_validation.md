@@ -64,6 +64,85 @@ Or an object containing an `entries` array:
 }
 ```
 
+A snapshot in either shape may also carry a `manifest` object binding the
+entries to the contract, code, network, and ledger they were captured from —
+see [Snapshot Integrity Manifests](#snapshot-integrity-manifests) below.
+
+The file may be a plain JSON file, a gzip-compressed JSON file (`.json.gz`,
+or any file whose contents start with the gzip magic bytes), or a path to a
+bundle directory (see the `bundle` module's manifest format) whose
+integrity is verified and which contains a `snapshot.json` or
+`snapshot.json.gz` member holding the snapshot itself.
+
+---
+
+## Snapshot Integrity Manifests
+
+A flat snapshot file carries no proof of where it came from: nothing ties
+its entries to a specific contract, code hash, network, or ledger, and
+nothing would detect if entries were altered, reordered, duplicated, or
+mixed in from a different ledger. An optional, versioned `manifest` object
+closes that gap:
+
+```json
+{
+  "manifest": {
+    "version": 1,
+    "contract_id": "CA...",
+    "code_hash": "9f86d0...",
+    "network": "Test SDF Network ; September 2015",
+    "ledger_sequence": 123456,
+    "source": "rpc-sample",
+    "captured_at": "2026-01-01T00:00:00Z",
+    "generator": "soroban-upgrade-safeguard/0.1.0",
+    "entry_count": 2,
+    "entries": [
+      {
+        "index": 0,
+        "durability": "persistent",
+        "instance": true,
+        "key_sha256": "...",
+        "sha256": "..."
+      },
+      {
+        "index": 1,
+        "durability": "persistent",
+        "instance": false,
+        "key_sha256": "...",
+        "sha256": "..."
+      }
+    ],
+    "manifest_sha256": "..."
+  },
+  "entries": ["<base64 XDR>", "<base64 XDR>"]
+}
+```
+
+Before empirical type-replay runs, the tool:
+- recomputes the manifest's own self-hash (`manifest_sha256`, computed over
+  the manifest with that field blanked) to detect tampering with the
+  manifest itself;
+- recomputes each entry's `key_sha256`/`sha256` and confirms it matches the
+  manifest's declared digest at that index, that indices are contiguous
+  and unique (no reordering, gaps, or duplication), and that the entry's
+  actual durability and contract match what the manifest declares;
+- cross-checks the manifest's `contract_id`, `code_hash`, `network`, and
+  `ledger_sequence` against whatever provenance the run already
+  established (e.g. an RPC-verified code hash, or a `--contract-id`
+  argument).
+
+A snapshot with **no** `manifest` still loads — this is unchanged, so
+snapshots captured before this feature existed keep working — but the
+report records its coverage as **unverified** rather than **verified**. A
+snapshot **with** a manifest that fails any of the checks above is
+**rejected outright** before type-replay runs at all, since nothing in a
+tampered or mixed-ledger snapshot can be trusted to replay meaningfully.
+
+The resulting status (`verified` / `unverified` / `failed`), the
+verified/total entry counts, and any specific issues found are included in
+every report (`snapshot_integrity` in the JSON output) whenever
+`--empirical-file` loaded a local snapshot.
+
 ---
 
 ## Guarantees and Limits

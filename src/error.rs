@@ -170,6 +170,29 @@ pub enum Error {
 }
 
 impl Error {
+    /// Build an [`InvalidInput`](Error::InvalidInput) error.
+    ///
+    /// `#[non_exhaustive]` blocks struct-literal construction of any
+    /// variant from outside this crate (regardless of field visibility),
+    /// so callers in other crates — native-language bindings
+    /// (`bindings/python`, `bindings/node`) in particular — go through
+    /// this constructor rather than `Error::InvalidInput { .. }`.
+    pub fn invalid_input(details: impl Into<String>) -> Self {
+        Error::InvalidInput {
+            details: details.into(),
+        }
+    }
+
+    /// Build an [`Integrity`](Error::Integrity) error with no further
+    /// source error attached. See [`Self::invalid_input`] for why this
+    /// constructor exists.
+    pub fn integrity(details: impl Into<String>) -> Self {
+        Error::Integrity {
+            details: details.into(),
+            source: None,
+        }
+    }
+
     /// Return a stable [`ErrorKind`] identifier for this error.
     ///
     /// Unlike matching on the enum variant directly, `kind()` is guaranteed to

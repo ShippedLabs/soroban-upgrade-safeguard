@@ -1,3 +1,12 @@
+[workspace]
+members = ["bindings/python", "bindings/node"]
+# The root package below is the workspace's default build/run target, so
+# `cargo build`/`cargo test` here behave exactly as before this workspace
+# existed; the native-language bindings are opt-in via
+# `cargo build -p soroban-upgrade-safeguard-python` (or `-node`), or built
+# through their own packaging tool (maturin, napi-rs's CLI).
+default-members = ["."]
+
 [package]
 name = "soroban-upgrade-safeguard"
 version = "0.1.0"
@@ -30,6 +39,8 @@ colored = "2.1"
 hex = "0.4"
 sha2 = "0.10"
 ring = "0.17"
+# Gzip decompression for compressed empirical storage snapshots.
+flate2 = "1.0"
 base64 = "0.22"
 ureq = { version = "2.9", features = ["json"] }
 # JSON Schema generation for `print-schema`.

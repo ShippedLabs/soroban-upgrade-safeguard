@@ -12,6 +12,7 @@
 //! [`crate::render::RenderableReport`] (or a type it embeds) shows up here
 //! automatically.
 
+use crate::impact_graph::ImpactGraph;
 use crate::render::RenderableReport;
 
 /// Build the JSON Schema document that describes every report shape this
@@ -29,6 +30,20 @@ pub fn report_schema() -> schemars::schema::RootSchema {
 /// separate from any I/O so it can be unit-tested.
 pub fn report_schema_value() -> serde_json::Value {
     let schema = report_schema();
+    serde_json::to_value(&schema).expect("JSON Schema serialization is infallible")
+}
+
+/// Build the JSON Schema document for the `impact_graph` field's shape
+/// (see `crate::impact_graph`), standalone rather than as a `RenderableReport`
+/// subschema — so a consumer that only wants to validate `--impact-graph-file`
+/// output doesn't need to pull in the whole report schema.
+pub fn impact_graph_schema() -> schemars::schema::RootSchema {
+    schemars::schema_for!(ImpactGraph)
+}
+
+/// Serialize [`impact_graph_schema`] to a `serde_json::Value`.
+pub fn impact_graph_schema_value() -> serde_json::Value {
+    let schema = impact_graph_schema();
     serde_json::to_value(&schema).expect("JSON Schema serialization is infallible")
 }
 

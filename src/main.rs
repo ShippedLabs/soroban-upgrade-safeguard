@@ -641,6 +641,14 @@ struct Args {
     #[arg(long, value_name = "EMPIRICAL_FILE")]
     empirical_file: Option<PathBuf>,
 
+    /// Export the upgrade's impact graph (functions, types, storage,
+    /// events, findings, and policy decisions, with their dependency/
+    /// cascade/reference edges) as part of the report. See
+    /// docs/impact-graph.md. Adds `impact_graph` to `--format json`
+    /// output; summarized only (node/edge counts) in text/markdown.
+    #[arg(long)]
+    impact_graph: bool,
+
     /// Maximum bytes accepted for any `https://` input download.
     #[arg(long, value_name = "BYTES", default_value_t = remote::DEFAULT_MAX_BYTES)]
     remote_max_bytes: usize,
@@ -1177,6 +1185,7 @@ enum SchemaTarget {
     Report,
     Config,
     Manifest,
+    ImpactGraph,
 }
 
 /// Output format for schema or metadata.
@@ -1202,7 +1211,7 @@ struct PrintSchemaArgs {
     #[arg(long)]
     compact: bool,
 
-    /// Target schema to print: report (default), config, or manifest.
+    /// Target schema to print: report (default), config, manifest, or impact-graph.
     #[arg(long, value_enum, default_value_t = SchemaTarget::Report)]
     target: SchemaTarget,
 
@@ -1807,6 +1816,28 @@ fn run_print_schema(args: &PrintSchemaArgs) -> Result<()> {
             handle
                 .write_all(md.as_bytes())
                 .context("writing manifest markdown to stdout")?;
+        }
+        (SchemaTarget::ImpactGraph, PrintSchemaFormat::Markdown) => {
+            let md = "# Impact Graph JSON Schema\n\nRun `print-schema --target impact-graph` without `--markdown` to print the Draft-07 JSON Schema. See docs/impact-graph.md for the node/edge kind reference.\n";
+            handle
+                .write_all(md.as_bytes())
+                .context("writing markdown schema to stdout")?;
+        }
+        (SchemaTarget::ImpactGraph, _) => {
+            let value = report_schema::impact_graph_schema_value();
+            if args.compact {
+                let bytes = serde_json::to_vec(&value)
+                    .context("serializing impact graph schema to JSON")?;
+                handle
+                    .write_all(&bytes)
+                    .context("writing JSON schema to stdout")?;
+            } else {
+                let pretty = serde_json::to_string_pretty(&value)
+                    .context("serializing impact graph schema to JSON")?;
+                handle
+                    .write_all(pretty.as_bytes())
+                    .context("writing JSON schema to stdout")?;
+            }
         }
     }
     handle.write_all(b"\n").ok();
@@ -3349,6 +3380,7 @@ fn compare_batch_pair(
                             no_timestamp: settings.no_timestamp.value,
                             empirical: args.empirical || args.empirical_file.is_some(),
                             empirical_file: args.empirical_file.as_deref(),
+                            impact_graph: args.impact_graph,
                             contract_id: None,
                             rpc_url: None,
                             rpc_headers: &args.rpc_headers,
@@ -4229,6 +4261,7 @@ fn run_single(
                     no_timestamp: args.no_timestamp,
                     empirical: args.empirical || args.empirical_file.is_some(),
                     empirical_file: args.empirical_file.as_deref(),
+                    impact_graph: args.impact_graph,
                     contract_id: old_source,
                     rpc_url: args.rpc_url.as_deref(),
                     rpc_headers: &args.rpc_headers,
@@ -4991,6 +5024,7 @@ struct ContractComparison<'a> {
     no_timestamp: bool,
     empirical: bool,
     empirical_file: Option<&'a Path>,
+    impact_graph: bool,
     contract_id: Option<&'a str>,
     rpc_url: Option<&'a str>,
     rpc_headers: &'a [String],
@@ -5054,6 +5088,7 @@ fn compare_contracts(
         no_timestamp,
         empirical,
         empirical_file,
+        impact_graph,
         contract_id,
         rpc_url,
         rpc_headers,
@@ -5126,6 +5161,27 @@ fn compare_contracts(
 
     report.no_timestamp = *no_timestamp;
 
+    if *impact_graph {
+        let old_build = soroban_upgrade_safeguard::impact_graph::BuildIdentity::new(
+            Some(loader::sha256_hex(old_bytes)),
+            Some(old_spec.interface_hash().to_hex()),
+        );
+        let new_build = soroban_upgrade_safeguard::impact_graph::BuildIdentity::new(
+            Some(loader::sha256_hex(new_bytes)),
+            Some(new_spec.interface_hash().to_hex()),
+        );
+        report.impact_graph = Some(soroban_upgrade_safeguard::impact_graph::build_impact_graph(
+            &old_spec,
+            &new_spec,
+            &diff_report.findings,
+            suppressions,
+            None,
+            old_build,
+            new_build,
+            &soroban_upgrade_safeguard::impact_graph::GraphLimits::default(),
+        ));
+    }
+
     // WASM complexity profiling — runs when a budget is configured.
     if let Some(budget) = complexity_budget {
         report.apply_complexity(old_bytes, new_bytes, budget);
@@ -5133,6 +5189,9 @@ fn compare_contracts(
 
     let mut empirical_findings = Vec::new();
     let mut is_empirical = false;
+    let mut snapshot_integrity: Option<
+        soroban_upgrade_safeguard::snapshot_manifest::SnapshotIntegrityReport,
+    > = None;
 
     if *empirical {
         is_empirical = true;
@@ -5143,12 +5202,47 @@ fn compare_contracts(
                 "📖 Loading empirical storage entries from: {}",
                 file_path.display()
             ));
-            match soroban_upgrade_safeguard::empirical::load_empirical_entries(file_path) {
-                Ok(loaded) => {
+            match soroban_upgrade_safeguard::empirical::load_empirical_snapshot(file_path) {
+                Ok((loaded, manifest)) => {
                     progress(format!(
                         "✅ Loaded {} storage entries from file",
                         loaded.len()
                     ));
+
+                    let expected = soroban_upgrade_safeguard::snapshot_manifest::ExpectedContext {
+                        contract_id: contract_id.map(|s| s.to_string()),
+                        code_hash: report.rpc_provenance.as_ref().map(|p| p.code_hash.clone()),
+                        network: report.rpc_provenance.as_ref().map(|p| p.network.clone()),
+                        ledger_sequence: report.rpc_provenance.as_ref().map(|p| p.ledger_sequence),
+                    };
+                    let integrity_report = soroban_upgrade_safeguard::snapshot_manifest::verify_snapshot(
+                        manifest.as_ref(),
+                        &loaded,
+                        &expected,
+                    )
+                    .map_err(|e| anyhow::anyhow!("Empirical validation error: {}", e))?;
+
+                    if integrity_report.integrity
+                        == soroban_upgrade_safeguard::snapshot_manifest::SnapshotIntegrity::Failed
+                    {
+                        progress("❌ Snapshot integrity manifest failed verification:".to_string());
+                        for issue in &integrity_report.issues {
+                            progress(format!("   - {issue}"));
+                        }
+                        return Err(anyhow::anyhow!(
+                            "Empirical validation error: snapshot integrity manifest rejected ({} issue(s)): {}",
+                            integrity_report.issues.len(),
+                            integrity_report.issues.join("; ")
+                        ));
+                    }
+
+                    if manifest.is_some() {
+                        progress("✅ Snapshot integrity manifest verified".to_string());
+                    } else {
+                        progress("⚠️  Snapshot has no integrity manifest; coverage is unverified".to_string());
+                    }
+
+                    snapshot_integrity = Some(integrity_report);
                     entries = loaded;
                 }
                 Err(e) => {
@@ -5218,6 +5312,7 @@ fn compare_contracts(
 
     report.empirical = is_empirical;
     report.empirical_findings = empirical_findings;
+    report.snapshot_integrity = snapshot_integrity;
 
     if report.empirical_findings.iter().any(|ef| !ef.is_success) {
         report.is_safe = false;
