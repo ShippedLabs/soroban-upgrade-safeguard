@@ -87,6 +87,7 @@ This folder contains comprehensive guides for using Soroban Upgrade Safeguard. S
 - [**unstable_api_guide.md**](unstable_api_guide.md) — Using unstable APIs and understanding stability guarantees
 - [**bindings.md**](bindings.md) — Python (PyO3) and Node.js (napi-rs) native bindings: scope, installation, error/report conversion model, version compatibility, and current limitations
 - [**impact-graph.md**](impact-graph.md) — `--impact-graph`'s versioned node/edge export of functions, types, storage, events, findings, and policy decisions: format, node/edge kind reference, resource limits, and an example Graphviz consumer
+- [**policy-bundles.md**](policy-bundles.md) — `--policy-bundle`'s centrally governed, signed compatibility policy: trust model, verification, precedence rules, and provenance
 
 ## Version History and Compatibility
 

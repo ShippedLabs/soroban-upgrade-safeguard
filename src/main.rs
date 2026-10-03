@@ -460,6 +460,25 @@ struct Args {
     #[arg(long, value_name = "CONFIG")]
     validate_config: Option<PathBuf>,
 
+    /// Apply a signed, centrally governed policy bundle: a local file path,
+    /// or an `https://host/path#sha256=<hex>` reference (fetched and cached
+    /// the same way `https://` WASM inputs are, via --remote-*). Opt-in:
+    /// without this flag, nothing changes. Requires --trusted-bundle-key.
+    /// Rejected entirely (before any WASM is loaded) if verification fails
+    /// for any reason — wrong payload type, non-canonical payload,
+    /// unsupported version, no trusted signature, or an expired bundle.
+    /// See docs/policy-bundles.md. Not yet supported in batch mode.
+    #[arg(long, value_name = "PATH_OR_URL")]
+    policy_bundle: Option<String>,
+
+    /// Trusted Ed25519 key for verifying a --policy-bundle, in ID=PATH
+    /// form (PATH contains a raw 32-byte public key). Repeatable; a bundle
+    /// verifies if any one signature matches a key given here. The same
+    /// key material used for --trusted-key (report attestations) can be
+    /// reused here, since both use the same Ed25519/DSSE mechanism.
+    #[arg(long = "trusted-bundle-key", value_name = "ID=PATH")]
+    trusted_bundle_key: Vec<String>,
+
     /// Print the fully resolved configuration (CLI flags, environment
     /// variables, and the suppression config file) with the origin of every
     /// value, then exit without analyzing any WASM inputs. Secrets (RPC
@@ -2671,6 +2690,11 @@ fn main() -> Result<()> {
     if args.interface_lockfile.is_some() && is_batch {
         anyhow::bail!("Cannot use --interface-lockfile with batch mode");
     }
+    if args.policy_bundle.is_some() && is_batch {
+        anyhow::bail!(
+            "--policy-bundle is not yet supported in batch mode (--manifest or --old-dir/--new-dir)"
+        );
+    }
     if args.interface_lockfile.is_some() && args.contract_id.is_some() {
         anyhow::bail!("Cannot use --interface-lockfile with --contract-id; the lockfile supplies the baseline");
     }
@@ -3409,6 +3433,7 @@ fn compare_batch_pair(
                             rpc_headers: &args.rpc_headers,
                             rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
                             allow_http_local: args.allow_http_local,
+                            policy_bundle: None,
                             lineage_store: None,
                             contract: Some(contract_name.as_str()),
                             complexity_budget: None,
@@ -4085,6 +4110,29 @@ fn render_batch_summary(
     Ok(())
 }
 
+/// Load a `--policy-bundle` source's raw bytes: a local file path, or an
+/// `https://...#sha256=<hex>` reference, fetched the same way `https://`
+/// WASM inputs are — reusing `remote::fetch_verified`, including its
+/// digest verification and content-addressed offline cache. Returns the
+/// bytes and a label for provenance (the path as given, or the redacted
+/// final URL after following any redirect).
+fn load_policy_bundle_bytes(source: &str, args: &Args) -> Result<(Vec<u8>, String)> {
+    match RemoteRef::parse(source).map_err(|e| anyhow::anyhow!(e))? {
+        Some(remote_ref) => {
+            let config = remote_fetch_config(args);
+            let fetched = remote::fetch_verified(&remote_ref, &config)
+                .map_err(|e| anyhow::anyhow!(e))
+                .with_context(|| format!("Failed to fetch policy bundle '{source}'."))?;
+            Ok((fetched.bytes, fetched.final_url))
+        }
+        None => {
+            let bytes = std::fs::read(source)
+                .with_context(|| format!("Failed to read policy bundle '{source}'."))?;
+            Ok((bytes, source.to_string()))
+        }
+    }
+}
+
 fn run_single(
     args: &Args,
     outputs: &[OutputSpec],
@@ -4163,6 +4211,51 @@ fn run_single(
         .file_stem()
         .and_then(|stem| stem.to_str())
         .map(String::from);
+
+    // --policy-bundle: opt-in, verified, and applied *before* any WASM is
+    // loaded (see docs/policy-bundles.md). `--manifest`/`--old-dir` batch
+    // mode already rejected this combination earlier in `main()`, so by
+    // construction nothing below needs to special-case batch mode.
+    let mut owned_suppressions: Option<SuppressionConfig> = None;
+    let mut policy_bundle_provenance: Option<
+        soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
+    > = None;
+    if let Some(bundle_source) = &args.policy_bundle {
+        let (bytes, source_label) = load_policy_bundle_bytes(bundle_source, args)?;
+        let mut trusted = std::collections::BTreeMap::new();
+        for item in &args.trusted_bundle_key {
+            let (id, path) = item.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
+            })?;
+            trusted.insert(
+                id.to_string(),
+                std::fs::read(path)
+                    .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
+            );
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let (bundle, provenance) =
+            soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
+                &bytes,
+                &trusted,
+                now,
+                &source_label,
+            )
+            .map_err(|e| anyhow::anyhow!(e))?;
+        progress(format!(
+            "🏛️  Policy bundle '{}' verified (signer(s): {})",
+            provenance.bundle_id,
+            provenance.signer_identities.join(", ")
+        ));
+        let mut merged = suppressions.clone();
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(&mut merged, &bundle);
+        owned_suppressions = Some(merged);
+        policy_bundle_provenance = Some(provenance);
+    }
+    let suppressions: &SuppressionConfig = owned_suppressions.as_ref().unwrap_or(suppressions);
 
     let run_comparison = |progress: &dyn Fn(String)| -> Result<bool> {
         progress("🔍 Soroban Upgrade Safeguard".to_string());
@@ -4309,6 +4402,7 @@ fn run_single(
                     rpc_headers: &args.rpc_headers,
                     rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
                     allow_http_local: args.allow_http_local,
+                    policy_bundle: policy_bundle_provenance.as_ref(),
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,
@@ -5073,6 +5167,7 @@ struct ContractComparison<'a> {
     rpc_headers: &'a [String],
     rpc_allow_id_mismatch: bool,
     allow_http_local: bool,
+    policy_bundle: Option<&'a soroban_upgrade_safeguard::policy_bundle::BundleProvenance>,
     lineage_store: Option<&'a soroban_upgrade_safeguard::lineage::LineageStore>,
     /// The contract's name, used to scope migrations declared with
     /// `contracts = [..]` in a config shared across several contracts.
@@ -5138,6 +5233,7 @@ fn compare_contracts(
         rpc_headers,
         rpc_allow_id_mismatch,
         allow_http_local,
+        policy_bundle,
         lineage_store,
         contract,
         complexity_budget,
@@ -5358,6 +5454,7 @@ fn compare_contracts(
     report.empirical = is_empirical;
     report.empirical_findings = empirical_findings;
     report.snapshot_integrity = snapshot_integrity;
+    report.policy_bundle = policy_bundle.cloned();
 
     if report.empirical_findings.iter().any(|ef| !ef.is_success) {
         report.is_safe = false;

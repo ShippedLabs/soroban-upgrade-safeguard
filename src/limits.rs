@@ -22,7 +22,7 @@
 
 use std::fmt;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use stellar_xdr::curr::Limits;
 
 /// Default maximum XDR recursion depth for a single decoded entry.
@@ -192,7 +192,7 @@ impl LimitError {
 /// Every field is optional; an omitted field keeps the compiled-in default. This
 /// mirrors [`crate::suppression::SuppressionConfig`] so a repo can commit both a
 /// suppression policy and a resource policy in the same file.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LimitsConfig {
     /// Overrides [`ResourcePolicy::max_xdr_depth`].
