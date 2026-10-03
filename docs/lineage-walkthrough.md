@@ -189,6 +189,18 @@ Use `--max-live-versions` to limit how far back validation looks, and
 is explicit, and the cap removes old versions automatically as new ones are
 recorded.
 
+**`--max-live-versions 0` is a defined outcome, not a silent no-op: it
+validates the candidate against *zero* historical versions, and the run
+passes vacuously.** Nothing in the store is actually compared against the
+candidate, so a pass here means "nothing was checked," not "everything
+checked was compatible." This is indistinguishable from a healthy run by
+`is_safe`/exit code alone — check the report's `lineage_versions_checked`
+field (JSON output), or the "Lineage: N historical version(s) checked"
+line text/Markdown output print, to tell the two apart. A cap of `0` is
+rarely what you want; it exists because capping to *some* small number is
+a deliberate, common policy (see above), and rejecting `0` specifically
+would be an arbitrary special case rather than a real safety boundary.
+
 ## A CI recipe
 
 A typical pipeline validates on every pull request and records on release:
@@ -219,8 +231,10 @@ that depends on the PR check.
 - **Without `--lineage-store`, the lineage flags do nothing.**
   `--record-version`, `--retire-version`, and `--max-live-versions` are
   accepted without it, but they have no effect and produce no warning.
-- **Retiring an unknown ID has no effect.** If you mistype an ID in
-  `--retire-version`, the run does not fail, and nothing is retired.
+- **Retiring an unknown ID fails the run.** `--retire-version <ID>` only
+  succeeds when `<ID>` matches an existing record; a mistyped ID is
+  rejected with an error naming the ID and listing the store's known
+  version IDs, rather than silently doing nothing.
 - **The store is always written as JSON.** A store loaded from a `.toml`
   file is saved back to the same path in JSON format. It still loads
   correctly on the next run, but the TOML formatting is lost.

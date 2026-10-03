@@ -193,6 +193,14 @@ pub struct RenderableReport {
     /// requested it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub impact_graph: Option<crate::impact_graph::ImpactGraph>,
+    /// How many live historical versions lineage validation actually
+    /// checked the candidate against, present only when
+    /// `--lineage-store` was given. `Some(0)` means the candidate
+    /// passed *vacuously* (nothing in history was compared against it,
+    /// typically `--max-live-versions 0`), not that history was checked
+    /// and found compatible — see `docs/lineage-walkthrough.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_versions_checked: Option<usize>,
     /// Configured compatibility budgets ([`crate::budget`]) that were exceeded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub budget_violations: Vec<crate::budget::BudgetViolation>,
@@ -731,6 +739,23 @@ impl RenderableReport {
             output.push_str("See --format json for the full graph (nodes, edges, and their kinds).\n");
         }
 
+        if let Some(checked) = self.lineage_versions_checked {
+            output.push('\n');
+            if checked == 0 {
+                output.push_str(
+                    &"⚠️  Lineage: 0 historical versions checked — the candidate passed \
+                       vacuously; nothing in history was actually compared against it \
+                       (see --max-live-versions).\n"
+                        .yellow()
+                        .to_string(),
+                );
+            } else {
+                output.push_str(&format!(
+                    "Lineage: {checked} historical version(s) checked.\n"
+                ));
+            }
+        }
+
         if !self.budget_violations.is_empty() {
             output.push('\n');
             output.push_str(
@@ -1193,6 +1218,20 @@ impl RenderableReport {
                 ));
             }
             output.push_str("- See `--format json` for the full graph (nodes, edges, and their kinds).\n\n");
+        }
+
+        if let Some(checked) = self.lineage_versions_checked {
+            if checked == 0 {
+                output.push_str(
+                    "### ⚠️ Lineage\n\n0 historical versions checked — the candidate passed \
+                     vacuously; nothing in history was actually compared against it (see \
+                     `--max-live-versions`).\n\n",
+                );
+            } else {
+                output.push_str(&format!(
+                    "### Lineage\n\n{checked} historical version(s) checked.\n\n"
+                ));
+            }
         }
 
         if !self.budget_violations.is_empty() {
