@@ -78,8 +78,10 @@ pub struct Args {
     #[arg(long, value_name = "NEW_DIR", requires = "old_dir")]
     pub new_dir: Option<PathBuf>,
 
-    /// Allow HTTP connections for RPC when the host is localhost/127.0.0.1.
-    /// Without this flag only HTTPS URLs are accepted.
+    /// Allow HTTP connections for RPC when the host is a loopback address
+    /// (`localhost`, `127.0.0.1`, or `::1`). Without this flag, and for
+    /// any non-loopback host regardless of this flag, only HTTPS URLs
+    /// are accepted.
     #[arg(long)]
     pub allow_http_local: bool,
 

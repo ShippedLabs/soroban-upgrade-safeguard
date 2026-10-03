@@ -343,6 +343,68 @@ fn split_host_port<'a>(
     }
 }
 
+/// Whether `host` is a loopback address: the literal hostname
+/// `localhost`, `127.0.0.1`, or `::1` (bracketed, as `split_host_port`
+/// returns it for an IPv6 literal, or not). No DNS resolution is
+/// performed — matching against these literals rather than resolving
+/// the host and checking the resulting IP avoids trusting a resolver an
+/// attacker might control (DNS rebinding) to decide whether an HTTP
+/// endpoint counts as "local".
+fn is_loopback_rpc_host(host: &str) -> bool {
+    let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+}
+
+/// Enforce the CLI's HTTPS-only policy for a user-supplied `--rpc-url`:
+/// `https://` is always accepted; `http://` is accepted only when
+/// `allow_http_local` is `true` *and* the host is loopback (see
+/// [`is_loopback_rpc_host`]).
+///
+/// Deliberately separate from [`RpcClientConfig::new`]/[`normalize_url`]:
+/// those also build configs against local mock servers in this crate's
+/// own test suite (see `tests/rpc_fetch.rs` and its siblings), which has
+/// nothing to do with the CLI's `--allow-http-local` flag and must keep
+/// working unconditionally regardless of it. Only the CLI's `--rpc-url`
+/// entry point (`main.rs`'s `rpc_config`) calls this.
+pub fn enforce_rpc_url_scheme_policy(url: &str, allow_http_local: bool) -> Result<(), Error> {
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| Error::RpcAuthConfig {
+        details: format!("RPC URL '{}' is missing a scheme (expected http:// or https://)", redact_url(url)),
+    })?;
+    if scheme.eq_ignore_ascii_case("https") {
+        return Ok(());
+    }
+    if !scheme.eq_ignore_ascii_case("http") {
+        return Err(Error::RpcAuthConfig {
+            details: format!("RPC URL '{}' must use http:// or https://", redact_url(url)),
+        });
+    }
+
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let host_port = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    let (host, _port) = split_host_port(host_port, url)?;
+
+    if allow_http_local && is_loopback_rpc_host(host) {
+        return Ok(());
+    }
+
+    Err(Error::RpcAuthConfig {
+        details: if allow_http_local {
+            format!(
+                "RPC URL '{}' uses plain HTTP but is not a loopback address (localhost/127.0.0.1/::1); \
+                 --allow-http-local only permits HTTP for local endpoints",
+                redact_url(url)
+            )
+        } else {
+            format!(
+                "RPC URL '{}' uses plain HTTP; only HTTPS is accepted unless --allow-http-local is set \
+                 and the host is a loopback address (localhost/127.0.0.1/::1)",
+                redact_url(url)
+            )
+        },
+    })
+}
+
 pub fn redact_url(url: &str) -> String {
     let without_query = url.split(['?', '#']).next().unwrap_or(url);
     if let Some(scheme_end) = without_query.find("://") {

@@ -519,8 +519,12 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ColorMode::Auto)]
     color: ColorMode,
 
-    /// Allow HTTP connections for RPC when the host is localhost/127.0.0.1.
-    /// Without this flag only HTTPS URLs are accepted.
+    /// Allow HTTP connections for RPC when the host is a loopback address
+    /// (`localhost`, `127.0.0.1`, or `::1`). Without this flag, and for
+    /// any non-loopback host regardless of this flag, only HTTPS URLs
+    /// are accepted. Only applies to the main comparison's `--rpc-url`;
+    /// the `extract`/`lint`/`init`/`preflight` subcommands always
+    /// require HTTPS for their own `--rpc-url`.
     #[arg(long)]
     allow_http_local: bool,
 
@@ -654,6 +658,12 @@ struct Args {
     remote_max_bytes: usize,
 
     /// Timeout, in seconds, for any single `https://` input request.
+    ///
+    /// A value of 0 is a defined failure, not an unbounded wait: the
+    /// deadline is computed from when the request starts, so a
+    /// zero-second budget is already exhausted before the connection
+    /// can complete, and every request fails immediately with a timeout
+    /// error. There is no "0 means unlimited" special case.
     #[arg(long, value_name = "SECONDS", default_value_t = remote::DEFAULT_TIMEOUT_SECS)]
     remote_timeout_secs: u64,
 
@@ -1242,7 +1252,14 @@ struct PrintSchemaArgs {
     markdown: bool,
 }
 
-fn rpc_config(url: &str, headers: &[String]) -> Result<RpcClientConfig> {
+/// `allow_http_local` is only ever `true` at call sites built from the
+/// top-level `Args` (the main comparison flow), which is the only place
+/// `--allow-http-local` is actually exposed as a flag; `extract`,
+/// `lint`, `init`, and `preflight` each have their own `Args`-like
+/// struct without it, so they pass `false` and always require HTTPS.
+fn rpc_config(url: &str, headers: &[String], allow_http_local: bool) -> Result<RpcClientConfig> {
+    soroban_upgrade_safeguard::rpc::enforce_rpc_url_scheme_policy(url, allow_http_local)
+        .map_err(|e| anyhow::anyhow!(e))?;
     let mut config = RpcClientConfig::new(url.to_string()).map_err(|e| anyhow::anyhow!(e))?;
     for spec in headers {
         let (name, env_var) = spec.split_once('=').ok_or_else(|| {
@@ -1274,7 +1291,7 @@ fn run_extract(args: &ExtractArgs) -> Result<()> {
                 .expect("clap requires --rpc-url alongside --contract-id");
             loader::fetch_wasm_from_rpc_with_config(
                 contract_id,
-                &rpc_config(rpc_url, &args.rpc_headers)?,
+                &rpc_config(rpc_url, &args.rpc_headers, false)?,
             )?
         }
         (Some(_), Some(_)) => anyhow::bail!(
@@ -1354,7 +1371,7 @@ fn run_preflight(args: &PreflightArgs) -> Result<()> {
         colored::control::set_override(false);
     }
 
-    let config = rpc_config(&args.rpc_url, &args.rpc_headers)?;
+    let config = rpc_config(&args.rpc_url, &args.rpc_headers, false)?;
     let report =
         preflight::run_preflight_with_timeout(&config, Duration::from_secs(args.timeout_secs));
 
@@ -1969,7 +1986,7 @@ fn run_lint(args: &LintArgs) -> Result<()> {
                 .expect("clap requires --rpc-url alongside --contract-id");
             loader::fetch_wasm_from_rpc_with_config(
                 contract_id,
-                &rpc_config(rpc_url, &args.rpc_headers)?,
+                &rpc_config(rpc_url, &args.rpc_headers, false)?,
             )?
         }
         (Some(_), Some(_)) => anyhow::bail!(
@@ -2417,7 +2434,7 @@ fn run_init(args: &InitArgs) -> Result<()> {
             (
                 loader::fetch_wasm_from_rpc_with_config(
                     contract_id,
-                    &rpc_config(rpc_url, &args.rpc_headers)?,
+                    &rpc_config(rpc_url, &args.rpc_headers, false)?,
                 ),
                 loader::load_wasm(new),
             )
@@ -3391,6 +3408,7 @@ fn compare_batch_pair(
                             rpc_url: None,
                             rpc_headers: &args.rpc_headers,
                             rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
+                            allow_http_local: args.allow_http_local,
                             lineage_store: None,
                             contract: Some(contract_name.as_str()),
                             complexity_budget: None,
@@ -4231,7 +4249,7 @@ fn run_single(
                 let rpc_url = args.rpc_url.as_ref().unwrap();
                 loader::fetch_wasm_from_rpc_with_config(
                     contract_id,
-                    &rpc_config(rpc_url, &args.rpc_headers)?
+                    &rpc_config(rpc_url, &args.rpc_headers, args.allow_http_local)?
                         .with_id_mismatch_allowed(args.rpc_allow_id_mismatch),
                 )?
             } else {
@@ -4272,6 +4290,7 @@ fn run_single(
                     rpc_url: args.rpc_url.as_deref(),
                     rpc_headers: &args.rpc_headers,
                     rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
+                    allow_http_local: args.allow_http_local,
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,
@@ -5035,6 +5054,7 @@ struct ContractComparison<'a> {
     rpc_url: Option<&'a str>,
     rpc_headers: &'a [String],
     rpc_allow_id_mismatch: bool,
+    allow_http_local: bool,
     lineage_store: Option<&'a soroban_upgrade_safeguard::lineage::LineageStore>,
     /// The contract's name, used to scope migrations declared with
     /// `contracts = [..]` in a config shared across several contracts.
@@ -5099,6 +5119,7 @@ fn compare_contracts(
         rpc_url,
         rpc_headers,
         rpc_allow_id_mismatch,
+        allow_http_local,
         lineage_store,
         contract,
         complexity_budget,
@@ -5258,7 +5279,7 @@ fn compare_contracts(
             }
         } else if let (Some(cid), Some(rpc)) = (contract_id, rpc_url) {
             progress("🌐 Fetching contract instance storage from RPC...".to_string());
-            match rpc_config(rpc, rpc_headers).and_then(|config| {
+            match rpc_config(rpc, rpc_headers, *allow_http_local).and_then(|config| {
                 let config = config.with_id_mismatch_allowed(*rpc_allow_id_mismatch);
                 loader::fetch_instance_storage_from_rpc_with_provenance(cid, &config)
                     .map_err(|e| anyhow::anyhow!(e))

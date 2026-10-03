@@ -120,6 +120,15 @@ memory and time use:
 All four can be tightened for pipelines that need stricter bounds, or
 loosened if a legitimate artifact exceeds the defaults.
 
+**`--remote-timeout-secs 0` is a defined failure, not an unbounded
+wait.** The timeout is a deadline computed once when the request starts
+(`Instant::now() + timeout`); with a zero-second budget that deadline is
+already in the past by the time it's first checked — resolving the host
+and opening the socket both take some nonzero time — so every request
+fails immediately with a timeout error instead of ever blocking on I/O.
+There is no "0 means unlimited" special case. Use a large explicit value
+(e.g. `--remote-timeout-secs 3600`) if you actually want a long budget.
+
 **Transport hardening that cannot be overridden from the CLI:**
 
 - Every redirect hop must be `https://` — a redirect to plain `http://`

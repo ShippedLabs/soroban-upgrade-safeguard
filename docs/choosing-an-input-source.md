@@ -103,7 +103,16 @@ soroban-upgrade-safeguard \
 
 **Size and timeout limits:**
 - `--remote-max-bytes` (default: 64 MiB)
-- `--remote-timeout-secs` (default: 30 seconds)
+- `--remote-timeout-secs` (default: 30 seconds) — bounds every single
+  request (including each redirect hop). **`--remote-timeout-secs 0` is
+  a defined failure, not an unbounded wait**: the timeout is measured
+  from when the request starts, so a zero-second budget is already
+  exhausted before the connection — let alone a response — can complete.
+  Every request fails immediately with a timeout error (reported as a
+  transport error naming the failed URL) rather than hanging or
+  silently succeeding. There's no "0 means unlimited" special case; use
+  a large explicit value (e.g. `--remote-timeout-secs 3600`) if you
+  actually want a long budget.
 - `--remote-max-redirects` (default: 5)
 
 **See also:**
