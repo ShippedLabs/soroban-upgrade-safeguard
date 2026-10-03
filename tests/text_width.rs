@@ -133,6 +133,64 @@ fn a_width_below_the_floor_is_clamped_rather_than_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// argument parsing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_non_numeric_width_is_rejected_by_argument_parsing() {
+    let output = run(&[
+        wasm("v1.wasm").to_str().unwrap(),
+        wasm("v2.wasm").to_str().unwrap(),
+        "--width",
+        "not-a-number",
+    ]);
+
+    assert_ne!(
+        output.status.code(),
+        Some(0),
+        "a non-numeric --width must be rejected"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not valid UTF-8");
+    assert!(
+        stderr.contains("--width"),
+        "error should name the offending flag, got: {stderr}"
+    );
+    assert!(
+        stderr.to_lowercase().contains("invalid"),
+        "error should explain the value was invalid, got: {stderr}"
+    );
+    // Rejected at argument-parsing time, before any WASM analysis: no
+    // report content at all, just clap's usage error.
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+    assert!(
+        stdout.is_empty(),
+        "no report should be produced when argument parsing fails, got: {stdout}"
+    );
+}
+
+#[test]
+fn a_numeric_width_is_accepted() {
+    let output = run(&[
+        wasm("v1.wasm").to_str().unwrap(),
+        wasm("v2.wasm").to_str().unwrap(),
+        "--quiet",
+        "--no-timestamp",
+        "--width",
+        "42",
+    ]);
+
+    assert!(
+        output.status.code().is_some(),
+        "a numeric --width must be accepted and the run should complete"
+    );
+    let stdout = stdout_of(&output);
+    assert!(
+        stdout.contains("SOROBAN UPGRADE SAFETY REPORT"),
+        "a valid numeric --width should still produce a normal report, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // JSON / Markdown must never be affected
 // ---------------------------------------------------------------------------
 

@@ -2203,6 +2203,116 @@ fn manifest_empty_pairs_toml_rejected_integration() {
     assert!(combined.contains("\"pairs\":"), "got: {combined}");
 }
 
+// ---------------------------------------------------------------------------
+// --per-contract-output-name-template placeholder validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unknown_placeholder_in_per_contract_output_name_template_is_rejected() {
+    let dir = temp_dir("mc-template-unknown-placeholder");
+    stage_wasm(&dir.join("wasm"));
+    let reports = dir.join("reports");
+    let root = write(
+        &dir,
+        "root.toml",
+        r#"
+        [defaults]
+        base_dir = "wasm"
+
+        [[pairs]]
+        old  = "v1.wasm"
+        new  = "v3.wasm"
+        name = "token-a"
+        id   = "a"
+        "#,
+    );
+
+    let run = run_in(
+        None,
+        &[
+            "--manifest",
+            root.to_str().unwrap(),
+            "--per-contract-output-dir",
+            reports.to_str().unwrap(),
+            "--per-contract-output-name-template",
+            "{bogus}.{ext}",
+        ],
+    );
+
+    assert_ne!(
+        run.code, 0,
+        "an unknown template placeholder must be rejected"
+    );
+    let combined = format!("{}{}", run.stdout, run.stderr);
+    assert!(
+        combined.contains("Unknown placeholder '{bogus}'"),
+        "error should name the offending placeholder, got: {combined}"
+    );
+    assert!(
+        combined.contains("{name}") && combined.contains("{id}") && combined.contains("{ext}"),
+        "error should list the supported placeholders, got: {combined}"
+    );
+
+    // Validated ahead of any pair processing, so nothing hits disk.
+    let wrote_reports = reports
+        .read_dir()
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
+    assert!(
+        !wrote_reports,
+        "no reports may be written when the template is rejected"
+    );
+}
+
+#[test]
+fn documented_placeholders_in_per_contract_output_name_template_still_expand() {
+    let dir = temp_dir("mc-template-documented-placeholders");
+    stage_wasm(&dir.join("wasm"));
+    let reports = dir.join("reports");
+    let root = write(
+        &dir,
+        "root.toml",
+        r#"
+        [defaults]
+        base_dir = "wasm"
+
+        [[pairs]]
+        old  = "v1.wasm"
+        new  = "v3.wasm"
+        name = "token-a"
+        id   = "a1"
+        "#,
+    );
+
+    let run = run_in(
+        None,
+        &[
+            "--manifest",
+            root.to_str().unwrap(),
+            "--per-contract-output-dir",
+            reports.to_str().unwrap(),
+            "--per-contract-output-name-template",
+            "{name}_{id}.{ext}",
+        ],
+    );
+
+    assert_eq!(
+        run.code, 0,
+        "v1 -> v3 is the checked-in safe pair; a valid template must not itself fail the run: {}{}",
+        run.stdout, run.stderr
+    );
+
+    let expected = reports.join("token-a_a1.txt");
+    assert!(
+        expected.exists(),
+        "expected per-contract report at {}, dir contains: {:?}",
+        expected.display(),
+        reports.read_dir().map(|entries| entries
+            .filter_map(|e| e.ok().map(|e| e.file_name()))
+            .collect::<Vec<_>>())
+    );
+}
+
 #[test]
 fn manifest_empty_pairs_json_rejected_integration() {
     let dir = temp_dir("mc-empty-pairs-json");
