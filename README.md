@@ -1573,3 +1573,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for the full text.
+
+
+## Cross-Platform & Build Support
+This project supports Linux, macOS, and Windows environments with automated toolchains.
