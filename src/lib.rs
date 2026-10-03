@@ -165,6 +165,11 @@ pub mod preflight;
 mod preflight;
 
 #[cfg(feature = "unstable")]
+pub mod policy_bundle;
+#[cfg(not(feature = "unstable"))]
+mod policy_bundle;
+
+#[cfg(feature = "unstable")]
 pub mod profile;
 #[cfg(not(feature = "unstable"))]
 mod profile;

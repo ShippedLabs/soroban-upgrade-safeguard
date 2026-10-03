@@ -201,6 +201,12 @@ pub struct RenderableReport {
     /// and found compatible — see `docs/lineage-walkthrough.md`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_versions_checked: Option<usize>,
+    /// What this run recorded about a `--policy-bundle`, present only
+    /// when one was given — and, since a failed bundle aborts the run
+    /// before a report exists, always reflects a *verified* bundle. See
+    /// `docs/policy-bundles.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_bundle: Option<crate::policy_bundle::BundleProvenance>,
     /// Configured compatibility budgets ([`crate::budget`]) that were exceeded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub budget_violations: Vec<crate::budget::BudgetViolation>,
@@ -756,6 +762,15 @@ impl RenderableReport {
             }
         }
 
+        if let Some(bundle) = &self.policy_bundle {
+            output.push('\n');
+            output.push_str(&format!(
+                "🏛️  Policy bundle: {} (signer(s): {})\n",
+                bundle.bundle_id,
+                bundle.signer_identities.join(", ")
+            ));
+        }
+
         if !self.budget_violations.is_empty() {
             output.push('\n');
             output.push_str(
@@ -1232,6 +1247,14 @@ impl RenderableReport {
                     "### Lineage\n\n{checked} historical version(s) checked.\n\n"
                 ));
             }
+        }
+
+        if let Some(bundle) = &self.policy_bundle {
+            output.push_str(&format!(
+                "### 🏛️ Policy Bundle\n\n- **Bundle ID**: {}\n- **Signer(s)**: {}\n\n",
+                bundle.bundle_id,
+                bundle.signer_identities.join(", ")
+            ));
         }
 
         if !self.budget_violations.is_empty() {

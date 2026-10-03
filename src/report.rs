@@ -632,6 +632,19 @@ pub struct SafetyReport {
     #[cfg(not(feature = "unstable"))]
     pub(crate) lineage_versions_checked: Option<usize>,
 
+    /// What this run recorded about a `--policy-bundle`, when one was
+    /// given. `None` when no bundle was used. A report with this field
+    /// set always reflects a *verified* bundle: a failed one aborts the
+    /// run before a report exists at all (see `docs/policy-bundles.md`).
+    #[cfg(feature = "unstable")]
+    pub policy_bundle: Option<crate::policy_bundle::BundleProvenance>,
+    /// What this run recorded about a `--policy-bundle`, when one was
+    /// given. `None` when no bundle was used. A report with this field
+    /// set always reflects a *verified* bundle; a failed one aborts the
+    /// run before a report exists at all (see `docs/policy-bundles.md`).
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) policy_bundle: Option<crate::policy_bundle::BundleProvenance>,
+
     /// Configured compatibility budgets ([`crate::budget`]) that were
     /// exceeded. Always gates `is_safe`, independent of `--strict` and axis
     /// gate policy, since a budget is an explicit opt-in the team configured.
@@ -1077,6 +1090,10 @@ impl SafetyReport {
         self.lineage_versions_checked
     }
 
+    pub fn policy_bundle(&self) -> Option<&crate::policy_bundle::BundleProvenance> {
+        self.policy_bundle.as_ref()
+    }
+
     pub fn snapshot_integrity(
         &self,
     ) -> Option<&crate::snapshot_manifest::SnapshotIntegrityReport> {
@@ -1477,6 +1494,7 @@ impl SafetyReport {
             snapshot_integrity: None,
             impact_graph: None,
             lineage_versions_checked: None,
+            policy_bundle: None,
             budget_violations: Vec::new(),
             rpc_provenance: None,
             old_symlink: None,
@@ -1835,6 +1853,7 @@ impl SafetyReport {
             snapshot_integrity: None,
             impact_graph: None,
             lineage_versions_checked: None,
+            policy_bundle: None,
             budget_violations,
             rpc_provenance: None,
             old_symlink: None,
@@ -2003,6 +2022,7 @@ impl SafetyReport {
             snapshot_integrity: self.snapshot_integrity.clone(),
             impact_graph: self.impact_graph.clone(),
             lineage_versions_checked: self.lineage_versions_checked,
+            policy_bundle: self.policy_bundle.clone(),
             budget_violations: self.budget_violations.clone(),
             migration: None,
             migrated_count: self.migrated_count,
@@ -2203,6 +2223,7 @@ mod tests {
             snapshot_integrity: None,
             impact_graph: None,
             lineage_versions_checked: None,
+            policy_bundle: None,
             budget_violations: Vec::new(),
             settings: ReportSettings::default(),
             complexity_old: None,

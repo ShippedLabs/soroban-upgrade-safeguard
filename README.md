@@ -1569,6 +1569,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Configuration Schema & Compatibility](docs/config_schema_compatibility.md): JSON Schemas for safeguard configuration and batch manifests, editor auto-completion catalog, and schema compatibility policy.
 - [Native Language Bindings](docs/bindings.md): Python (PyO3) and Node.js (napi-rs) bindings for the comparison engine — scope, installation, error/report conversion model, version compatibility, and current limitations.
 - [Impact Graph Export](docs/impact-graph.md): `--impact-graph`'s versioned node/edge graph of functions, types, storage, events, findings, and policy decisions — format, node/edge kind reference, resource limits, and an example Graphviz consumer.
+- [Signed Policy Bundles](docs/policy-bundles.md): `--policy-bundle`'s centrally governed, signed compatibility policy — trust model, verification, precedence rules (a bundle can only tighten, never loosen), and provenance.
 
 ## License
 

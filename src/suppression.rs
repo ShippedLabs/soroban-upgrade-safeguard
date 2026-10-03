@@ -87,7 +87,7 @@ use crate::error::Error;
 pub const DEFAULT_CONFIG_FILE: &str = ".safeguard.toml";
 
 /// Gating policy configuration for compatibility axes.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct PolicyConfig {
     #[serde(default = "default_true")]
     pub gate_storage_layout: bool,
@@ -145,7 +145,7 @@ fn default_false() -> bool {
 /// depends on how the type is actually used in a given contract pair. Use
 /// `rule_ids` when a specific category must always require a reason
 /// regardless of that ambiguity.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct RequireReasonPolicy {
     /// Canonical rule IDs (snake_case) that must carry a reason when suppressed.
     #[serde(default)]
