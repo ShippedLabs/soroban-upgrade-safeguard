@@ -5,6 +5,25 @@ use soroban_upgrade_safeguard::lineage::{
 };
 use soroban_upgrade_safeguard::{compare_wasm_bytes_with_options, CompareOptions};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+fn wasm_fixture(name: &str) -> Vec<u8> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("wasm")
+        .join(name);
+    std::fs::read(path).expect("failed to read fixture WASM")
+}
+
+/// Serialize `wasm`'s extracted spec, suitable for a [`LineageRecord`]'s
+/// `spec_json` field.
+fn extracted_spec_json(source: &str, wasm: &[u8]) -> String {
+    let metadata = soroban_upgrade_safeguard::parser::extract_metadata(wasm)
+        .expect("failed to extract metadata from fixture WASM");
+    let spec = soroban_upgrade_safeguard::spec::ContractSpec::from_entries(&metadata.spec);
+    let extracted = soroban_upgrade_safeguard::spec_json::ExtractedSpec::new(source, &metadata, &spec);
+    serde_json::to_string(&extracted).expect("failed to serialize extracted spec")
+}
 
 #[test]
 fn test_lineage_store_persistence_json_and_toml() {
@@ -146,4 +165,114 @@ fn test_lineage_store_option_in_compare_options() {
 
     let report = compare_wasm_bytes_with_options(&wasm_empty, &wasm_empty, &options).unwrap();
     assert!(report.is_safe());
+}
+
+// ---------------------------------------------------------------------------
+// --max-live-versions 0
+// ---------------------------------------------------------------------------
+//
+// `--max-live-versions 0` validates the candidate against *zero* historical
+// versions (see `LineageStore::live_records`): a real, defined outcome, not
+// a crash or a hang, but one that's easy to mistake for "every historical
+// version was checked and found compatible" unless it's surfaced somewhere.
+// These confirm it's surfaced (`SafetyReport::lineage_versions_checked`) and
+// show the concrete risk: a genuinely incompatible historical version is
+// silently skipped rather than caught.
+
+/// A store with one live record holding `v1.wasm`'s spec — structurally
+/// incompatible with a `v2.wasm` candidate in exactly the direction this
+/// session's other tests already rely on (3 Critical findings; see
+/// `tests/suppression.rs`'s module doc for `v1 -> v2`). Historical-vs-
+/// candidate order matters for a structural diff, so the record is built
+/// from `v1` specifically to land on that well-established relationship
+/// once compared against a `v2` candidate.
+fn store_with_one_incompatible_historical_version() -> LineageStore {
+    let v1_bytes = wasm_fixture("v1.wasm");
+    let mut store = LineageStore::default();
+    store
+        .record_version(LineageRecord {
+            version_id: "v1.0.0".to_string(),
+            order: 1,
+            created_at: "2026-08-25T00:00:00Z".to_string(),
+            status: LiveStatus::Live,
+            wasm_hash: "hash_v1".to_string(),
+            interface_hash: "iface_v1".to_string(),
+            spec_json: Some(extracted_spec_json("v1.wasm", &v1_bytes)),
+            storage_schema: None,
+            metadata: BTreeMap::new(),
+        })
+        .unwrap();
+    store
+}
+
+#[test]
+fn max_live_versions_zero_checks_nothing_and_passes_vacuously() {
+    // Comparing v2 against itself keeps the *primary* old/new diff trivial
+    // (always safe), isolating lineage validation as the only thing that
+    // could fail this run. The candidate spec lineage validation actually
+    // uses is extracted from `new_wasm` (the second argument) -- v2 here --
+    // which is what the stored v1.0.0 record is incompatible with.
+    let v2_bytes = wasm_fixture("v2.wasm");
+
+    let mut store = store_with_one_incompatible_historical_version();
+    store.policy.max_live_versions = Some(0);
+
+    let options = CompareOptions {
+        suppressions: None,
+        explain: false,
+        strict: false,
+        storage_schemas: None,
+        lineage_store: Some(&store),
+        contract: None,
+        complexity_budget: None,
+    };
+
+    let report = compare_wasm_bytes_with_options(&v2_bytes, &v2_bytes, &options)
+        .expect("comparison should succeed");
+
+    assert_eq!(
+        report.lineage_versions_checked(),
+        Some(0),
+        "the report must say explicitly that zero historical versions were checked"
+    );
+    assert!(
+        report.is_safe(),
+        "with nothing checked, the run passes vacuously -- this is the defined outcome, \
+         not a crash or a hang"
+    );
+}
+
+#[test]
+fn without_the_cap_the_same_incompatible_historical_version_is_caught() {
+    // Same store, same candidate, no cap: proves the "vacuous pass" above
+    // is actually due to the cap, by showing the historical incompatibility
+    // *is* caught the moment it's actually checked.
+    let v2_bytes = wasm_fixture("v2.wasm");
+
+    let store = store_with_one_incompatible_historical_version();
+    assert_eq!(store.policy.max_live_versions, None);
+
+    let options = CompareOptions {
+        suppressions: None,
+        explain: false,
+        strict: false,
+        storage_schemas: None,
+        lineage_store: Some(&store),
+        contract: None,
+        complexity_budget: None,
+    };
+
+    let report = compare_wasm_bytes_with_options(&v2_bytes, &v2_bytes, &options)
+        .expect("comparison should succeed");
+
+    assert_eq!(
+        report.lineage_versions_checked(),
+        Some(1),
+        "without a cap, the one live historical version must actually be checked"
+    );
+    assert!(
+        !report.is_safe(),
+        "the stored v1.0.0 spec is structurally incompatible with the v2 candidate; \
+         checking it must fail the run"
+    );
 }

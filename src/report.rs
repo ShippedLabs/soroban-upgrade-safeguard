@@ -609,6 +609,29 @@ pub struct SafetyReport {
     #[cfg(not(feature = "unstable"))]
     pub(crate) impact_graph: Option<crate::impact_graph::ImpactGraph>,
 
+    /// How many live historical versions lineage validation actually
+    /// checked the candidate against, when `--lineage-store` was given.
+    /// `None` when lineage validation did not run at all. `Some(0)` is a
+    /// real, meaningful outcome — most commonly `--max-live-versions 0`
+    /// (or a store with every version retired and
+    /// `allow_retired_data: false`) — and means the candidate passed
+    /// *vacuously*: nothing in lineage history was actually compared
+    /// against it, not that every historical version was found
+    /// compatible. See `docs/lineage-walkthrough.md`.
+    #[cfg(feature = "unstable")]
+    pub lineage_versions_checked: Option<usize>,
+    /// How many live historical versions lineage validation actually
+    /// checked the candidate against, when `--lineage-store` was given.
+    /// `None` when lineage validation did not run at all. `Some(0)` is a
+    /// real, meaningful outcome — most commonly `--max-live-versions 0`
+    /// (or a store with every version retired and
+    /// `allow_retired_data: false`) — and means the candidate passed
+    /// *vacuously*: nothing in lineage history was actually compared
+    /// against it, not that every historical version was found
+    /// compatible. See `docs/lineage-walkthrough.md`.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) lineage_versions_checked: Option<usize>,
+
     /// Configured compatibility budgets ([`crate::budget`]) that were
     /// exceeded. Always gates `is_safe`, independent of `--strict` and axis
     /// gate policy, since a budget is an explicit opt-in the team configured.
@@ -864,6 +887,8 @@ impl SafetyReport {
         explain: bool,
         strict: bool,
     ) {
+        self.lineage_versions_checked = Some(lineage_report.historical_versions_checked);
+
         if !lineage_report.is_safe {
             self.is_safe = false;
         }
@@ -1046,6 +1071,10 @@ impl SafetyReport {
 
     pub fn impact_graph(&self) -> Option<&crate::impact_graph::ImpactGraph> {
         self.impact_graph.as_ref()
+    }
+
+    pub fn lineage_versions_checked(&self) -> Option<usize> {
+        self.lineage_versions_checked
     }
 
     pub fn snapshot_integrity(
@@ -1447,6 +1476,7 @@ impl SafetyReport {
             empirical_findings: Vec::new(),
             snapshot_integrity: None,
             impact_graph: None,
+            lineage_versions_checked: None,
             budget_violations: Vec::new(),
             rpc_provenance: None,
             old_symlink: None,
@@ -1804,6 +1834,7 @@ impl SafetyReport {
             empirical_findings: Vec::new(),
             snapshot_integrity: None,
             impact_graph: None,
+            lineage_versions_checked: None,
             budget_violations,
             rpc_provenance: None,
             old_symlink: None,
@@ -1971,6 +2002,7 @@ impl SafetyReport {
             empirical_findings: self.empirical_findings.clone(),
             snapshot_integrity: self.snapshot_integrity.clone(),
             impact_graph: self.impact_graph.clone(),
+            lineage_versions_checked: self.lineage_versions_checked,
             budget_violations: self.budget_violations.clone(),
             migration: None,
             migrated_count: self.migrated_count,
@@ -2170,6 +2202,7 @@ mod tests {
             empirical_findings: Vec::new(),
             snapshot_integrity: None,
             impact_graph: None,
+            lineage_versions_checked: None,
             budget_violations: Vec::new(),
             settings: ReportSettings::default(),
             complexity_old: None,

@@ -4212,7 +4212,25 @@ fn run_single(
                 store.policy.max_live_versions = Some(max_v);
             }
             if let Some(ref ret_v) = args.retire_version {
-                store.retire_version(ret_v)?;
+                if !store.retire_version(ret_v)? {
+                    let known = if store.records.is_empty() {
+                        "(the store has no recorded versions)".to_string()
+                    } else {
+                        store
+                            .records
+                            .iter()
+                            .map(|r| r.version_id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    anyhow::bail!(
+                        "--retire-version '{}' does not match any version in lineage store '{}'. \
+                         Known version(s): {}",
+                        ret_v,
+                        path.display(),
+                        known
+                    );
+                }
             }
             Some(store)
         } else {
