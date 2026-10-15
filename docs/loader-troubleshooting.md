@@ -15,7 +15,7 @@ soroban-upgrade-safeguard extract ./the-file-in-question.wasm
 
 If `extract` fails, the problem is in loading — read on. If `extract`
 succeeds but returns an interface with far fewer functions/types than you
-expect, jump to [Missing custom sections](#missing-custom-sections) below —
+expect, jump to [Missing custom sections](#2-missing-custom-sections) below —
 that case doesn't fail at all, it just quietly gives you less than you
 think it did.
 
