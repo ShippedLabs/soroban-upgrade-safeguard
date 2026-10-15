@@ -2809,7 +2809,7 @@ fn main() -> Result<()> {
                 eprintln!("Warning: failed to write metrics file: {e}");
             }
         }
-        return result;
+        return exit_if_unsafe(result);
     }
 
     let result = run_single(&args, &outputs, &suppressions, &progress);
@@ -2819,7 +2819,19 @@ fn main() -> Result<()> {
             eprintln!("Warning: failed to write metrics file: {e}");
         }
     }
-    result
+    exit_if_unsafe(result)
+}
+
+/// Turn an unsafe verdict into exit code 1.
+///
+/// Kept out of `run_single`/`run_batch` so that anything that must survive an
+/// unsafe run (the `--metrics-file` snapshot, which is most useful on exactly
+/// those runs) is written before the process exits.
+fn exit_if_unsafe(result: Result<bool>) -> Result<()> {
+    if !result? {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 /// The result of resolving a batch mode run out of its inputs: the composed
@@ -2883,18 +2895,21 @@ fn build_batch(args: &Args) -> Result<BuiltBatch> {
     })
 }
 
-fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> Result<()> {
+/// Run a batch comparison. Returns `Ok(true)` when every pair is safe, and
+/// `Ok(false)` for an unsafe verdict, which the caller turns into exit code 1
+/// *after* it has written `--metrics-file`; exiting here would skip that write.
+fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> Result<bool> {
     // Watch mode for a whole batch re-runs only the pairs whose inputs
     // changed, rather than recomputing every pair on every file event.
     if args.watch {
         #[cfg(feature = "watch")]
         {
-            return crate::watch::run_batch_watch(args, outputs, progress);
+            return crate::watch::run_batch_watch(args, outputs, progress).map(|()| true);
         }
         #[cfg(not(feature = "watch"))]
         {
             eprintln!("Warning: --watch is not available in this build. Rebuild with the 'watch' feature enabled.");
-            return Ok(());
+            return Ok(true);
         }
     }
 
@@ -3124,11 +3139,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
         progress,
     )?;
 
-    if !overall_safe {
-        std::process::exit(1);
-    }
-
-    Ok(())
+    Ok(overall_safe)
 }
 
 fn synthesize_error_report(
@@ -3224,6 +3235,10 @@ fn synthesize_error_report(
         migration_diagnostics: Vec::new(),
         empirical: false,
         empirical_findings: Vec::new(),
+        snapshot_integrity: None,
+        impact_graph: None,
+        lineage_versions_checked: None,
+        policy_bundle: None,
         budget_violations: Vec::new(),
         settings: report::ReportSettings::default(),
         complexity_old: None,
@@ -3661,6 +3676,10 @@ fn gap_to_result(gap: &GapContract, args: &Args) -> BatchResult {
         migration_diagnostics: Vec::new(),
         empirical: false,
         empirical_findings: Vec::new(),
+        snapshot_integrity: None,
+        impact_graph: None,
+        lineage_versions_checked: None,
+        policy_bundle: None,
         budget_violations: Vec::new(),
         settings: report::ReportSettings::default(),
         complexity_old: None,
@@ -4133,12 +4152,15 @@ fn load_policy_bundle_bytes(source: &str, args: &Args) -> Result<(Vec<u8>, Strin
     }
 }
 
+/// Run a single-pair comparison. Returns `Ok(true)` for a safe verdict and
+/// `Ok(false)` for an unsafe one, which the caller turns into exit code 1
+/// *after* it has written `--metrics-file`; exiting here would skip that write.
 fn run_single(
     args: &Args,
     outputs: &[OutputSpec],
     suppressions: &SuppressionConfig,
     progress: &dyn Fn(String),
-) -> Result<()> {
+) -> Result<bool> {
     if args.interface_lockfile.is_some() && args.wasm_paths.len() != 1 {
         anyhow::bail!("--interface-lockfile requires exactly one candidate WASM path");
     }
@@ -4523,11 +4545,7 @@ fn run_single(
         );
     }
 
-    if !is_safe {
-        std::process::exit(1);
-    }
-
-    Ok(())
+    Ok(is_safe)
 }
 
 /// Lower bound for `--watch-debounce-ms`. Below this, the burst of events a

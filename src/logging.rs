@@ -21,10 +21,6 @@ pub enum LogLevel {
 impl std::str::FromStr for LogLevel {
     type Err = String;
 
-    fn str_to_err(s: &str) -> String {
-        format!("unknown log level: {s}")
-    }
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "trace" => Ok(LogLevel::Trace),
@@ -32,7 +28,7 @@ impl std::str::FromStr for LogLevel {
             "info" => Ok(LogLevel::Info),
             "warn" | "warning" => Ok(LogLevel::Warn),
             "error" => Ok(LogLevel::Error),
-            other => Err(Self::str_to_err(other)),
+            other => Err(format!("unknown log level: {other}")),
         }
     }
 }
@@ -265,6 +261,10 @@ mod tests {
         assert_eq!("warn".parse::<LogLevel>().unwrap(), LogLevel::Warn);
         assert_eq!("warning".parse::<LogLevel>().unwrap(), LogLevel::Warn);
         assert!("invalid".parse::<LogLevel>().is_err());
+        assert_eq!(
+            "verbose".parse::<LogLevel>(),
+            Err("unknown log level: verbose".to_string())
+        );
     }
 
     #[test]

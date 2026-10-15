@@ -885,14 +885,15 @@ mod tests {
             Some("Balance"),
         )];
 
-        let suppressions = SuppressionConfig {
-            rules: vec![SuppressionRule::new(
-                "Struct Removed",
-                Some("Balance"),
-                Some("accepted for v2"),
-            )],
-            ..Default::default()
-        };
+        // Not `..Default::default()`: `SuppressionConfig` has private fields
+        // (e.g. `raw_budget`), which struct-update syntax can't fill from
+        // outside the `suppression` module.
+        let mut suppressions = SuppressionConfig::default();
+        suppressions.rules = vec![SuppressionRule::new(
+            "Struct Removed",
+            Some("Balance"),
+            Some("accepted for v2"),
+        )];
 
         let graph = build_impact_graph(
             &old_spec,
