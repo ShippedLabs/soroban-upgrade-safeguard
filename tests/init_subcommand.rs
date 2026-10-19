@@ -107,3 +107,66 @@ fn init_help_documents_output() {
     assert!(stdout.contains("--output <PATH>"));
     assert!(stdout.contains(".safeguard.toml"));
 }
+
+#[test]
+fn init_custom_output_respects_existing_file_and_force() {
+    let dir = std::env::temp_dir().join(format!(
+        "soroban-upgrade-safeguard-init-force-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("failed to create temp working directory");
+
+    let custom_output = dir.join("sub").join("custom.toml");
+    fs::create_dir_all(custom_output.parent().unwrap()).unwrap();
+    fs::write(&custom_output, b"pre-existing").unwrap();
+
+    // Without --force, it should fail
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("init")
+        .arg("-o")
+        .arg(&custom_output)
+        .arg(wasm("v1.wasm"))
+        .arg(wasm("v2.wasm"))
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run binary");
+
+    assert_ne!(
+        output.status.code(),
+        Some(0),
+        "init without force should fail if file exists"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        stderr.contains("already exists. Use --force to overwrite."),
+        "expected error message on existing file, got: {stderr}"
+    );
+
+    // With --force, it should succeed and overwrite
+    let output_forced = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("init")
+        .arg("-o")
+        .arg(&custom_output)
+        .arg("--force")
+        .arg(wasm("v1.wasm"))
+        .arg(wasm("v2.wasm"))
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run binary");
+
+    let stdout = String::from_utf8_lossy(&output_forced.stdout).into_owned();
+    assert_eq!(
+        output_forced.status.code(),
+        Some(0),
+        "init with --force must succeed: {stdout}"
+    );
+
+    let config = fs::read_to_string(&custom_output).expect("custom output config should exist");
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(
+        config.contains("[[suppress]]"),
+        "the generated config should include suppress blocks, got: {config}"
+    );
+}

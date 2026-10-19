@@ -1261,8 +1261,8 @@ struct InitArgs {
     #[arg(long)]
     force: bool,
 
-    /// Destination path for the generated config.
-    #[arg(long, value_name = "PATH", default_value = DEFAULT_CONFIG_FILE)]
+    /// Destination path for the generated suppression config. Defaults to .safeguard.toml.
+    #[arg(short, long, value_name = "PATH", default_value = DEFAULT_CONFIG_FILE)]
     output: PathBuf,
 
     /// Path to the old WASM file (or contract ID with --rpc-url)
@@ -1869,8 +1869,8 @@ fn render_doctor_text(
     remote_cache_dir: &Path,
     oci_cache_dir: &Path,
     metadata_cache_dir: &Path,
-    config_source: &Option<(PathBuf, config::ConfigSource)>,
-    suppressions: &config::Suppressions,
+    config_source: &Option<(PathBuf, ConfigSource)>,
+    suppressions: &SuppressionConfig,
 ) -> String {
     let mut out = String::new();
 
@@ -2971,6 +2971,13 @@ fn run_init(args: &InitArgs) -> Result<()> {
                  # reason = \"TODO: Add justification for suppressing this rule.\"\n\n",
                 category, target
             ));
+        }
+    }
+
+    // Create parent directory if it doesn't exist
+    if let Some(parent) = config_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
         }
     }
 
@@ -7831,5 +7838,65 @@ mod tests {
         assert!(validate_template("{invalid}.{ext}").is_err());
         assert!(validate_template("{name").is_err());
         assert!(validate_template("}").is_err());
+    }
+
+    #[test]
+    fn test_init_args_output_flag() {
+        let args = Args::try_parse_from([
+            "soroban-upgrade-safeguard",
+            "init",
+            "--output",
+            "custom/path.toml",
+            "old.wasm",
+            "new.wasm",
+        ])
+        .unwrap();
+
+        match args.command {
+            Some(Command::Init(init_args)) => {
+                assert_eq!(init_args.output, PathBuf::from("custom/path.toml"));
+                assert_eq!(init_args.old, Some(PathBuf::from("old.wasm")));
+                assert_eq!(init_args.new, Some(PathBuf::from("new.wasm")));
+                assert!(!init_args.force);
+            }
+            _ => panic!("expected Command::Init"),
+        }
+    }
+
+    #[test]
+    fn test_init_args_output_short_flag() {
+        let args = Args::try_parse_from([
+            "soroban-upgrade-safeguard",
+            "init",
+            "-o",
+            "custom.toml",
+            "--force",
+            "old.wasm",
+            "new.wasm",
+        ])
+        .unwrap();
+
+        match args.command {
+            Some(Command::Init(init_args)) => {
+                assert_eq!(init_args.output, PathBuf::from("custom.toml"));
+                assert!(init_args.force);
+            }
+            _ => panic!("expected Command::Init"),
+        }
+    }
+
+    #[test]
+    fn test_init_args_output_default() {
+        let args =
+            Args::try_parse_from(["soroban-upgrade-safeguard", "init", "old.wasm", "new.wasm"])
+                .unwrap();
+
+        match args.command {
+            Some(Command::Init(init_args)) => {
+                assert_eq!(init_args.output, PathBuf::from(DEFAULT_CONFIG_FILE));
+                assert!(!init_args.force);
+            }
+            _ => panic!("expected Command::Init"),
+        }
     }
 }

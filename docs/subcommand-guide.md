@@ -72,10 +72,11 @@ See [Report Migrations](report_migrations.md).
 
 ### `init`
 
-Generates a `.safeguard.toml` suppression config from the findings a comparison currently produces. Every finding becomes a commented-out `[[suppress]]` block; rules are inactive until you review, fill in a `reason`, and uncomment them. Use `--force` to regenerate the file after resolving some breaks.
+Generates a suppression config (`.safeguard.toml` by default, or custom path with `--output` / `-o`) from the findings a comparison currently produces. Every finding becomes a commented-out `[[suppress]]` block; rules are inactive until you review, fill in a `reason`, and uncomment them. Use `--force` to regenerate the file after resolving some breaks.
 
 ```bash
 soroban-upgrade-safeguard init ./wasm/v1.wasm ./wasm/v2.wasm
+soroban-upgrade-safeguard init --output ci/safeguard.toml ./wasm/v1.wasm ./wasm/v2.wasm
 ```
 
 See [Suppressing known breaking changes](../README.md#suppressing-known-breaking-changes).
