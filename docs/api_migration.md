@@ -1,5 +1,7 @@
 # Public API Surface Hardening & Migration Guide
 
+> This guide is linked from the README Documentation section as `docs/api_migration.md`.
+
 Starting in version `0.2.0`, the public API surface of the `soroban-upgrade-safeguard` library has been hardened to separate internal pipeline modules from the stable, curated public API. This hardening allows the project internals to evolve without causing breaking changes for downstream consumers.
 
 ---
