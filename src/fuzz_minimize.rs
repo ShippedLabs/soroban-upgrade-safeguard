@@ -131,9 +131,7 @@ pub enum FailureClass {
         discriminant: String,
     },
     /// A resource limit was hit (XDR depth/length, entry count, walk depth).
-    LimitExceeded {
-        discriminant: String,
-    },
+    LimitExceeded { discriminant: String },
     /// The input was accepted (no error). Useful for fixture promotion of
     /// inputs that previously caused a panic rather than a structured error.
     Accepted,
@@ -364,12 +362,10 @@ fn sanitize_message(msg: &str) -> String {
 fn oracle(candidate: &[u8], kind: InputKind, policy: &ResourcePolicy) -> FailureClass {
     let _ = policy; // policy is recorded in the result; the built-in defaults match
     match kind {
-        InputKind::Parser | InputKind::Mapper => {
-            match parser::extract_metadata(candidate) {
-                Ok(_) => FailureClass::Accepted,
-                Err(e) => classify_error(&e),
-            }
-        }
+        InputKind::Parser | InputKind::Mapper => match parser::extract_metadata(candidate) {
+            Ok(_) => FailureClass::Accepted,
+            Err(e) => classify_error(&e.into()),
+        },
         InputKind::Decoder => {
             // Exercise the raw XDR decode path directly.
             use std::io::Cursor;
@@ -403,9 +399,9 @@ fn oracle(candidate: &[u8], kind: InputKind, policy: &ResourcePolicy) -> Failure
         }
         InputKind::Report => {
             // Exercise the JSON report rendering path.
-            match crate::render::RenderableReport::from_json_str(
-                &String::from_utf8_lossy(candidate),
-            ) {
+            match crate::render::RenderableReport::from_json_str(&String::from_utf8_lossy(
+                candidate,
+            )) {
                 Ok(_) => FailureClass::Accepted,
                 Err(_) => FailureClass::ParseError {
                     discriminant: "report_render".to_string(),
@@ -445,23 +441,6 @@ fn reduction_candidates(input: &[u8]) -> Vec<(&'static str, Vec<u8>)> {
         out.push(("bisect_tail", input[input.len() / 2..].to_vec()));
     }
 
-    // Strategy 5: zero out the middle quarter.
-    if input.len() > 8 {
-        let mut zeroed = input.to_vec();
-        let q = input.len() / 4;
-        for b in &mut zeroed[q..3 * q] {
-            *b = 0;
-        }
-        out.push(("zero_middle", zeroed));
-    }
-
-    // Strategy 6: replace every non-ASCII byte with 0x00. Useful for spec
-    // blobs where the XDR framing is what matters.
-    if input.iter().any(|b| *b > 0x7f) {
-        let cleaned: Vec<u8> = input.iter().map(|b| if *b > 0x7f { 0 } else { *b }).collect();
-        out.push(("ascii_clamp", cleaned));
-    }
-
     out
 }
 
@@ -482,10 +461,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// Returns an error when the original input does **not** trigger a failure
 /// (i.e. the oracle returns [`FailureClass::Accepted`] for the unmodified
 /// input) — there is nothing to minimize.
-pub fn minimize(
-    input: &[u8],
-    config: &MinimizeConfig,
-) -> anyhow::Result<MinimizationResult> {
+pub fn minimize(input: &[u8], config: &MinimizeConfig) -> anyhow::Result<MinimizationResult> {
     let original_class = oracle(input, config.input_kind, &config.policy);
     if original_class == FailureClass::Accepted {
         anyhow::bail!(
@@ -502,7 +478,6 @@ pub fn minimize(
     let mut steps_accepted = 0usize;
 
     'outer: for _ in 0..config.max_iterations {
-        let mut improved = false;
         for (strategy, candidate) in reduction_candidates(&best) {
             if candidate.is_empty() || candidate.len() >= best.len() {
                 continue;
@@ -530,18 +505,15 @@ pub fn minimize(
                         accepted: true,
                     });
                 }
-                improved = true;
                 // Restart from the new best immediately.
                 continue 'outer;
             }
 
             // Guard: never let the best grow.
-            debug_assert!(candidate.len() < input.len() + 1);
+            debug_assert!(candidate.len() < input.len());
         }
 
-        if !improved {
-            break;
-        }
+        break;
     }
 
     let digest = sha256_hex(&best);
@@ -573,16 +545,17 @@ pub fn minimize(
 /// The fixture is validated under normal resource limits before being written:
 /// the oracle is re-run on the minimized bytes to confirm the failure class is
 /// still reproducible. An error is returned if the class has changed.
-pub fn promote(
-    result: MinimizationResult,
-    output_dir: &Path,
-) -> anyhow::Result<PromotedFixture> {
+pub fn promote(result: MinimizationResult, output_dir: &Path) -> anyhow::Result<PromotedFixture> {
     use std::io::Write;
 
     // Validation: confirm the minimized bytes still reproduce the failure
     // under the standard (default) resource policy.
     let validation_policy = ResourcePolicy::default();
-    let reproduced_class = oracle(&result.minimized_bytes, result.input_kind, &validation_policy);
+    let reproduced_class = oracle(
+        &result.minimized_bytes,
+        result.input_kind,
+        &validation_policy,
+    );
 
     let mut validation_notes: Vec<String> = Vec::new();
 
@@ -597,9 +570,7 @@ pub fn promote(
     }
     validation_notes.push(format!(
         "Reproduced '{}' under standard resource limits (max_xdr_depth={}, max_entries={}).",
-        result.failure_class,
-        validation_policy.max_xdr_depth,
-        validation_policy.max_entries
+        result.failure_class, validation_policy.max_xdr_depth, validation_policy.max_entries
     ));
 
     // Derive a stable, path-independent fixture name.
@@ -611,7 +582,10 @@ pub fn promote(
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect::<String>();
     let short_digest = &result.digest[..12];
-    let name = format!("{}_{}_{}_{}", result.input_kind, safe_class, short_digest, result.minimized_len);
+    let name = format!(
+        "{}_{}_{}_{}",
+        result.input_kind, safe_class, short_digest, result.minimized_len
+    );
 
     let fixture = PromotedFixture {
         name: name.clone(),
@@ -620,8 +594,12 @@ pub fn promote(
     };
 
     // Write the fixture files.
-    std::fs::create_dir_all(output_dir)
-        .map_err(|e| anyhow::anyhow!("Failed to create output dir '{}': {e}", output_dir.display()))?;
+    std::fs::create_dir_all(output_dir).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create output dir '{}': {e}",
+            output_dir.display()
+        )
+    })?;
 
     let bin_path = output_dir.join(format!("{name}.bin"));
     let meta_path = output_dir.join(format!("{name}.meta.json"));
@@ -655,7 +633,11 @@ fn toolchain_triple() -> String {
     let arch = "aarch64";
     #[cfg(target_arch = "wasm32")]
     let arch = "wasm32";
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "wasm32"
+    )))]
     let arch = "unknown";
 
     #[cfg(target_os = "linux")]
@@ -745,7 +727,10 @@ mod tests {
         let msg = "panicked at 0x7f3a4b5c6d7e: something went wrong";
         let out = sanitize_message(msg);
         assert!(!out.contains("0x7f3a"), "address must be replaced: {out}");
-        assert!(out.contains("0x<addr>"), "address placeholder expected: {out}");
+        assert!(
+            out.contains("0x<addr>"),
+            "address placeholder expected: {out}"
+        );
     }
 
     #[test]
@@ -839,7 +824,11 @@ mod tests {
             Ok(result) => {
                 // Every accepted step must have preserved the failure class.
                 assert_eq!(
-                    oracle(&result.minimized_bytes, result.input_kind, &ResourcePolicy::default()),
+                    oracle(
+                        &result.minimized_bytes,
+                        result.input_kind,
+                        &ResourcePolicy::default()
+                    ),
                     result.failure_class,
                     "minimized bytes must reproduce the recorded failure class"
                 );
@@ -898,7 +887,8 @@ mod tests {
             .collect::<String>();
         let short_digest = &result.digest[..12];
         let name = format!(
-            "{}_{}_{}_{}", result.input_kind, safe_class, short_digest, result.minimized_len
+            "{}_{}_{}_{}",
+            result.input_kind, safe_class, short_digest, result.minimized_len
         );
         assert!(!name.contains('/'), "name must not contain '/': {name}");
         assert!(!name.contains('\\'), "name must not contain '\\': {name}");
@@ -965,8 +955,7 @@ mod tests {
     #[test]
     fn promote_writes_fixture_files_and_metadata_contains_no_local_path() {
         // Build a known-failing input (garbage bytes → ParseError).
-        let bad_input: Vec<u8> = b"\xde\xad\xbe\xef garbage that is not WASM or XDR"
-            .to_vec();
+        let bad_input: Vec<u8> = b"\xde\xad\xbe\xef garbage that is not WASM or XDR".to_vec();
         let config = MinimizeConfig {
             input_kind: InputKind::Parser,
             max_iterations: 50,
@@ -980,7 +969,8 @@ mod tests {
         };
 
         let tmp = std::env::temp_dir().join(format!(
-            "safeguard_promote_test_{}", sha256_hex(&bad_input)[..8].to_string()
+            "safeguard_promote_test_{}",
+            sha256_hex(&bad_input)[..8].to_string()
         ));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
@@ -988,8 +978,16 @@ mod tests {
         let fixture = promote(result, &tmp).expect("promote must succeed");
 
         // Fixture name must not contain path separators.
-        assert!(!fixture.name.contains('/'), "name contains '/': {}", fixture.name);
-        assert!(!fixture.name.contains('\\'), "name contains '\\': {}", fixture.name);
+        assert!(
+            !fixture.name.contains('/'),
+            "name contains '/': {}",
+            fixture.name
+        );
+        assert!(
+            !fixture.name.contains('\\'),
+            "name contains '\\': {}",
+            fixture.name
+        );
 
         // Both files must exist.
         let bin = tmp.join(format!("{}.bin", fixture.name));
@@ -1027,7 +1025,10 @@ mod tests {
         let garbage = b"\x99\x88\x77\x66\x55 not xdr";
         let class = oracle(garbage, InputKind::Decoder, &ResourcePolicy::default());
         assert!(
-            matches!(class, FailureClass::ParseError { .. } | FailureClass::Accepted),
+            matches!(
+                class,
+                FailureClass::ParseError { .. } | FailureClass::Accepted
+            ),
             "decoder oracle should fail or accept garbage cleanly: {class}"
         );
     }
@@ -1037,7 +1038,10 @@ mod tests {
         let garbage = b"\x01\x02\x03\x04 not a mapper input";
         let class = oracle(garbage, InputKind::Mapper, &ResourcePolicy::default());
         assert!(
-            matches!(class, FailureClass::ParseError { .. } | FailureClass::Accepted),
+            matches!(
+                class,
+                FailureClass::ParseError { .. } | FailureClass::Accepted
+            ),
             "mapper oracle should not panic: {class}"
         );
     }
@@ -1047,7 +1051,10 @@ mod tests {
         let not_json = b"this is not valid json { broken";
         let class = oracle(not_json, InputKind::Report, &ResourcePolicy::default());
         assert!(
-            matches!(class, FailureClass::ParseError { .. } | FailureClass::Accepted),
+            matches!(
+                class,
+                FailureClass::ParseError { .. } | FailureClass::Accepted
+            ),
             "report oracle should not panic: {class}"
         );
     }
@@ -1069,9 +1076,9 @@ mod tests {
         let bad_wasm: Vec<u8> = vec![
             0x00, 0x61, 0x73, 0x6d, // magic: \0asm
             0x01, 0x00, 0x00, 0x00, // version: 1
-            0x01,                   // section id: type
-            0x05,                   // section size: 5 bytes claimed
-            0x01, 0x00,             // only 2 bytes provided → truncated
+            0x01, // section id: type
+            0x05, // section size: 5 bytes claimed
+            0x01, 0x00, // only 2 bytes provided → truncated
         ];
         let config = MinimizeConfig {
             input_kind: InputKind::Parser,
@@ -1084,11 +1091,16 @@ mod tests {
                 assert!(
                     result.minimized_len <= result.original_len,
                     "minimized must not grow: {} > {}",
-                    result.minimized_len, result.original_len
+                    result.minimized_len,
+                    result.original_len
                 );
                 // The failure class must be preserved.
                 assert_eq!(
-                    oracle(&result.minimized_bytes, InputKind::Parser, &ResourcePolicy::default()),
+                    oracle(
+                        &result.minimized_bytes,
+                        InputKind::Parser,
+                        &ResourcePolicy::default()
+                    ),
                     result.failure_class,
                     "failure class must be preserved after minimization"
                 );

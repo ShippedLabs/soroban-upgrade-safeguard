@@ -90,6 +90,11 @@ pub mod error;
 mod error;
 
 #[cfg(feature = "unstable")]
+pub mod fuzz_minimize;
+#[cfg(not(feature = "unstable"))]
+mod fuzz_minimize;
+
+#[cfg(feature = "unstable")]
 pub mod impact_graph;
 #[cfg(not(feature = "unstable"))]
 mod impact_graph;
