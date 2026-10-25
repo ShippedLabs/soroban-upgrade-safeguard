@@ -1,4 +1,4 @@
-﻿use std::process::Command;
+use std::process::Command;
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
