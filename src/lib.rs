@@ -351,6 +351,15 @@ pub fn compare_wasm_storage_schemas(
 
 /// Compare two Soroban contract builds supplied as raw WASM byte slices.
 pub fn compare_wasm_bytes(old_wasm: &[u8], new_wasm: &[u8]) -> Result<SafetyReport> {
+    compare_wasm_bytes_named(old_wasm, "old WASM", new_wasm, "new WASM")
+}
+
+fn compare_wasm_bytes_named(
+    old_wasm: &[u8],
+    old_source: &str,
+    new_wasm: &[u8],
+    new_source: &str,
+) -> Result<SafetyReport> {
     let old_meta = parser::extract_metadata(old_wasm)
         .context("Failed to extract metadata from the old WASM")?;
     let new_meta = parser::extract_metadata(new_wasm)
@@ -366,17 +375,29 @@ pub fn compare_wasm_bytes(old_wasm: &[u8], new_wasm: &[u8]) -> Result<SafetyRepo
         &mut diff_report,
     );
 
-    Ok(
-        SafetyReport::new_with_specs(&diff_report, &old_spec, &new_spec)
-            .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash()),
-    )
+    let empty_suppressions = SuppressionConfig::default();
+    let mut safety_report = SafetyReport::new_with_specs(&diff_report, &old_spec, &new_spec)
+        .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
+    safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.apply_spec_section_diagnostics(
+        old_source,
+        old_meta.spec_section_count,
+        !old_spec.is_empty(),
+        new_source,
+        new_meta.spec_section_count,
+        !new_spec.is_empty(),
+        &empty_suppressions,
+        false,
+        false,
+    );
+    Ok(safety_report)
 }
 
 /// Compare two Soroban contract builds read from WASM files on disk.
 pub fn compare_wasm_files(old_path: &Path, new_path: &Path) -> Result<SafetyReport> {
     let old = loader::load_wasm(old_path).map_err(|e| anyhow::anyhow!("{}", e))?;
     let new = loader::load_wasm(new_path).map_err(|e| anyhow::anyhow!("{}", e))?;
-    compare_wasm_bytes(&old.bytes, &new.bytes)
+    compare_wasm_bytes_named(&old.bytes, &old.path, &new.bytes, &new.path)
 }
 
 /// Options for the analysis pipeline.
@@ -400,6 +421,16 @@ pub struct CompareOptions<'a> {
 pub fn compare_wasm_bytes_with_options(
     old_wasm: &[u8],
     new_wasm: &[u8],
+    options: &CompareOptions<'_>,
+) -> Result<SafetyReport> {
+    compare_wasm_bytes_with_options_named(old_wasm, "old WASM", new_wasm, "new WASM", options)
+}
+
+fn compare_wasm_bytes_with_options_named(
+    old_wasm: &[u8],
+    old_source: &str,
+    new_wasm: &[u8],
+    new_source: &str,
     options: &CompareOptions<'_>,
 ) -> Result<SafetyReport> {
     let empty_suppressions = SuppressionConfig::default();
@@ -444,8 +475,18 @@ pub fn compare_wasm_bytes_with_options(
         &new_spec,
         options.contract,
     );
-    safety_report.scope.exported_interface = true;
     safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.apply_spec_section_diagnostics(
+        old_source,
+        old_meta.spec_section_count,
+        !old_spec.is_empty(),
+        new_source,
+        new_meta.spec_section_count,
+        !new_spec.is_empty(),
+        suppressions,
+        options.explain,
+        options.strict,
+    );
     safety_report.old_spec_summary = Some(old_spec.summary());
     safety_report.new_spec_summary = Some(new_spec.summary());
 
@@ -521,7 +562,17 @@ pub fn compare_wasm_against_interface_lockfile(
         options.contract,
     )
     .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
-    report.scope.exported_interface = true;
+    report.apply_spec_section_diagnostics(
+        "interface lockfile",
+        1,
+        !old_spec.is_empty(),
+        "candidate WASM",
+        new_meta.spec_section_count,
+        !new_spec.is_empty(),
+        suppressions,
+        options.explain,
+        options.strict,
+    );
     report.old_spec_summary = Some(old_spec.summary());
     report.new_spec_summary = Some(new_spec.summary());
     Ok(report)
@@ -535,5 +586,5 @@ pub fn compare_wasm_files_with_options(
 ) -> Result<SafetyReport> {
     let old = loader::load_wasm(old_path).map_err(|e| anyhow::anyhow!("{}", e))?;
     let new = loader::load_wasm(new_path).map_err(|e| anyhow::anyhow!("{}", e))?;
-    compare_wasm_bytes_with_options(&old.bytes, &new.bytes, options)
+    compare_wasm_bytes_with_options_named(&old.bytes, &old.path, &new.bytes, &new.path, options)
 }

@@ -2926,9 +2926,11 @@ fn run_init(args: &InitArgs) -> Result<()> {
 
     // Extract metadata and compare
     let old_meta = parser::extract_metadata(&old.bytes)?;
+    warn_if_missing_contractspec(&old.path, old_meta.spec_section_count);
     let old_spec = spec::ContractSpec::from_entries(&old_meta.spec);
 
     let new_meta = parser::extract_metadata(&new.bytes)?;
+    warn_if_missing_contractspec(&new.path, new_meta.spec_section_count);
     let new_spec = spec::ContractSpec::from_entries(&new_meta.spec);
 
     // Generate diff
@@ -2953,7 +2955,7 @@ fn run_init(args: &InitArgs) -> Result<()> {
 
     // Collect unsuppressed findings (with empty suppression config)
     let empty_suppressions = SuppressionConfig::default();
-    let safety_report = report::SafetyReport::with_suppressions_with_specs(
+    let mut safety_report = report::SafetyReport::with_suppressions_with_specs(
         &diff_report,
         &empty_suppressions,
         false,
@@ -2961,6 +2963,18 @@ fn run_init(args: &InitArgs) -> Result<()> {
         &old_spec,
         &new_spec,
         None,
+    );
+    safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.apply_spec_section_diagnostics(
+        &old.path,
+        old_meta.spec_section_count,
+        !old_spec.is_empty(),
+        &new.path,
+        new_meta.spec_section_count,
+        !new_spec.is_empty(),
+        &empty_suppressions,
+        false,
+        false,
     );
 
     // Extract findings from the report
@@ -3978,6 +3992,15 @@ fn compare_batch_pair(
                             complexity_budget: None,
                         },
                     )?;
+                    warn_if_missing_contractspec(
+                        &old_wasm.path,
+                        report.scope.old_spec_section_count,
+                    );
+                    warn_if_missing_contractspec(
+                        &new_wasm.path,
+                        report.scope.new_spec_section_count,
+                    );
+                    relabel_missing_spec_sources(&mut report, &old_wasm.path, &new_wasm.path);
                     report.set_no_timestamp(settings.no_timestamp.value);
                     Ok(report)
                 } else {
@@ -4958,6 +4981,7 @@ fn run_single(
                 },
             )?
             .with_symlinks(None, new.symlink.clone());
+            warn_if_missing_contractspec(&new.path, report.scope.new_spec_section_count);
             log.timing("Interface lockfile comparison", compare_start);
             report
         } else {
@@ -5838,6 +5862,37 @@ fn load_storage_schema(path: &Path) -> Result<soroban_upgrade_safeguard::Storage
         .map_err(|error| anyhow::anyhow!("{}: {}", path.display(), error))
 }
 
+fn warn_if_missing_contractspec(source: &str, section_count: usize) {
+    if section_count == 0 {
+        eprintln!(
+            "warning: '{source}' has no contractspecv0 section; no contract interface could be extracted"
+        );
+    }
+}
+
+fn relabel_missing_spec_sources(report: &mut report::SafetyReport, old_path: &str, new_path: &str) {
+    for src in &mut report.scope.missing_spec_sources {
+        if src == "old WASM" {
+            *src = old_path.to_string();
+        } else if src == "new WASM" {
+            *src = new_path.to_string();
+        }
+    }
+    if let Some(findings) = report.findings_by_category.get_mut("Missing Contract Spec") {
+        for reported in findings {
+            for (placeholder, actual) in [("old WASM", old_path), ("new WASM", new_path)] {
+                if reported.finding.target.as_deref() == Some(placeholder) {
+                    reported.finding.target = Some(actual.to_string());
+                    reported.finding.message = reported
+                        .finding
+                        .message
+                        .replace(&format!("'{placeholder}'"), &format!("'{actual}'"));
+                }
+            }
+        }
+    }
+}
+
 fn compare_contracts(
     comparison: &ContractComparison<'_>,
     progress: &dyn Fn(String),
@@ -5869,6 +5924,7 @@ fn compare_contracts(
     log.sections("New", new_bytes);
     let parse_start = std::time::Instant::now();
     let old_meta = parser::extract_metadata(old_bytes)?;
+    warn_if_missing_contractspec(old_path, old_meta.spec_section_count);
     let old_spec = spec::ContractSpec::from_entries(&old_meta.spec);
     log.diagnostic(
         1,
@@ -5893,6 +5949,7 @@ fn compare_contracts(
 
     let parse_start = std::time::Instant::now();
     let new_meta = parser::extract_metadata(new_bytes)?;
+    warn_if_missing_contractspec(new_path, new_meta.spec_section_count);
     let new_spec = spec::ContractSpec::from_entries(&new_meta.spec);
     log.diagnostic(
         1,
@@ -5960,6 +6017,18 @@ fn compare_contracts(
     .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
 
     report.no_timestamp = *no_timestamp;
+    report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    report.apply_spec_section_diagnostics(
+        old_path,
+        old_meta.spec_section_count,
+        !old_spec.is_empty(),
+        new_path,
+        new_meta.spec_section_count,
+        !new_spec.is_empty(),
+        suppressions,
+        *explain,
+        *strict,
+    );
 
     if *impact_graph {
         let old_build = soroban_upgrade_safeguard::impact_graph::BuildIdentity::new(

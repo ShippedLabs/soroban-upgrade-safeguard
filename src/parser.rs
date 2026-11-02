@@ -77,6 +77,9 @@ impl ContractEnvMeta {
 #[derive(Debug, Default)]
 pub struct SorobanMetadata {
     pub spec: Vec<ScSpecEntry>,
+    /// Number of `contractspecv0` custom sections present in the WASM binary.
+    /// Zero indicates the section was absent, as opposed to present with zero entries.
+    pub spec_section_count: usize,
     pub env_meta: Option<ContractEnvMeta>,
     /// Conservative observations from SDK-generated storage host calls.
     pub storage: StorageInference,
@@ -92,6 +95,13 @@ pub struct SorobanMetadata {
     /// The interface version that was used to select the spec decoder, if
     /// available from the env-meta section.
     pub spec_interface_version: Option<InterfaceVersion>,
+}
+
+impl SorobanMetadata {
+    /// True when the WASM module contained at least one `contractspecv0` custom section.
+    pub fn has_spec_section(&self) -> bool {
+        self.spec_section_count > 0
+    }
 }
 
 /// Decodes concatenated ScSpecEntry XDR objects from raw bytes.
@@ -270,6 +280,7 @@ pub fn extract_metadata_with_registry(
 
     // Now that we have the env-meta (and therefore the interface version),
     // decode all buffered contractspecv0 sections through the registry.
+    metadata.spec_section_count = raw_spec_sections.len();
     let iface_version = metadata
         .env_meta
         .as_ref()
@@ -719,6 +730,8 @@ mod tests {
         let without_section = wasm_with_imports(&[(0, 0)], &[]);
         let metadata = extract_metadata(&without_section).expect("valid minimal module");
         assert!(metadata.spec.is_empty());
+        assert_eq!(metadata.spec_section_count, 0);
+        assert!(!metadata.has_spec_section());
 
         // ...a present but empty contractspecv0 section also yields an empty
         // spec list, but must print a warning to distinguish the two cases.
@@ -731,6 +744,8 @@ mod tests {
             metadata.spec.is_empty(),
             "an empty contractspecv0 section must decode to an empty spec vec"
         );
+        assert_eq!(metadata.spec_section_count, 1);
+        assert!(metadata.has_spec_section());
     }
 
     #[test]

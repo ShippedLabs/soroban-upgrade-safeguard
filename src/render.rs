@@ -313,17 +313,53 @@ fn wrap_with_prefix(prefix: &str, message: &str, width: usize) -> String {
     out
 }
 
+fn redact_spec_source_if_local(source: &str) -> String {
+    if matches!(
+        source,
+        "<stdin>" | "old WASM" | "new WASM" | "candidate WASM" | "interface lockfile"
+    ) || crate::spec_json::SourceKind::classify(source) != crate::spec_json::SourceKind::Local
+    {
+        source.to_string()
+    } else {
+        crate::redact::redact_local_path(source)
+    }
+}
+
 impl RenderableReport {
-    /// Redact local filesystem paths embedded in provenance, in place.
+    /// Redact local filesystem paths embedded in provenance and missing-spec
+    /// diagnostics, in place.
     ///
-    /// Currently that means resolved symlink targets (`provenance.symlinks`),
-    /// which are absolute by construction and can expose a username or
-    /// workspace layout. Interface hashes, contract IDs, and RPC endpoints
+    /// Interface hashes, contract IDs, synthetic labels, and RPC endpoints
     /// (already sanitized by [`crate::rpc::redact_url`]) are untouched.
     pub fn redact_local_paths(&mut self) {
         for symlink in &mut self.provenance.symlinks {
             symlink.requested = crate::redact::redact_local_path(&symlink.requested);
             symlink.resolved = crate::redact::redact_local_path(&symlink.resolved);
+        }
+        for source in &mut self.scope.missing_spec_sources {
+            *source = redact_spec_source_if_local(source);
+        }
+        let redact_finding = |reported: &mut ReportedFinding| {
+            if reported.rule_id == "missing_contract_spec" {
+                if let Some(target) = reported.finding.target.clone() {
+                    let redacted = redact_spec_source_if_local(&target);
+                    if redacted != target {
+                        reported.finding.target = Some(redacted.clone());
+                        reported.finding.message =
+                            reported.finding.message.replace(&target, &redacted);
+                    }
+                }
+            }
+        };
+        for findings in self.findings_by_category.values_mut() {
+            for reported in findings {
+                redact_finding(reported);
+            }
+        }
+        for findings in self.findings_by_axis.values_mut() {
+            for reported in findings {
+                redact_finding(reported);
+            }
         }
     }
 
@@ -362,7 +398,12 @@ impl RenderableReport {
         if let Some(new) = &self.new_interface_hash {
             lines.push(("New Interface Hash", new.clone()));
         }
-        if let Some(unchanged) = self.interface_unchanged() {
+        if self.scope.has_missing_spec_section() {
+            lines.push((
+                "Interface",
+                "unavailable (missing contractspecv0 section)".to_string(),
+            ));
+        } else if let Some(unchanged) = self.interface_unchanged() {
             lines.push((
                 "Interface",
                 if unchanged {
@@ -618,7 +659,13 @@ impl RenderableReport {
 
         output.push_str(&self.provenance_block_text());
 
-        if self.total_findings == 0 {
+        if let Some(notice) = self.scope.missing_spec_notice() {
+            output.push_str(&format!("WARNING: {notice}\n").yellow().bold().to_string());
+            if self.total_findings == 0 {
+                return output;
+            }
+            output.push('\n');
+        } else if self.total_findings == 0 {
             output.push_str(&"No relevant changes detected. The upgrade is identical in its exports and types.\n".green().to_string());
             return output;
         }
@@ -1155,7 +1202,16 @@ impl RenderableReport {
         output.push_str(&self.provenance_block_markdown());
         output.push_str("---\n\n");
 
-        if self.total_findings == 0 {
+        if let Some(notice) = self.scope.missing_spec_notice() {
+            output.push_str(&format!(
+                "> **Warning**: {}\n",
+                notice.replace(['\r', '\n'], " ")
+            ));
+            if self.total_findings == 0 {
+                return output;
+            }
+            output.push('\n');
+        } else if self.total_findings == 0 {
             output.push_str("No relevant changes detected. The upgrade is identical in its exports and types.\n");
             return output;
         }
@@ -1335,6 +1391,15 @@ impl RenderableReport {
     /// severity, so they appear in the log without blocking the run.
     pub fn to_github_actions(&self) -> String {
         let mut output = String::new();
+        if let Some(notice) = self.scope.missing_spec_notice() {
+            if !self
+                .findings_by_category
+                .contains_key("Missing Contract Spec")
+            {
+                let message = notice.replace(['\r', '\n'], " ");
+                output.push_str(&format!("::warning::[Missing Contract Spec] {message}\n"));
+            }
+        }
         let mut categories: Vec<_> = self.findings_by_category.keys().collect();
         categories.sort();
         for category in categories {
