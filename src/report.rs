@@ -723,6 +723,117 @@ pub struct ReportSettings {
 }
 
 impl SafetyReport {
+    /// Record `contractspecv0` section counts and missing-spec diagnostics for
+    /// both sides of a comparison.
+    ///
+    /// When one side has no `contractspecv0` section at all while the other
+    /// side declares a populated contract spec, a `Critical` finding is emitted
+    /// under `CallAbi` so a stripped or non-Soroban WASM cannot silently pass
+    /// comparison against a real contract (even when neither side declares host
+    /// imports). When both sides lack `contractspecv0`, no finding gates
+    /// `is_safe`, while `scope.missing_spec_sources` still records both inputs
+    /// so renderers warn explicitly instead of claiming exports are identical.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_spec_section_diagnostics(
+        &mut self,
+        old_source: &str,
+        old_section_count: usize,
+        old_populated: bool,
+        new_source: &str,
+        new_section_count: usize,
+        new_populated: bool,
+        suppressions: &SuppressionConfig,
+        explain: bool,
+        strict: bool,
+    ) {
+        self.scope.old_spec_section_count = old_section_count;
+        self.scope.new_spec_section_count = new_section_count;
+        self.scope.exported_interface = old_section_count > 0 || new_section_count > 0;
+        self.scope.missing_spec_sources.clear();
+        if old_section_count == 0 {
+            self.scope.missing_spec_sources.push(old_source.to_string());
+        }
+        if new_section_count == 0 {
+            self.scope.missing_spec_sources.push(new_source.to_string());
+        }
+
+        let mut added_finding = false;
+        for (missing_source, section_count, other_populated) in [
+            (old_source, old_section_count, new_populated),
+            (new_source, new_section_count, old_populated),
+        ] {
+            if section_count == 0 && other_populated {
+                let category = "Missing Contract Spec".to_string();
+                let message = format!(
+                    "WASM file '{missing_source}' has no contractspecv0 custom section; its exported contract interface could not be extracted for comparison against a populated contract spec."
+                );
+                let finding = crate::diff::Finding {
+                    severity: crate::diff::Severity::Critical,
+                    axes: vec![crate::diff::CompatibilityAxis::CallAbi],
+                    category: category.clone(),
+                    message,
+                    type_name: None,
+                    target: Some(missing_source.to_string()),
+                    change: None,
+                    root_target: None,
+                };
+                let rule = suppressions.matching_rule(&finding);
+                let suppressed = rule.is_some();
+                self.critical_count += 1;
+                self.critical_root_count += 1;
+                self.total_findings += 1;
+                if suppressed {
+                    self.suppressed_count += 1;
+                    self.suppressed_critical_count += 1;
+                } else {
+                    let call_abi_gated = suppressions.policy.gate_call_abi || strict;
+                    if call_abi_gated {
+                        self.is_safe = false;
+                        self.axis_verdicts
+                            .insert(crate::diff::CompatibilityAxis::CallAbi, AxisStatus::Failed);
+                    } else {
+                        let current = self
+                            .axis_verdicts
+                            .entry(crate::diff::CompatibilityAxis::CallAbi)
+                            .or_insert(AxisStatus::Passed);
+                        if *current == AxisStatus::Passed {
+                            *current = AxisStatus::Warning;
+                        }
+                    }
+                }
+                self.findings_by_category
+                    .entry(category.clone())
+                    .or_default()
+                    .push(ReportedFinding {
+                        rule_id: "missing_contract_spec".to_string(),
+                        axes: finding.axes.clone(),
+                        finding,
+                        suppressed,
+                        suppression_reason: if suppressed {
+                            rule.and_then(|r| r.reason.clone())
+                        } else {
+                            None
+                        },
+                        remediation: explain
+                            .then(|| get_remediation_guidance(&category).map(String::from))
+                            .flatten(),
+                        migrated_by: None,
+                    });
+                added_finding = true;
+            }
+        }
+
+        if added_finding && !suppressions.budgets().entries.is_empty() {
+            let reported_refs: Vec<&ReportedFinding> =
+                self.findings_by_category.values().flatten().collect();
+            self.budget_violations =
+                crate::budget::evaluate(&reported_refs, &suppressions.budgets().entries);
+            if !self.budget_violations.is_empty() {
+                self.is_safe = false;
+            }
+        }
+    }
+
     pub fn apply_storage_schema_comparison(
         &mut self,
         comparison: &crate::storage_schema::StorageSchemaComparison,
@@ -1267,11 +1378,41 @@ pub struct AnalysisScope {
     pub new_spec_section_count: usize,
     pub old_duplicate_names: Vec<String>,
     pub new_duplicate_names: Vec<String>,
+    /// Input sources (file paths or synthetic labels) that lacked a
+    /// `contractspecv0` custom section. Omitted when empty so existing reports
+    /// remain byte-compatible.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_spec_sources: Vec<String>,
 }
 
 impl AnalysisScope {
     pub fn storage_analyzed(&self) -> bool {
         matches!(self.storage_schema, StorageScopeState::Analyzed { .. })
+    }
+
+    /// True when at least one compared WASM input had no `contractspecv0` section.
+    pub fn has_missing_spec_section(&self) -> bool {
+        !self.missing_spec_sources.is_empty()
+    }
+
+    /// Human-readable warning naming every input that lacked a `contractspecv0` section.
+    pub fn missing_spec_notice(&self) -> Option<String> {
+        match self.missing_spec_sources.as_slice() {
+            [] => None,
+            [only] => Some(format!(
+                "WASM file '{only}' has no contractspecv0 section; its exported contract interface could not be extracted."
+            )),
+            [first, second] => Some(format!(
+                "Neither '{first}' nor '{second}' has a contractspecv0 section; no exported contract interface could be compared."
+            )),
+            many => {
+                let quoted: Vec<String> = many.iter().map(|s| format!("'{s}'")).collect();
+                Some(format!(
+                    "WASM files {} have no contractspecv0 section; no exported contract interface could be extracted.",
+                    quoted.join(", ")
+                ))
+            }
+        }
     }
 
     pub fn summary_line(&self) -> String {
@@ -2069,6 +2210,11 @@ impl SafetyReport {
 /// Delegates to [`crate::category::FindingCategory`] which is the single source
 /// of truth.
 pub fn get_remediation_guidance(category: &str) -> Option<&'static str> {
+    if category == "Missing Contract Spec" {
+        return Some(
+            "Ensure both WASM files are compiled Soroban contracts built with contractspecv0 metadata enabled (do not strip custom sections before running soroban-upgrade-safeguard).",
+        );
+    }
     crate::category::FindingCategory::find_by_name(category).map(|c| c.remediation())
 }
 

@@ -180,9 +180,11 @@ impl ExtractedSpec {
         let source = source.into();
         let duplicates = crate::spec::ContractSpec::duplicate_declarations(&metadata.spec);
         let scope = ExtractionScope {
-            exported_interface: !metadata.spec.is_empty(),
+            exported_interface: metadata.has_spec_section()
+                || !metadata.spec.is_empty()
+                || !spec.is_empty(),
             env_metadata: metadata.env_meta.is_some(),
-            spec_section_count: metadata.spec.len(),
+            spec_section_count: metadata.spec_section_count,
             duplicate_count: duplicates.len(),
         };
         Self {

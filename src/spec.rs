@@ -89,6 +89,15 @@ impl ContractSpec {
     pub fn error_enums(&self) -> &HashMap<String, ScSpecUdtErrorEnumV0> {
         &self.error_enums
     }
+
+    /// True when the decoded contract spec declares no functions or user-defined types.
+    pub fn is_empty(&self) -> bool {
+        self.functions.is_empty()
+            && self.structs.is_empty()
+            && self.enums.is_empty()
+            && self.unions.is_empty()
+            && self.error_enums.is_empty()
+    }
 }
 
 impl ContractSpec {

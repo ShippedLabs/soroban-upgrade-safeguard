@@ -121,6 +121,16 @@ pub fn compare_bytes(
     new_wasm: &[u8],
     request: &CompareRequest,
 ) -> Result<SafetyReport, Error> {
+    compare_bytes_named(old_wasm, "old WASM", new_wasm, "new WASM", request)
+}
+
+fn compare_bytes_named(
+    old_wasm: &[u8],
+    old_source: &str,
+    new_wasm: &[u8],
+    new_source: &str,
+    request: &CompareRequest,
+) -> Result<SafetyReport, Error> {
     let suppressions = request.resolve_suppressions()?;
     let storage_schemas = request.resolve_storage_schemas()?;
 
@@ -158,8 +168,18 @@ pub fn compare_bytes(
         &new_spec,
         request.contract.as_deref(),
     );
-    safety_report.scope.exported_interface = true;
     safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.apply_spec_section_diagnostics(
+        old_source,
+        old_meta.spec_section_count,
+        !old_spec.is_empty(),
+        new_source,
+        new_meta.spec_section_count,
+        !new_spec.is_empty(),
+        &suppressions,
+        request.explain,
+        request.strict,
+    );
     safety_report.old_spec_summary = Some(old_spec.summary());
     safety_report.new_spec_summary = Some(new_spec.summary());
 
@@ -193,7 +213,7 @@ pub fn compare_files(
 ) -> Result<SafetyReport, Error> {
     let old = loader::load_wasm(old_path)?;
     let new = loader::load_wasm(new_path)?;
-    compare_bytes(&old.bytes, &new.bytes, request)
+    compare_bytes_named(&old.bytes, &old.path, &new.bytes, &new.path, request)
 }
 
 #[cfg(test)]

@@ -401,6 +401,9 @@ fn effective_category(rule: &SuppressionRule) -> Option<&str> {
         return Some(rule.category.as_str());
     }
     let rule_id = rule.rule_id.as_deref()?;
+    if rule_id == "missing_contract_spec" {
+        return Some("Missing Contract Spec");
+    }
     crate::category::FindingCategory::all()
         .iter()
         .find(|c| canonical_rule_id(c.as_str()) == rule_id)
@@ -621,9 +624,10 @@ pub fn is_known_category(category: &str) -> bool {
 }
 
 fn is_known_rule_id(rule_id: &str) -> bool {
-    crate::category::FindingCategory::all()
-        .iter()
-        .any(|category| canonical_rule_id(category.as_str()) == rule_id)
+    rule_id == "missing_contract_spec"
+        || crate::category::FindingCategory::all()
+            .iter()
+            .any(|category| canonical_rule_id(category.as_str()) == rule_id)
 }
 
 /// The outcome of [`SuppressionConfig::validate`].
