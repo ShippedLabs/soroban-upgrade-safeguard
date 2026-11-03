@@ -3792,6 +3792,7 @@ fn synthesize_error_report(
         complexity_violations: Vec::new(),
         manifest_verification: None,
         manifest_gates_safety: false,
+        env_metadata_changed: false,
     }
 }
 
@@ -4243,6 +4244,7 @@ fn gap_to_result(gap: &GapContract, args: &Args) -> BatchResult {
         complexity_violations: Vec::new(),
         manifest_verification: None,
         manifest_gates_safety: false,
+        env_metadata_changed: false,
     };
     BatchResult::Error {
         id: name.clone(),
@@ -4434,6 +4436,11 @@ fn render_batch_summary(
     } = *summary;
 
     let verdict_summary = BatchVerdictSummary::from_results(results);
+    let batch_rollup = report::rollup_batch_bumps(
+        results
+            .iter()
+            .map(|r| (r.report(), matches!(r, BatchResult::Error { .. }))),
+    );
 
     for output in outputs {
         let content = match output.format {
@@ -4496,6 +4503,9 @@ fn render_batch_summary(
                     "is_safe": overall_safe,
                     "strict": strict,
                     "total_pairs": total_pairs,
+                    "recommended_bump": batch_rollup.recommended_bump,
+                    "recommended_bump_reason": batch_rollup.reason,
+                    "bump_rationale": batch_rollup,
                     "summary": verdict_summary.to_json(),
                     "results": results_json,
                 });
@@ -4530,6 +4540,10 @@ fn render_batch_summary(
                     verdict_summary.errored,
                     verdict_summary.incomplete,
                     verdict_summary.total()
+                ));
+                markdown.push_str(&format!(
+                    "**Recommended SemVer Bump**: `{}`\n\n**Bump Rationale**: {}\n\n",
+                    batch_rollup.recommended_bump, batch_rollup.reason
                 ));
 
                 markdown.push_str("### Summary\n\n");
@@ -4601,9 +4615,17 @@ fn render_batch_summary(
                         .to_string()
                 };
                 text.push_str(&format!("Overall Status: {}\n\n", status));
+                text.push_str(&format!("Verdict Summary: {}\n", verdict_summary.to_line()));
+                let batch_bump_str = match batch_rollup.recommended_bump.as_str() {
+                    "major" => "major".red().bold(),
+                    "minor" => "minor".yellow().bold(),
+                    "patch" => "patch".green().bold(),
+                    other => other.normal(),
+                };
+                text.push_str(&format!("Recommended Bump: {}\n", batch_bump_str));
                 text.push_str(&format!(
-                    "Verdict Summary: {}\n\n",
-                    verdict_summary.to_line()
+                    "Bump Rationale:   {}\n\n",
+                    batch_rollup.reason.dimmed()
                 ));
                 text.push_str("Summary of Contracts:\n");
                 for result in results {
@@ -5960,6 +5982,7 @@ fn compare_contracts(
     .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
 
     report.no_timestamp = *no_timestamp;
+    report.set_env_metadata_changed(old_meta.env_meta != new_meta.env_meta);
 
     if *impact_graph {
         let old_build = soroban_upgrade_safeguard::impact_graph::BuildIdentity::new(

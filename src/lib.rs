@@ -278,6 +278,7 @@ pub use crate::attestation::{
 pub use crate::call_abi::{
     CallAbiBreak, CallAbiCompatibility, CallDirection, DirectionalCallVerdict,
 };
+pub use crate::category::ChangeKind;
 pub use crate::config_schema::{
     config_schema, config_schema_value, generate_config_completion, manifest_schema,
     manifest_schema_value, validate_batch_manifest, validate_config_file,
@@ -297,7 +298,10 @@ pub use crate::oci::{
 pub use crate::remote::{
     default_cache_dir, fetch_verified, CacheStatus, FetchedArtifact, RemoteFetchConfig, RemoteRef,
 };
-pub use crate::report::{ReportedFinding, SafetyReport};
+pub use crate::report::{
+    rollup_batch_bumps, BatchBumpRollup, BumpRationale, ReportedFinding, SafetyReport,
+    UpgradeChangeProfile,
+};
 pub use crate::runtime_surface::{
     DataSegmentSummary, ElementSegmentSummary, GlobalDeclaration, MemoryDeclaration,
     RuntimeSurface, TableDeclaration,
@@ -446,6 +450,7 @@ pub fn compare_wasm_bytes_with_options(
     );
     safety_report.scope.exported_interface = true;
     safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.set_env_metadata_changed(old_meta.env_meta != new_meta.env_meta);
     safety_report.old_spec_summary = Some(old_spec.summary());
     safety_report.new_spec_summary = Some(new_spec.summary());
 

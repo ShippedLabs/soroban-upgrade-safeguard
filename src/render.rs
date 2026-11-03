@@ -154,6 +154,12 @@ pub struct RenderableReport {
     pub suppressed_count: usize,
     pub total_findings: usize,
     pub recommended_bump: String,
+    /// Human-readable explanation of why `recommended_bump` was chosen.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub recommended_bump_reason: String,
+    /// Structured change-kind and suppression/migration context backing `recommended_bump`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bump_rationale: Option<crate::report::BumpRationale>,
     /// Interface hash of the old build, when the pipeline supplied specs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_interface_hash: Option<String>,
@@ -607,6 +613,12 @@ impl RenderableReport {
             other => other.normal(),
         };
         output.push_str(&format!("Recommended Bump: {}\n", bump_str));
+        if !self.recommended_bump_reason.is_empty() {
+            output.push_str(&format!(
+                "Bump Rationale:   {}\n",
+                self.recommended_bump_reason.dimmed()
+            ));
+        }
         for (label, value) in self.interface_hash_lines() {
             output.push_str(&format!("{}: {}\n", label, value.dimmed()));
         }
@@ -1142,6 +1154,12 @@ impl RenderableReport {
             "\n**Recommended SemVer Bump**: {}\n\n",
             markdown_code_span(&self.recommended_bump)
         ));
+        if !self.recommended_bump_reason.is_empty() {
+            output.push_str(&format!(
+                "**Bump Rationale**: {}\n\n",
+                markdown_escape_text(&self.recommended_bump_reason)
+            ));
+        }
         output.push_str(&self.directional_call_abi_markdown());
         for (label, value) in self.interface_hash_lines() {
             output.push_str(&format!(

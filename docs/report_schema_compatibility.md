@@ -47,7 +47,7 @@ Every field and enum value in the JSON output is classified as one of:
 | `counts.info` | `integer` | Total info findings including suppressed ones. |
 | `suppressed_count` | `integer` | Findings acknowledged by the suppression config. |
 | `total_findings` | `integer` | Sum of all findings regardless of severity or suppression. |
-| `recommended_bump` | `string` | One of `"none"`, `"patch"`, `"minor"`, `"major"`. |
+| `recommended_bump` | `string` | One of `"patch"`, `"minor"`, `"major"`. Always consistent with `is_safe` (`is_safe: true` never emits `"major"`). |
 | `findings_by_category` | `object` | Keys are category strings (see [Rule IDs](#rule-ids)); values are arrays of finding objects. Key order is alphabetical and stable across runs. |
 | `provenance.tool_version` | `string` | `CARGO_PKG_VERSION` of the binary that produced the report. |
 
@@ -72,6 +72,8 @@ Every field and enum value in the JSON output is classified as one of:
 | `call_abi` | `object` | `{}` | Directional call-ABI compatibility verdicts. |
 | `empirical` | `boolean` | `false` | Whether empirical storage validation was active. |
 | `empirical_findings` | `array` | `[]` | Present only when `empirical` is `true`. |
+| `recommended_bump_reason` | `string` | `""` | Concise human-readable explanation of why `recommended_bump` was chosen (including suppression, migration, or `--strict` context). |
+| `bump_rationale` | `object` | absent | Structured breakdown backing `recommended_bump`: `change_profile`, `reason`, per-kind finding counts (`active_breaking_count`, `migrated_breaking_count`, `suppressed_breaking_count`, `ungated_breaking_count`, `migration_requiring_count`, `additive_count`, `cosmetic_count`), `env_metadata_changed`, and `strict_gate_failed`. |
 
 ### Conditional
 
@@ -146,10 +148,20 @@ as unrecognized rather than crashing).
 
 | Value | Meaning |
 | :--- | :--- |
-| `"none"` | No changes detected. |
-| `"patch"` | Only informational findings. |
-| `"minor"` | Warning-level findings present. |
-| `"major"` | Critical findings present. |
+| `"patch"` | Identical interface/storage/runtime (`"identical"`) or cosmetic/documentation/environment-metadata changes only (`"cosmetic"`). |
+| `"minor"` | Purely additive changes (`"additive"`), migration-requiring evolutions or verified-migrated breaks (`"migration_requiring"`), or policy-accepted/suppressed breaking changes (`"suppressed_breaking"`). |
+| `"major"` | Active, unsuppressed, unmigrated breaking changes that fail compatibility (`"breaking"`). |
+
+### `bump_rationale.change_profile`
+
+| Value | Meaning |
+| :--- | :--- |
+| `"identical"` | Zero structural, runtime, documentation, or environment-metadata changes. |
+| `"cosmetic"` | Documentation, provenance, internal WASM section, or `contractenvmetav0` changes only. |
+| `"additive"` | Purely backward-compatible additions requiring no data migration. |
+| `"migration_requiring"` | State-migration or host/caller coordination changes, or breaking changes covered by a verified `[[migration]]`. |
+| `"suppressed_breaking"` | Breaking changes present, all acknowledged via `[[suppress]]` or located on ungated axes (`is_safe: true`). |
+| `"breaking"` | Active breaking changes failing compatibility (`is_safe: false`). |
 
 ---
 

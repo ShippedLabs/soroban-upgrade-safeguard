@@ -1,6 +1,91 @@
 // SPDX-License-Identifier: MIT
 
+use serde::{Deserialize, Serialize};
+
 use crate::diff::Severity;
+
+/// Structural change classification used to derive SemVer bump recommendations.
+///
+/// Unlike [`Severity`], which reflects default display and gate urgency,
+/// `ChangeKind` records what structurally changed between the two builds so
+/// purely additive changes remain distinguishable from changes requiring state
+/// migration or caller/runtime coordination.
+#[non_exhaustive]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    /// Documentation, build provenance, environment metadata, or internal WASM
+    /// changes that leave callable ABI, storage layout, and runtime requirements compatible.
+    Cosmetic,
+    /// Purely backward-compatible additions to the exported interface, types,
+    /// or WASM module that require no data migration.
+    Additive,
+    /// Schema, parameter, or host/runtime evolutions that require state
+    /// migration, initialization, or host/client coordination to deploy safely.
+    MigrationRequiring,
+    /// Incompatible ABI, storage layout, event schema, or runtime mutations and
+    /// removals that break existing callers, stored entries, indexers, or host execution.
+    Breaking,
+}
+
+impl ChangeKind {
+    /// Stable snake_case identifier for JSON and human-readable rationale output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChangeKind::Cosmetic => "cosmetic",
+            ChangeKind::Additive => "additive",
+            ChangeKind::MigrationRequiring => "migration_requiring",
+            ChangeKind::Breaking => "breaking",
+        }
+    }
+
+    /// Baseline SemVer bump implied when an active finding of this change kind
+    /// governs an upgrade without suppression or migration overrides.
+    pub fn baseline_bump(self) -> &'static str {
+        match self {
+            ChangeKind::Cosmetic => "patch",
+            ChangeKind::Additive | ChangeKind::MigrationRequiring => "minor",
+            ChangeKind::Breaking => "major",
+        }
+    }
+}
+
+/// Classify a finding category string into its structural [`ChangeKind`].
+///
+/// Known [`FindingCategory`] names and synthetic pipeline categories (storage
+/// schema mismatches, lineage breaks, reproducible-build manifest checks, and
+/// batch pair errors) map deterministically by category regardless of any
+/// display `Severity` value on the finding. Unknown custom category strings fall
+/// back to `fallback_severity`.
+pub fn classify_change_kind(category: &str, fallback_severity: &Severity) -> ChangeKind {
+    if let Some(cat) = FindingCategory::find_by_name(category) {
+        return cat.change_kind();
+    }
+    match category {
+        "Storage Schema Mismatch" | "contract-missing-from-new" | "analysis-error" => {
+            ChangeKind::Breaking
+        }
+        c if c.starts_with("Historical Lineage Break") => ChangeKind::Breaking,
+        "Build Manifest Mismatch" | "Build Manifest Stale" => ChangeKind::Cosmetic,
+        _ => match fallback_severity {
+            Severity::Critical => ChangeKind::Breaking,
+            Severity::Warning => ChangeKind::MigrationRequiring,
+            Severity::Info => ChangeKind::Additive,
+        },
+    }
+}
 
 /// Every finding category emitted by the comparison analysis.
 ///
@@ -265,6 +350,91 @@ impl FindingCategory {
             FindingCategory::StorageNamespaceChanged => Severity::Critical,
             FindingCategory::MapKeyTypeChanged => Severity::Critical,
             FindingCategory::MapValueTypeChanged => Severity::Critical,
+        }
+    }
+
+    /// Structural [`ChangeKind`] for SemVer bump calculation.
+    ///
+    /// Exhaustively matched across all variants so adding a new category forces
+    /// an explicit versioning classification decision at compile time.
+    pub fn change_kind(self) -> ChangeKind {
+        match self {
+            FindingCategory::Environment
+            | FindingCategory::FunctionDocumentationChanged
+            | FindingCategory::StructDocumentationChanged
+            | FindingCategory::EnumDocumentationChanged
+            | FindingCategory::HostImportRemoved
+            | FindingCategory::ElementSegmentChanged
+            | FindingCategory::DataSegmentChanged
+            | FindingCategory::WasmProposalRemoved => ChangeKind::Cosmetic,
+
+            FindingCategory::FunctionAdded
+            | FindingCategory::StructAdded
+            | FindingCategory::EnumAdded
+            | FindingCategory::EnumCaseAdded
+            | FindingCategory::EventEnumCaseAdded
+            | FindingCategory::UnionAdded
+            | FindingCategory::UnionCaseAdded
+            | FindingCategory::ErrorEnumAdded
+            | FindingCategory::ErrorEnumCaseAdded
+            | FindingCategory::MemoryAdded
+            | FindingCategory::TableAdded
+            | FindingCategory::GlobalAdded => ChangeKind::Additive,
+
+            FindingCategory::StructFieldAdded
+            | FindingCategory::ParameterRenamed
+            | FindingCategory::HostImportAdded
+            | FindingCategory::HostImportSignatureChanged
+            | FindingCategory::UnknownHostImport
+            | FindingCategory::ProtocolRequirementRaised
+            | FindingCategory::MemoryLimitsChanged
+            | FindingCategory::TableLimitsChanged
+            | FindingCategory::GlobalRemoved
+            | FindingCategory::StartFunctionRemoved
+            | FindingCategory::StartFunctionChanged
+            | FindingCategory::WasmProposalAdded => ChangeKind::MigrationRequiring,
+
+            FindingCategory::FunctionRemoved
+            | FindingCategory::FunctionSignatureChanged
+            | FindingCategory::ParameterReordered
+            | FindingCategory::ParameterTypeChanged
+            | FindingCategory::ReturnTypeChanged
+            | FindingCategory::BytesNSizeChanged
+            | FindingCategory::EventDefinitionRemoved
+            | FindingCategory::StructRemoved
+            | FindingCategory::StructFieldRemoved
+            | FindingCategory::StructFieldInserted
+            | FindingCategory::StructFieldReordered
+            | FindingCategory::StructFieldTypeChanged
+            | FindingCategory::EventSchemaRemoved
+            | FindingCategory::EventSchemaReordered
+            | FindingCategory::EventSchemaTypeChanged
+            | FindingCategory::EventEnumRemoved
+            | FindingCategory::EnumRemoved
+            | FindingCategory::EnumCaseRemoved
+            | FindingCategory::EnumCaseValueChanged
+            | FindingCategory::EventEnumCaseRemoved
+            | FindingCategory::EventEnumCaseValueChanged
+            | FindingCategory::UnionRemoved
+            | FindingCategory::UnionCaseRemoved
+            | FindingCategory::UnionCaseReordered
+            | FindingCategory::UnionCaseTypeChanged
+            | FindingCategory::ErrorEnumRemoved
+            | FindingCategory::ErrorEnumCaseRemoved
+            | FindingCategory::ErrorEnumCaseValueChanged
+            | FindingCategory::TypeKindChanged
+            | FindingCategory::CascadingLayoutBreak
+            | FindingCategory::ProtocolEnvironmentMismatch
+            | FindingCategory::MemoryRemoved
+            | FindingCategory::TableRemoved
+            | FindingCategory::TableElementTypeChanged
+            | FindingCategory::GlobalMutabilityChanged
+            | FindingCategory::GlobalTypeChanged
+            | FindingCategory::StartFunctionAdded
+            | FindingCategory::StorageDurabilityChanged
+            | FindingCategory::StorageNamespaceChanged
+            | FindingCategory::MapKeyTypeChanged
+            | FindingCategory::MapValueTypeChanged => ChangeKind::Breaking,
         }
     }
 
@@ -910,6 +1080,53 @@ mod tests {
                 tmp.display(),
                 tmp.display(),
                 path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn change_kind_distinguishes_cosmetic_additive_migration_and_breaking() {
+        assert_eq!(
+            FindingCategory::FunctionDocumentationChanged.change_kind(),
+            ChangeKind::Cosmetic
+        );
+        assert_eq!(
+            FindingCategory::Environment.change_kind(),
+            ChangeKind::Cosmetic
+        );
+        assert_eq!(
+            FindingCategory::FunctionAdded.change_kind(),
+            ChangeKind::Additive
+        );
+        assert_eq!(
+            FindingCategory::EnumCaseAdded.change_kind(),
+            ChangeKind::Additive
+        );
+        assert_eq!(
+            FindingCategory::StructFieldAdded.change_kind(),
+            ChangeKind::MigrationRequiring
+        );
+        assert_eq!(
+            FindingCategory::ProtocolRequirementRaised.change_kind(),
+            ChangeKind::MigrationRequiring
+        );
+        assert_eq!(
+            FindingCategory::FunctionRemoved.change_kind(),
+            ChangeKind::Breaking
+        );
+        assert_eq!(
+            FindingCategory::StructFieldTypeChanged.change_kind(),
+            ChangeKind::Breaking
+        );
+
+        for cat in FindingCategory::all() {
+            assert_eq!(
+                classify_change_kind(cat.as_str(), &Severity::Critical),
+                cat.change_kind()
+            );
+            assert_eq!(
+                classify_change_kind(cat.as_str(), &Severity::Info),
+                cat.change_kind()
             );
         }
     }

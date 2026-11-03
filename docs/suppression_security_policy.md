@@ -64,3 +64,14 @@ echo -n "Finding message + target content" | shasum -a 256
 
 ### Regular Audits
 We recommend running a regular quarterly audit of active `.safeguard.toml` files to remove obsolete rules and rotate expiring authorizations.
+
+---
+
+## 5. Suppression & Version Bump Semantics
+
+Suppressing a finding changes the upgrade gate verdict without erasing the structural history of the artifact:
+
+* **Verdict Consistency**: When all breaking findings are acknowledged by active `[[suppress]]` rules, `is_safe` becomes `true` and `recommended_bump` is capped at `"minor"` (`bump_rationale.change_profile = "suppressed_breaking"`), never `"major"`.
+* **Underlying Change Kind Preserved**: Suppressing cosmetic-only findings (such as documentation or `Environment` metadata changes) still recommends `"patch"`. Suppressing structural or breaking changes recommends `"minor"` because the deployed contract surface or layout materially changed even though operators accepted the change.
+* **Partial Suppressions**: If at least one gated breaking finding remains unsuppressed and unmigrated, `is_safe` remains `false` and `recommended_bump` remains `"major"` (with both `active_breaking_count` and `suppressed_breaking_count` reported in `bump_rationale`).
+* **Suppression vs Verified Migration**: A `[[suppress]]` rule records human acknowledgement (`"suppressed_breaking"`), whereas a verified `[[migration]]` declaration proves on-chain migration coverage (`"migration_requiring"`). Both cap the SemVer recommendation at `"minor"` when `is_safe` is `true`, while remaining distinct in `bump_rationale`.
