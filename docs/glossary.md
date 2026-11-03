@@ -197,6 +197,13 @@ soroban-upgrade-safeguard verify-attestation report.dsse.json \
 
 **See also:** [Signed safeguard attestations](attestations.md)
 
+### Impact Graph
+A versioned, machine-readable node and edge graph of a comparison's functions, types, storage declarations, events, findings, and suppression policy decisions, linked by dependency, cascade, and reference edges. It is embedded in the JSON report as `impact_graph` so reviewers and release tooling can consume it directly instead of parsing report text.
+
+**Use with:** `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM> --impact-graph --format json`
+
+**See also:** [Impact Graph Export](impact-graph.md)
+
 ## Historical Tracking
 
 ### Lineage
