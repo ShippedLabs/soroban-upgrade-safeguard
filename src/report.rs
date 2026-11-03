@@ -405,6 +405,207 @@ impl ReportedFinding {
     pub fn migrated_by(&self) -> Option<&FindingCoverage> {
         self.migrated_by.as_ref()
     }
+
+    /// Structural [`crate::category::ChangeKind`] for SemVer bump derivation.
+    pub fn change_kind(&self) -> crate::category::ChangeKind {
+        crate::category::classify_change_kind(&self.finding.category, &self.finding.severity)
+    }
+}
+
+/// High-level structural upgrade profile backing `recommended_bump`.
+///
+/// Separates upgrades that map to the same three-level SemVer label — for
+/// instance, `"additive"`, `"migration_requiring"`, and `"suppressed_breaking"`
+/// all recommend `"minor"`, while `"identical"` and `"cosmetic"` both recommend
+/// `"patch"`.
+#[non_exhaustive]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum UpgradeChangeProfile {
+    /// Zero interface, storage, runtime, documentation, or environment metadata changes.
+    #[default]
+    Identical,
+    /// Only documentation, provenance, environment metadata, or internal WASM section changes.
+    Cosmetic,
+    /// Purely backward-compatible additions requiring no data migration.
+    Additive,
+    /// Schema or runtime evolutions requiring state migration or coordination,
+    /// including breaking storage/type changes covered by a verified `[[migration]]`.
+    MigrationRequiring,
+    /// Breaking changes were detected, but every breaking change is suppressed
+    /// or sits on an ungated compatibility axis so the upgrade passes safety policy.
+    SuppressedBreaking,
+    /// Active, unsuppressed, unmigrated breaking changes that fail compatibility.
+    Breaking,
+}
+
+impl UpgradeChangeProfile {
+    /// Stable snake_case identifier matching JSON serialization.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UpgradeChangeProfile::Identical => "identical",
+            UpgradeChangeProfile::Cosmetic => "cosmetic",
+            UpgradeChangeProfile::Additive => "additive",
+            UpgradeChangeProfile::MigrationRequiring => "migration_requiring",
+            UpgradeChangeProfile::SuppressedBreaking => "suppressed_breaking",
+            UpgradeChangeProfile::Breaking => "breaking",
+        }
+    }
+
+    /// SemVer bump (`"patch"`, `"minor"`, or `"major"`) corresponding to this profile.
+    pub fn recommended_bump(self) -> &'static str {
+        match self {
+            UpgradeChangeProfile::Identical | UpgradeChangeProfile::Cosmetic => "patch",
+            UpgradeChangeProfile::Additive
+            | UpgradeChangeProfile::MigrationRequiring
+            | UpgradeChangeProfile::SuppressedBreaking => "minor",
+            UpgradeChangeProfile::Breaking => "major",
+        }
+    }
+}
+
+/// Structured explanation of why a specific `recommended_bump` was chosen.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct BumpRationale {
+    /// The recommended SemVer bump (`"patch"`, `"minor"`, or `"major"`).
+    pub recommended_bump: String,
+    /// Structural profile distinguishing e.g. `"additive"` from `"migration_requiring"`.
+    pub change_profile: UpgradeChangeProfile,
+    /// Concise human-readable explanation of why this bump was chosen.
+    pub reason: String,
+    /// Unsuppressed, unmigrated breaking changes that fail a gated compatibility check.
+    pub active_breaking_count: usize,
+    /// Breaking changes handled by a verified `[[migration]]` declaration.
+    pub migrated_breaking_count: usize,
+    /// Breaking changes explicitly acknowledged by a `[[suppress]]` rule.
+    pub suppressed_breaking_count: usize,
+    /// Unsuppressed breaking changes on axes left ungated by the active policy.
+    pub ungated_breaking_count: usize,
+    /// Changes classified as [`crate::category::ChangeKind::MigrationRequiring`].
+    pub migration_requiring_count: usize,
+    /// Purely additive changes classified as [`crate::category::ChangeKind::Additive`].
+    pub additive_count: usize,
+    /// Cosmetic or metadata changes classified as [`crate::category::ChangeKind::Cosmetic`].
+    pub cosmetic_count: usize,
+    /// Whether `contractenvmetav0` differed between the old and new builds.
+    pub env_metadata_changed: bool,
+    /// `true` when `--strict` failed the safety gate on warning-level findings
+    /// without escalating `recommended_bump` to `"major"`.
+    pub strict_gate_failed: bool,
+}
+
+/// Top-level version bump recommendation rolled up across a batch of contract pairs.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct BatchBumpRollup {
+    pub recommended_bump: String,
+    pub change_profile: UpgradeChangeProfile,
+    pub reason: String,
+    pub major_pairs: usize,
+    pub minor_pairs: usize,
+    pub patch_pairs: usize,
+    pub errored_pairs: usize,
+    pub strict_gate_failed_pairs: usize,
+}
+
+/// Roll up per-pair [`BumpRationale`] records (paired with whether the pair
+/// errored before completing structural comparison) into a coherent batch recommendation.
+pub fn rollup_batch_bumps<'a, I>(pairs: I) -> BatchBumpRollup
+where
+    I: IntoIterator<Item = (&'a SafetyReport, bool)>,
+{
+    let mut max_profile = UpgradeChangeProfile::Identical;
+    let mut major_pairs = 0usize;
+    let mut minor_pairs = 0usize;
+    let mut patch_pairs = 0usize;
+    let mut errored_pairs = 0usize;
+    let mut strict_gate_failed_pairs = 0usize;
+    let mut total_pairs = 0usize;
+
+    for (report, is_errored) in pairs {
+        total_pairs += 1;
+        let rationale = report.bump_rationale();
+        if rationale.change_profile > max_profile {
+            max_profile = rationale.change_profile;
+        }
+        match rationale.recommended_bump.as_str() {
+            "major" => major_pairs += 1,
+            "minor" => minor_pairs += 1,
+            _ => patch_pairs += 1,
+        }
+        if is_errored {
+            errored_pairs += 1;
+        }
+        if rationale.strict_gate_failed {
+            strict_gate_failed_pairs += 1;
+        }
+    }
+
+    if errored_pairs > 0 && max_profile < UpgradeChangeProfile::Breaking {
+        max_profile = UpgradeChangeProfile::Breaking;
+    }
+
+    let recommended_bump = max_profile.recommended_bump().to_string();
+    let mut reason = if total_pairs == 0 {
+        "patch: batch contained zero contract pairs".to_string()
+    } else {
+        match max_profile {
+            UpgradeChangeProfile::Breaking if errored_pairs > 0 && major_pairs == errored_pairs => {
+                format!(
+                    "major: {errored_pairs} of {total_pairs} contract pair(s) failed analysis; treating unverified batch conservatively as major"
+                )
+            }
+            UpgradeChangeProfile::Breaking => format!(
+                "major: {major_pairs} of {total_pairs} contract pair(s) require a major bump ({minor_pairs} minor, {patch_pairs} patch)"
+            ),
+            UpgradeChangeProfile::SuppressedBreaking => format!(
+                "minor: highest pair profile is suppressed_breaking ({minor_pairs} minor, {patch_pairs} patch across {total_pairs} pair(s); no active breaking pairs)"
+            ),
+            UpgradeChangeProfile::MigrationRequiring => format!(
+                "minor: at least one pair requires migration or runtime coordination ({minor_pairs} minor, {patch_pairs} patch across {total_pairs} pair(s))"
+            ),
+            UpgradeChangeProfile::Additive => format!(
+                "minor: purely additive changes across {minor_pairs} of {total_pairs} contract pair(s); no migration required"
+            ),
+            UpgradeChangeProfile::Cosmetic => format!(
+                "patch: cosmetic or metadata-only changes across {total_pairs} contract pair(s)"
+            ),
+            UpgradeChangeProfile::Identical => format!(
+                "patch: all {total_pairs} contract pair(s) have identical interfaces and metadata"
+            ),
+        }
+    };
+
+    if strict_gate_failed_pairs > 0 && recommended_bump != "major" {
+        reason.push_str(&format!(
+            "; strict mode failed safety gate on {strict_gate_failed_pairs} pair(s) without implying a major bump"
+        ));
+    }
+
+    BatchBumpRollup {
+        recommended_bump,
+        change_profile: max_profile,
+        reason,
+        major_pairs,
+        minor_pairs,
+        patch_pairs,
+        errored_pairs,
+        strict_gate_failed_pairs,
+    }
 }
 
 /// A structured container for aggregated comparison findings.
@@ -708,6 +909,14 @@ pub struct SafetyReport {
     /// See the `unstable`-feature `manifest_gates_safety` field above.
     #[cfg(not(feature = "unstable"))]
     pub(crate) manifest_gates_safety: bool,
+
+    /// Whether `contractenvmetav0` differed between the old and new builds,
+    /// even when no structural findings were emitted.
+    #[cfg(feature = "unstable")]
+    pub env_metadata_changed: bool,
+    /// See the `unstable`-feature `env_metadata_changed` field above.
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) env_metadata_changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -1504,6 +1713,7 @@ impl SafetyReport {
             complexity_violations: Vec::new(),
             manifest_verification: None,
             manifest_gates_safety: false,
+            env_metadata_changed: false,
         }
     }
 
@@ -1867,6 +2077,10 @@ impl SafetyReport {
             complexity_violations: Vec::new(),
             manifest_verification: None,
             manifest_gates_safety: false,
+            env_metadata_changed: diff
+                .findings
+                .iter()
+                .any(|f| f.category == crate::diff::ENVIRONMENT_CATEGORY),
         }
     }
 
@@ -1889,6 +2103,25 @@ impl SafetyReport {
         self
     }
 
+    /// Record whether `contractenvmetav0` differed between the two builds.
+    pub fn set_env_metadata_changed(&mut self, changed: bool) {
+        self.env_metadata_changed = changed;
+    }
+
+    /// Builder form of [`Self::set_env_metadata_changed`].
+    pub fn with_env_metadata_changed(mut self, changed: bool) -> Self {
+        self.env_metadata_changed = changed;
+        self
+    }
+
+    /// Whether `contractenvmetav0` differed between the analyzed builds.
+    pub fn env_metadata_changed(&self) -> bool {
+        self.env_metadata_changed
+            || self
+                .findings_by_category
+                .contains_key(crate::diff::ENVIRONMENT_CATEGORY)
+    }
+
     pub fn interface_unchanged(&self) -> Option<bool> {
         match (self.old_interface_hash, self.new_interface_hash) {
             (Some(old), Some(new)) => Some(old == new),
@@ -1896,39 +2129,254 @@ impl SafetyReport {
         }
     }
 
-    pub fn recommended_bump(&self) -> &'static str {
-        if self.critical_count > 0 || !self.call_abi.compatible() {
-            "major"
-        } else if self.warning_count > 0 {
-            "minor"
-        } else if self.info_count > 0 {
-            if self.has_non_documentation_info_findings() {
-                "minor"
-            } else {
-                "patch"
-            }
-        } else {
-            "patch"
-        }
+    /// Structural upgrade profile distinguishing identical, cosmetic, additive,
+    /// migration-requiring, suppressed-breaking, and breaking upgrades.
+    pub fn upgrade_change_profile(&self) -> UpgradeChangeProfile {
+        self.bump_rationale().change_profile
     }
 
-    fn has_non_documentation_info_findings(&self) -> bool {
-        const DOC_CATEGORIES: &[&str] = &[
-            "Function Documentation Changed",
-            "Struct Documentation Changed",
-            "Enum Documentation Changed",
-        ];
+    /// Recommended SemVer bump (`"patch"`, `"minor"`, or `"major"`).
+    ///
+    /// Derived from finding change kinds, suppression/migration coverage, and
+    /// active compatibility gates so it never contradicts [`Self::is_safe`].
+    pub fn recommended_bump(&self) -> &'static str {
+        self.upgrade_change_profile().recommended_bump()
+    }
 
-        for findings in self.findings_by_category.values() {
-            for reported in findings {
-                if reported.finding.severity == Severity::Info
-                    && !DOC_CATEGORIES.contains(&reported.finding.category.as_str())
+    /// Concise human-readable explanation of why [`Self::recommended_bump`] was chosen.
+    pub fn recommended_bump_reason(&self) -> String {
+        self.bump_rationale().reason
+    }
+
+    /// Full structured rationale backing [`Self::recommended_bump`].
+    pub fn bump_rationale(&self) -> BumpRationale {
+        use crate::category::ChangeKind;
+        use crate::diff::CompatibilityAxis;
+
+        let mut active_breaking_count = 0usize;
+        let mut migrated_breaking_count = 0usize;
+        let mut suppressed_breaking_count = 0usize;
+        let mut ungated_breaking_count = 0usize;
+        let mut migration_requiring_count = 0usize;
+        let mut additive_count = 0usize;
+        let mut cosmetic_count = 0usize;
+        let mut has_structural_diff_findings = false;
+        let mut has_unsuppressed_call_abi_finding = false;
+        let mut has_suppressed_or_migrated_call_abi_finding = false;
+        let mut has_analysis_error = false;
+
+        for reported in self.findings_by_category.values().flatten() {
+            if !matches!(
+                reported.rule_id.as_str(),
+                "storage_schema_mismatch"
+                    | "historical_lineage_break"
+                    | "build_manifest_mismatch"
+                    | "build_manifest_stale"
+            ) {
+                has_structural_diff_findings = true;
+            }
+            if reported.finding.category == "analysis-error" {
+                has_analysis_error = true;
+            }
+            if reported.axes.contains(&CompatibilityAxis::CallAbi) {
+                if !reported.suppressed
+                    && reported.migrated_by.is_none()
+                    && reported.finding.severity != Severity::Info
+                    && reported.finding.category != crate::diff::ENVIRONMENT_CATEGORY
                 {
-                    return true;
+                    has_unsuppressed_call_abi_finding = true;
+                } else if reported.suppressed || reported.migrated_by.is_some() {
+                    has_suppressed_or_migrated_call_abi_finding = true;
+                }
+            }
+
+            match reported.change_kind() {
+                ChangeKind::Breaking => {
+                    if reported.migrated_by.is_some() {
+                        migrated_breaking_count += 1;
+                    } else if reported.suppressed {
+                        suppressed_breaking_count += 1;
+                    } else {
+                        let axis_is_gated = reported.rule_id == "historical_lineage_break"
+                            || reported.axes.is_empty()
+                            || self.gated_axes.is_empty()
+                            || reported.axes.iter().any(|a| self.gated_axes.contains(a));
+                        if !self.is_safe && axis_is_gated {
+                            active_breaking_count += 1;
+                        } else {
+                            ungated_breaking_count += 1;
+                        }
+                    }
+                }
+                ChangeKind::MigrationRequiring => {
+                    migration_requiring_count += 1;
+                }
+                ChangeKind::Additive => {
+                    additive_count += 1;
+                }
+                ChangeKind::Cosmetic => {
+                    cosmetic_count += 1;
                 }
             }
         }
-        false
+
+        if !self.call_abi.compatible() {
+            let unsuppressed_wire_break =
+                !has_structural_diff_findings || has_unsuppressed_call_abi_finding;
+            if unsuppressed_wire_break {
+                let call_abi_gated = self.gated_axes.is_empty()
+                    || self.gated_axes.contains(&CompatibilityAxis::CallAbi);
+                if !self.is_safe && call_abi_gated {
+                    if active_breaking_count == 0 {
+                        active_breaking_count += 1;
+                    }
+                } else if ungated_breaking_count == 0 {
+                    ungated_breaking_count += 1;
+                }
+            } else if has_suppressed_or_migrated_call_abi_finding
+                && suppressed_breaking_count == 0
+                && migrated_breaking_count == 0
+            {
+                suppressed_breaking_count += 1;
+            }
+        }
+
+        let empirical_failures = self
+            .empirical_findings
+            .iter()
+            .filter(|ef| !ef.is_success)
+            .count();
+        if !self.is_safe && empirical_failures > 0 {
+            active_breaking_count += empirical_failures;
+        }
+
+        let strict_gate_failed = self.strict
+            && !self.is_safe
+            && active_breaking_count == 0
+            && self
+                .axis_verdicts
+                .values()
+                .any(|&status| status == AxisStatus::Failed);
+
+        let env_changed = self.env_metadata_changed();
+        let change_profile = if active_breaking_count > 0 {
+            UpgradeChangeProfile::Breaking
+        } else if migration_requiring_count > 0 || migrated_breaking_count > 0 {
+            UpgradeChangeProfile::MigrationRequiring
+        } else if suppressed_breaking_count > 0 || ungated_breaking_count > 0 {
+            UpgradeChangeProfile::SuppressedBreaking
+        } else if additive_count > 0 {
+            UpgradeChangeProfile::Additive
+        } else if cosmetic_count > 0 || env_changed {
+            UpgradeChangeProfile::Cosmetic
+        } else {
+            UpgradeChangeProfile::Identical
+        };
+
+        let recommended_bump = change_profile.recommended_bump();
+        let env_finding_count = self
+            .findings_by_category
+            .get(crate::diff::ENVIRONMENT_CATEGORY)
+            .map_or(0, Vec::len);
+
+        let mut reason = match change_profile {
+            UpgradeChangeProfile::Breaking if has_analysis_error => format!(
+                "major: contract analysis failed ({active_breaking_count} errored finding(s)); treating unverified upgrade conservatively as major"
+            ),
+            UpgradeChangeProfile::Breaking => {
+                let mut msg = format!(
+                    "major: {active_breaking_count} active breaking change(s) require a major version bump"
+                );
+                if suppressed_breaking_count > 0 || migrated_breaking_count > 0 {
+                    msg.push_str(&format!(
+                        " ({migrated_breaking_count} migrated, {suppressed_breaking_count} suppressed)"
+                    ));
+                }
+                msg
+            }
+            UpgradeChangeProfile::MigrationRequiring => {
+                let mut msg = if migrated_breaking_count > 0 && migration_requiring_count > 0 {
+                    format!(
+                        "minor: {migrated_breaking_count} breaking change(s) covered by verified migration and {migration_requiring_count} migration-requiring change(s)"
+                    )
+                } else if migrated_breaking_count > 0 {
+                    format!(
+                        "minor: {migrated_breaking_count} breaking change(s) covered by verified migration; state migration required on upgrade"
+                    )
+                } else {
+                    format!(
+                        "minor: {migration_requiring_count} migration-requiring change(s); state migration or runtime coordination required"
+                    )
+                };
+                if suppressed_breaking_count > 0 {
+                    msg.push_str(&format!(
+                        " ({suppressed_breaking_count} suppressed breaking change(s) also acknowledged)"
+                    ));
+                }
+                msg
+            }
+            UpgradeChangeProfile::SuppressedBreaking => {
+                if suppressed_breaking_count > 0 && ungated_breaking_count > 0 {
+                    format!(
+                        "minor: {suppressed_breaking_count} suppressed and {ungated_breaking_count} ungated breaking change(s) accepted by policy; capped at minor to match safe verdict"
+                    )
+                } else if suppressed_breaking_count > 0 {
+                    format!(
+                        "minor: {suppressed_breaking_count} breaking change(s) acknowledged via suppression; capped at minor to match safe verdict"
+                    )
+                } else {
+                    format!(
+                        "minor: {ungated_breaking_count} breaking change(s) on ungated compatibility axis accepted by policy; capped at minor to match safe verdict"
+                    )
+                }
+            }
+            UpgradeChangeProfile::Additive => format!(
+                "minor: purely additive changes ({additive_count} additive finding(s)); no data migration required"
+            ),
+            UpgradeChangeProfile::Cosmetic => {
+                if env_changed && cosmetic_count == env_finding_count {
+                    "patch: environment metadata changed with no interface, storage, or runtime changes"
+                        .to_string()
+                } else {
+                    format!(
+                        "patch: cosmetic changes only ({cosmetic_count} cosmetic finding(s)); exported interface and storage layout compatible"
+                    )
+                }
+            }
+            UpgradeChangeProfile::Identical => {
+                "patch: no interface, storage, runtime, or metadata changes detected".to_string()
+            }
+        };
+
+        if !self.is_safe && active_breaking_count == 0 {
+            if strict_gate_failed {
+                reason.push_str(
+                    "; strict mode failed safety gate on warnings without implying a major bump",
+                );
+            } else if !self.budget_violations.is_empty()
+                || !self.complexity_violations.is_empty()
+                || self.manifest_gates_safety
+            {
+                reason.push_str(
+                    "; policy budget or provenance gate failed safety check without implying a major bump",
+                );
+            }
+        }
+
+        BumpRationale {
+            recommended_bump: recommended_bump.to_string(),
+            change_profile,
+            reason,
+            active_breaking_count,
+            migrated_breaking_count,
+            suppressed_breaking_count,
+            ungated_breaking_count,
+            migration_requiring_count,
+            additive_count,
+            cosmetic_count,
+            env_metadata_changed: env_changed,
+            strict_gate_failed,
+        }
     }
 
     pub fn to_renderable(&self) -> RenderableReport {
@@ -1964,6 +2412,8 @@ impl SafetyReport {
             });
         }
 
+        let rationale = self.bump_rationale();
+
         RenderableReport {
             report_schema_version: REPORT_SCHEMA_VERSION,
             provenance: crate::render::Provenance {
@@ -1997,7 +2447,9 @@ impl SafetyReport {
             },
             suppressed_count: self.suppressed_count,
             total_findings: self.total_findings,
-            recommended_bump: self.recommended_bump().to_string(),
+            recommended_bump: rationale.recommended_bump.clone(),
+            recommended_bump_reason: rationale.reason.clone(),
+            bump_rationale: Some(rationale),
             old_interface_hash: self.old_interface_hash.map(|h| h.to_hex()),
             new_interface_hash: self.new_interface_hash.map(|h| h.to_hex()),
             scope: self.scope.clone(),
@@ -2241,9 +2693,23 @@ mod tests {
             complexity_violations: Vec::new(),
             manifest_verification: None,
             manifest_gates_safety: false,
+            env_metadata_changed: false,
         };
 
         assert_eq!(report.recommended_bump(), "patch");
+        assert_eq!(
+            report.upgrade_change_profile(),
+            UpgradeChangeProfile::Identical
+        );
+
+        report.set_env_metadata_changed(true);
+        assert_eq!(report.recommended_bump(), "patch");
+        assert_eq!(
+            report.upgrade_change_profile(),
+            UpgradeChangeProfile::Cosmetic
+        );
+        assert!(report.bump_rationale().env_metadata_changed);
+        report.set_env_metadata_changed(false);
 
         report.info_count = 1;
         report.findings_by_category.insert(
@@ -2251,6 +2717,10 @@ mod tests {
             vec![make_finding(Severity::Info, "Function Added")],
         );
         assert_eq!(report.recommended_bump(), "minor");
+        assert_eq!(
+            report.upgrade_change_profile(),
+            UpgradeChangeProfile::Additive
+        );
 
         report.info_count = 1;
         report.warning_count = 0;
@@ -2264,14 +2734,150 @@ mod tests {
             )],
         );
         assert_eq!(report.recommended_bump(), "patch");
+        assert_eq!(
+            report.upgrade_change_profile(),
+            UpgradeChangeProfile::Cosmetic
+        );
 
         report.info_count = 0;
         report.warning_count = 1;
         report.findings_by_category.clear();
+        report.findings_by_category.insert(
+            "Struct Field Added".to_string(),
+            vec![make_finding(Severity::Warning, "Struct Field Added")],
+        );
         assert_eq!(report.recommended_bump(), "minor");
+        assert_eq!(
+            report.upgrade_change_profile(),
+            UpgradeChangeProfile::MigrationRequiring
+        );
 
+        report.warning_count = 0;
         report.critical_count = 1;
+        report.is_safe = false;
+        report.findings_by_category.clear();
+        report.findings_by_category.insert(
+            "Function Removed".to_string(),
+            vec![make_finding(Severity::Critical, "Function Removed")],
+        );
         assert_eq!(report.recommended_bump(), "major");
+        assert_eq!(
+            report.upgrade_change_profile(),
+            UpgradeChangeProfile::Breaking
+        );
+
+        // Suppressing the breaking finding restores `is_safe = true` and caps
+        // the version bump at `minor` so it never contradicts the verdict.
+        let mut suppressed_finding = make_finding(Severity::Critical, "Function Removed");
+        suppressed_finding.suppressed = true;
+        suppressed_finding.suppression_reason = Some("Reviewed cutover".to_string());
+        report.is_safe = true;
+        report.suppressed_count = 1;
+        report.suppressed_critical_count = 1;
+        report.findings_by_category.clear();
+        report
+            .findings_by_category
+            .insert("Function Removed".to_string(), vec![suppressed_finding]);
+        assert_eq!(report.recommended_bump(), "minor");
+        assert_eq!(
+            report.upgrade_change_profile(),
+            UpgradeChangeProfile::SuppressedBreaking
+        );
+    }
+
+    #[test]
+    fn recommended_bump_is_consistent_with_verdict_across_all_categories() {
+        use crate::diff::Finding;
+        use crate::suppression::SuppressionRule;
+
+        let empty_spec = crate::spec::ContractSpec::default();
+        for cat in crate::category::FindingCategory::all() {
+            let diff = DiffReport {
+                findings: vec![Finding {
+                    severity: cat.severity(),
+                    axes: Vec::new(),
+                    category: cat.as_str().to_string(),
+                    message: "synthetic check".to_string(),
+                    type_name: Some("State".to_string()),
+                    target: Some("target_item".to_string()),
+                    change: None,
+                    root_target: None,
+                }],
+            };
+
+            let mut default_config = SuppressionConfig::default();
+            default_config.policy.gate_event_indexer = true;
+            default_config.policy.gate_source_level = true;
+
+            for strict in [false, true] {
+                let unsuppressed = SafetyReport::with_suppressions_with_specs(
+                    &diff,
+                    &default_config,
+                    false,
+                    strict,
+                    &empty_spec,
+                    &empty_spec,
+                    None,
+                );
+                if unsuppressed.is_safe() {
+                    assert_ne!(
+                        unsuppressed.recommended_bump(),
+                        "major",
+                        "safe verdict must never recommend major for unsuppressed '{}' (strict={strict})",
+                        cat.as_str()
+                    );
+                }
+
+                let ungated = SafetyReport::with_suppressions_with_specs(
+                    &diff,
+                    &SuppressionConfig::default(),
+                    false,
+                    strict,
+                    &empty_spec,
+                    &empty_spec,
+                    None,
+                );
+                if ungated.is_safe() {
+                    assert_ne!(
+                        ungated.recommended_bump(),
+                        "major",
+                        "safe verdict must never recommend major on ungated axis for '{}' (strict={strict})",
+                        cat.as_str()
+                    );
+                }
+
+                let mut suppressed_config = default_config.clone();
+                suppressed_config.rules.push(SuppressionRule {
+                    rule_id: None,
+                    category: cat.as_str().to_string(),
+                    target: Some("target_item".to_string()),
+                    reason: Some("reviewed".to_string()),
+                    author: None,
+                    expiry: None,
+                    fingerprint: None,
+                });
+                let suppressed = SafetyReport::with_suppressions_with_specs(
+                    &diff,
+                    &suppressed_config,
+                    false,
+                    strict,
+                    &empty_spec,
+                    &empty_spec,
+                    None,
+                );
+                assert!(
+                    suppressed.is_safe(),
+                    "suppressed '{}' should pass safety gate (strict={strict})",
+                    cat.as_str()
+                );
+                assert_ne!(
+                    suppressed.recommended_bump(),
+                    "major",
+                    "suppressed '{}' must never recommend major alongside safe verdict",
+                    cat.as_str()
+                );
+            }
+        }
     }
 
     fn sample_manifest() -> BuildManifest {

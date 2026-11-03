@@ -69,8 +69,48 @@ The validator diffs the `contractspecv0` section exported by Soroban binaries. H
 *   **Adding an input parameter**: Breaks existing invocations. Reported as **Critical**.
 
 ### User-Defined Types (UDTs)
-*   **Adding a field to a struct**: If a struct is consumed by public functions, adding a field shifts parameters. If the struct is stored, it shifts byte layout. Reported as **Critical**.
-*   **Modifying enum discriminants**: Modifying or removing case values changes serialization. Reported as **Critical**.
+*   **Adding a field to a struct**: Appending a field to an existing struct alters XDR field count for stored entries (`Struct Field Added`, `Warning`, `ChangeKind::MigrationRequiring`), while inserting a field mid-struct shifts positional layout (`Struct Field Inserted`, `Critical`, `ChangeKind::Breaking`).
+*   **Modifying enum discriminants**: Modifying or removing case values changes serialization. Reported as **Critical** (`ChangeKind::Breaking`).
+
+---
+
+## Contract Upgrade `recommended_bump` Derivation
+
+Beyond versioning this crate itself, `soroban-upgrade-safeguard` recommends a SemVer bump (`"patch"`, `"minor"`, or `"major"`) for every analyzed smart-contract upgrade alongside structured context (`recommended_bump_reason` and `bump_rationale`).
+
+### 1. Change-Kind Classification (`ChangeKind`)
+
+Recommendations are derived from each finding's structural `ChangeKind` (defined on `FindingCategory::change_kind()`), independent of display severity overrides:
+
+| `ChangeKind` | Representative Categories | Baseline Bump | `bump_rationale.change_profile` |
+| :--- | :--- | :--- | :--- |
+| `cosmetic` | `Function/Struct/Enum Documentation Changed`, `Environment`, `Host Import Removed`, `Data/Element Segment Changed`, `WASM Proposal Removed`, `Build Manifest Mismatch/Stale` | `"patch"` | `"cosmetic"` |
+| `additive` | `Function Added`, `Struct/Enum/Union/Error Enum Added`, `Enum/Event Enum/Union/Error Enum Case Added`, `Memory/Table/Global Added` | `"minor"` | `"additive"` |
+| `migration_requiring` | `Struct Field Added`, `Parameter Renamed`, `Protocol Requirement Raised`, `Host Import Added / Signature Changed / Unknown`, `Memory/Table Limits Changed`, `Global/Start Function Removed`, `Start Function Changed`, `WASM Proposal Added` | `"minor"` | `"migration_requiring"` |
+| `breaking` | Signature/parameter/return incompatibilities, struct/enum/union/event removals or layout mutations, `Cascading Layout Break`, `Protocol Environment Mismatch`, storage durability/namespace/map key-value changes, directional `call_abi` breaks, empirical decode failures | `"major"` | `"breaking"` |
+
+When zero findings and zero `contractenvmetav0` differences exist, `change_profile` is `"identical"` and `recommended_bump` is `"patch"`. When `contractenvmetav0` differs with zero compatibility findings, `change_profile` is `"cosmetic"` (`env_metadata_changed: true`) and `recommended_bump` remains `"patch"`.
+
+### 2. Distinguishing Additive vs Migration-Requiring Upgrades
+
+In three-level SemVer, both purely additive upgrades (e.g. `Function Added`) and compatible-with-migration upgrades (e.g. `Struct Field Added`, or a `Struct Field Type Changed` covered by a verified `[[migration]]` declaration) recommend `"minor"`. Consumers distinguish them via `bump_rationale.change_profile` (`"additive"` vs `"migration_requiring"`) and `SafetyReport::upgrade_change_profile()`.
+
+### 3. Suppression, Ungated Axes, and Verdict Consistency
+
+`recommended_bump` is guaranteed never to contradict `is_safe`:
+
+*   **Safe verdict (`is_safe: true`)**: Never recommends `"major"`.
+*   **Suppressed breaking changes (`[[suppress]]`)**: Suppressing a breaking finding records human acceptance of the break for this deployment (`is_safe: true`), not byte-for-byte identity. When all breaking changes are suppressed (and no migration-requiring changes are present), `change_profile` is `"suppressed_breaking"` and `recommended_bump` is capped at `"minor"`. Suppressing cosmetic-only findings yields `"patch"`.
+*   **Verified migrations (`[[migration]]`)**: A breaking finding covered by a verified migration resolves the safety gate (`is_safe: true`) and classifies the upgrade as `"migration_requiring"` (`"minor"`).
+*   **Ungated compatibility axes**: An unsuppressed breaking finding on an axis disabled in `[policy]` (for example `gate_event_indexer = false`) does not fail `is_safe` and is likewise capped at `"minor"` (`"suppressed_breaking"`, recorded under `ungated_breaking_count`).
+
+### 4. `--strict` Mode Interaction
+
+`--strict` tightens the safety gate so `Warning` findings fail the run (`is_safe: false`), without changing the structural nature of the upgrade. A warning-only upgrade under `--strict` sets `is_safe: false`, `bump_rationale.strict_gate_failed: true`, and keeps `recommended_bump: "minor"`.
+
+### 5. Batch Mode Rollup
+
+In batch mode (`--manifest` or directory comparison), per-pair profiles roll up via `rollup_batch_bumps` by taking the maximum `UpgradeChangeProfile` across all pairs. Any pair that fails analysis (`BatchResult::Error`) forces the batch recommendation conservatively to `"major"` alongside `is_safe: false`.
 
 ---
 

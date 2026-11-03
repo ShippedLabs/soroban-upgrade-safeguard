@@ -160,6 +160,7 @@ pub fn compare_bytes(
     );
     safety_report.scope.exported_interface = true;
     safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.set_env_metadata_changed(old_meta.env_meta != new_meta.env_meta);
     safety_report.old_spec_summary = Some(old_spec.summary());
     safety_report.new_spec_summary = Some(new_spec.summary());
 
