@@ -162,6 +162,7 @@ fn test_lineage_store_option_in_compare_options() {
         lineage_store: Some(&store),
         contract: None,
         complexity_budget: None,
+        ..Default::default()
     };
 
     let report = compare_wasm_bytes_with_options(&wasm_empty, &wasm_empty, &options).unwrap();
@@ -226,6 +227,7 @@ fn max_live_versions_zero_checks_nothing_and_passes_vacuously() {
         lineage_store: Some(&store),
         contract: None,
         complexity_budget: None,
+        ..Default::default()
     };
 
     let report = compare_wasm_bytes_with_options(&v2_bytes, &v2_bytes, &options)
@@ -261,6 +263,7 @@ fn without_the_cap_the_same_incompatible_historical_version_is_caught() {
         lineage_store: Some(&store),
         contract: None,
         complexity_budget: None,
+        ..Default::default()
     };
 
     let report = compare_wasm_bytes_with_options(&v2_bytes, &v2_bytes, &options)

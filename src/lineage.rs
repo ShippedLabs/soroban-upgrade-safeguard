@@ -383,6 +383,26 @@ pub fn validate_candidate_against_lineage(
     suppressions: &SuppressionConfig,
     strict: bool,
 ) -> Result<LineageValidationReport> {
+    validate_candidate_against_lineage_scoped(
+        new_wasm,
+        new_spec,
+        store,
+        suppressions,
+        strict,
+        &diff::ComparisonScope::all(),
+    )
+}
+
+/// Validate a candidate contract build against live historical versions using
+/// the selected [`diff::ComparisonScope`].
+pub fn validate_candidate_against_lineage_scoped(
+    new_wasm: &[u8],
+    new_spec: &ContractSpec,
+    store: &LineageStore,
+    suppressions: &SuppressionConfig,
+    strict: bool,
+    scope: &diff::ComparisonScope,
+) -> Result<LineageValidationReport> {
     store
         .validate_integrity()
         .context("Invalid lineage store cannot be used for historical validation")?;
@@ -421,12 +441,14 @@ pub fn validate_candidate_against_lineage(
             continue;
         };
 
-        let mut diff_report = diff::compare(&historical_spec, new_spec);
-        diff::compare_runtime_surfaces(
-            &crate::runtime_surface::RuntimeSurface::default(),
-            &new_meta.runtime_surface,
-            &mut diff_report,
-        );
+        let mut diff_report = diff::compare_scoped(&historical_spec, new_spec, scope);
+        if scope.includes(diff::ScopeArea::Env) {
+            diff::compare_runtime_surfaces(
+                &crate::runtime_surface::RuntimeSurface::default(),
+                &new_meta.runtime_surface,
+                &mut diff_report,
+            );
+        }
 
         for finding in diff_report.findings {
             let rule = suppressions.matching_rule(&finding);

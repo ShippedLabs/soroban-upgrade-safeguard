@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use crate::capability;
 use crate::category::FindingCategory;
@@ -278,23 +278,235 @@ impl DiffReport {
     }
 }
 
+/// A selectable spec or metadata area for scoped comparisons.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeArea {
+    /// Exported contract functions and directional call-ABI checks.
+    Functions,
+    /// Non-event structs, enums, unions, storage schemas, and empirical storage checks.
+    Types,
+    /// Event structs, event enums, and event unions.
+    Events,
+    /// Contract error enums (`#[contracterror]`).
+    Errors,
+    /// WASM environment metadata, host imports, and runtime surface metadata.
+    Env,
+}
+
+impl ScopeArea {
+    pub const ALL: [ScopeArea; 5] = [
+        ScopeArea::Functions,
+        ScopeArea::Types,
+        ScopeArea::Events,
+        ScopeArea::Errors,
+        ScopeArea::Env,
+    ];
+
+    pub const SUPPORTED_NAMES: &'static str = "functions, types, events, errors, env, all";
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScopeArea::Functions => "functions",
+            ScopeArea::Types => "types",
+            ScopeArea::Events => "events",
+            ScopeArea::Errors => "errors",
+            ScopeArea::Env => "env",
+        }
+    }
+}
+
+impl std::fmt::Display for ScopeArea {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for ScopeArea {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "functions" | "function" | "fn" | "funcs" => Ok(ScopeArea::Functions),
+            "types" | "type" | "storage" | "storage-types" | "storage_types" | "udt" | "udts" => {
+                Ok(ScopeArea::Types)
+            }
+            "events" | "event" => Ok(ScopeArea::Events),
+            "errors" | "error" | "error-enums" | "error_enums" => Ok(ScopeArea::Errors),
+            "env" | "environment" | "env-metadata" | "env_metadata" => Ok(ScopeArea::Env),
+            other => Err(format!(
+                "Unknown comparison scope '{other}'. Supported values: {}",
+                Self::SUPPORTED_NAMES
+            )),
+        }
+    }
+}
+
+/// Selected spec and metadata areas participating in a comparison.
+///
+/// Defaults to every area enabled so an unscoped comparison analyzes the full
+/// contract surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ComparisonScope {
+    included: BTreeSet<ScopeArea>,
+}
+
+impl Default for ComparisonScope {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+impl ComparisonScope {
+    /// Include all comparison areas.
+    pub fn all() -> Self {
+        Self {
+            included: ScopeArea::ALL.into_iter().collect(),
+        }
+    }
+
+    /// Construct a scope from an explicit set of areas.
+    ///
+    /// An empty iterator falls back to [`Self::all`].
+    pub fn from_areas<I: IntoIterator<Item = ScopeArea>>(areas: I) -> Self {
+        let included: BTreeSet<ScopeArea> = areas.into_iter().collect();
+        if included.is_empty() {
+            Self::all()
+        } else {
+            Self { included }
+        }
+    }
+
+    /// Parse CLI scope tokens (supporting `all`, repeatable flags, and
+    /// comma-delimited lists). An empty slice returns [`Self::all`].
+    pub fn from_cli_tokens<S: AsRef<str>>(tokens: &[S]) -> Result<Self, String> {
+        if tokens.is_empty() {
+            return Ok(Self::all());
+        }
+        let mut included = BTreeSet::new();
+        let mut saw_all = false;
+        let mut saw_specific = false;
+        for raw in tokens {
+            for part in raw.as_ref().split(',') {
+                let trimmed = part.trim();
+                if trimmed.is_empty() {
+                    return Err(format!(
+                        "Empty comparison scope value. Supported values: {}",
+                        ScopeArea::SUPPORTED_NAMES
+                    ));
+                }
+                if trimmed.eq_ignore_ascii_case("all") {
+                    saw_all = true;
+                    included.extend(ScopeArea::ALL);
+                } else {
+                    saw_specific = true;
+                    included.insert(trimmed.parse::<ScopeArea>()?);
+                }
+            }
+        }
+        if saw_all && saw_specific {
+            return Err(
+                "Cannot combine '--scope all' with specific scope areas; omit 'all' to restrict the comparison."
+                    .to_string(),
+            );
+        }
+        Ok(Self { included })
+    }
+
+    pub fn includes(&self, area: ScopeArea) -> bool {
+        self.included.contains(&area)
+    }
+
+    /// Whether any `contractspecv0` interface area (`functions`, `types`,
+    /// `events`, or `errors`) is included.
+    pub fn includes_any_spec_area(&self) -> bool {
+        self.includes(ScopeArea::Functions)
+            || self.includes(ScopeArea::Types)
+            || self.includes(ScopeArea::Events)
+            || self.includes(ScopeArea::Errors)
+    }
+
+    pub fn is_full(&self) -> bool {
+        ScopeArea::ALL
+            .iter()
+            .all(|area| self.included.contains(area))
+    }
+
+    pub fn included_areas(&self) -> Vec<ScopeArea> {
+        ScopeArea::ALL
+            .into_iter()
+            .filter(|area| self.included.contains(area))
+            .collect()
+    }
+
+    pub fn excluded_areas(&self) -> Vec<ScopeArea> {
+        ScopeArea::ALL
+            .into_iter()
+            .filter(|area| !self.included.contains(area))
+            .collect()
+    }
+
+    pub fn included_names(&self) -> Vec<String> {
+        self.included_areas()
+            .into_iter()
+            .map(|area| area.as_str().to_string())
+            .collect()
+    }
+
+    pub fn excluded_names(&self) -> Vec<String> {
+        self.excluded_areas()
+            .into_iter()
+            .map(|area| area.as_str().to_string())
+            .collect()
+    }
+}
+
 /// Compare two contract specs and return a report of all findings.
 pub fn compare(old: &ContractSpec, new: &ContractSpec) -> DiffReport {
+    compare_scoped(old, new, &ComparisonScope::all())
+}
+
+/// Compare two contract specs restricted to the selected [`ComparisonScope`].
+///
+/// Excluded areas are skipped in the diff stage so they emit zero findings.
+pub fn compare_scoped(
+    old: &ContractSpec,
+    new: &ContractSpec,
+    scope: &ComparisonScope,
+) -> DiffReport {
     let mut report = DiffReport::default();
 
-    compare_functions(old, new, &mut report);
-    compare_structs(old, new, &mut report);
-    compare_enums(old, new, &mut report);
-    compare_unions(old, new, &mut report);
-    compare_error_enums(old, new, &mut report);
+    if scope.includes(ScopeArea::Functions) {
+        compare_functions(old, new, &mut report);
+    }
+    if scope.includes(ScopeArea::Types) || scope.includes(ScopeArea::Events) {
+        compare_structs_scoped(old, new, scope, &mut report);
+        compare_enums_scoped(old, new, scope, &mut report);
+        compare_unions_scoped(old, new, scope, &mut report);
+    }
+    if scope.includes(ScopeArea::Errors) {
+        compare_error_enums(old, new, &mut report);
+    }
 
     // Must run after the per-kind passes, which each see only their own map and
     // so mistake a kind change for an unrelated removal plus addition, and
     // before cascade detection, so a type that changed kind still propagates to
     // everything embedding it.
-    detect_type_kind_changes(old, new, &mut report);
+    detect_type_kind_changes_scoped(old, new, scope, &mut report);
 
-    detect_cascading_layout_breaks(old, &mut report);
+    detect_cascading_layout_breaks_scoped(old, scope, &mut report);
 
     // Post-process to assign axes and legacy severity
     for finding in &mut report.findings {
@@ -1237,9 +1449,30 @@ fn types_equal(a: &ScSpecTypeDef, b: &ScSpecTypeDef) -> bool {
     a == b
 }
 
+fn udt_area_for_name(name: &str) -> ScopeArea {
+    if is_event(name) {
+        ScopeArea::Events
+    } else {
+        ScopeArea::Types
+    }
+}
+
 /// Compare struct definitions between old and new contract specs.
+#[allow(dead_code)]
 fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport) {
+    compare_structs_scoped(old, new, &ComparisonScope::all(), report);
+}
+
+fn compare_structs_scoped(
+    old: &ContractSpec,
+    new: &ContractSpec,
+    scope: &ComparisonScope,
+    report: &mut DiffReport,
+) {
     for (name, old_struct) in &old.structs {
+        if !scope.includes(udt_area_for_name(name)) {
+            continue;
+        }
         let is_evt = is_event(name);
         match new.structs.get(name) {
             None => {
@@ -1295,6 +1528,9 @@ fn compare_structs(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepo
 
     // Check for newly added structs (informational)
     for name in new.structs.keys() {
+        if !scope.includes(udt_area_for_name(name)) {
+            continue;
+        }
         if !old.structs.contains_key(name) {
             report.findings.push(Finding {
                 axes: Vec::new(),
@@ -1494,8 +1730,21 @@ fn check_struct_fields(
 }
 
 /// Compare enum definitions between old and new contract specs.
+#[allow(dead_code)]
 fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport) {
+    compare_enums_scoped(old, new, &ComparisonScope::all(), report);
+}
+
+fn compare_enums_scoped(
+    old: &ContractSpec,
+    new: &ContractSpec,
+    scope: &ComparisonScope,
+    report: &mut DiffReport,
+) {
     for (name, old_enum) in &old.enums {
+        if !scope.includes(udt_area_for_name(name)) {
+            continue;
+        }
         let is_evt = is_event(name);
         match new.enums.get(name) {
             None => {
@@ -1551,6 +1800,9 @@ fn compare_enums(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport
 
     // Check for newly added enums
     for name in new.enums.keys() {
+        if !scope.includes(udt_area_for_name(name)) {
+            continue;
+        }
         if !old.enums.contains_key(name) {
             report.findings.push(Finding {
                 axes: Vec::new(),
@@ -1659,8 +1911,21 @@ fn check_enum_cases(
 }
 
 /// Compare union definitions between old and new contract specs.
+#[allow(dead_code)]
 fn compare_unions(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport) {
+    compare_unions_scoped(old, new, &ComparisonScope::all(), report);
+}
+
+fn compare_unions_scoped(
+    old: &ContractSpec,
+    new: &ContractSpec,
+    scope: &ComparisonScope,
+    report: &mut DiffReport,
+) {
     for (name, old_union) in &old.unions {
+        if !scope.includes(udt_area_for_name(name)) {
+            continue;
+        }
         match new.unions.get(name) {
             None => {
                 report.findings.push(Finding {
@@ -1684,6 +1949,9 @@ fn compare_unions(old: &ContractSpec, new: &ContractSpec, report: &mut DiffRepor
     }
 
     for name in new.unions.keys() {
+        if !scope.includes(udt_area_for_name(name)) {
+            continue;
+        }
         if !old.unions.contains_key(name) {
             report.findings.push(Finding {
                 axes: Vec::new(),
@@ -2048,7 +2316,23 @@ fn udt_kind_of(spec: &ContractSpec, name: &str) -> Option<UdtKind> {
 /// There is currently no type-level rename detection in this module; if one is
 /// added it must skip names handled here, so that a single change is not
 /// reported as both a rename and a kind change.
+fn udt_scope_area(name: &str, kind: UdtKind) -> ScopeArea {
+    match kind {
+        UdtKind::ErrorEnum => ScopeArea::Errors,
+        UdtKind::Struct | UdtKind::Enum | UdtKind::Union => udt_area_for_name(name),
+    }
+}
+
 pub fn detect_type_kind_changes(old: &ContractSpec, new: &ContractSpec, report: &mut DiffReport) {
+    detect_type_kind_changes_scoped(old, new, &ComparisonScope::all(), report);
+}
+
+fn detect_type_kind_changes_scoped(
+    old: &ContractSpec,
+    new: &ContractSpec,
+    scope: &ComparisonScope,
+    report: &mut DiffReport,
+) {
     let mut changed: Vec<(String, UdtKind, UdtKind)> = old
         .structs
         .keys()
@@ -2058,7 +2342,9 @@ pub fn detect_type_kind_changes(old: &ContractSpec, new: &ContractSpec, report: 
         .filter_map(|name| {
             let old_kind = udt_kind_of(old, name)?;
             let new_kind = udt_kind_of(new, name)?;
-            (old_kind != new_kind).then(|| (name.clone(), old_kind, new_kind))
+            let in_scope = scope.includes(udt_scope_area(name, old_kind))
+                || scope.includes(udt_scope_area(name, new_kind));
+            (old_kind != new_kind && in_scope).then(|| (name.clone(), old_kind, new_kind))
         })
         .collect();
 
@@ -2101,7 +2387,16 @@ pub fn detect_type_kind_changes(old: &ContractSpec, new: &ContractSpec, report: 
     }
 }
 
+#[allow(dead_code)]
 fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
+    detect_cascading_layout_breaks_scoped(old, &ComparisonScope::all(), report);
+}
+
+fn detect_cascading_layout_breaks_scoped(
+    old: &ContractSpec,
+    scope: &ComparisonScope,
+    report: &mut DiffReport,
+) {
     let old_mapper = LayoutMapper::new(old);
     let reverse_deps = old_mapper.build_reverse_dependencies();
 
@@ -2129,25 +2424,30 @@ fn detect_cascading_layout_breaks(old: &ContractSpec, report: &mut DiffReport) {
 
         if let Some(dependents) = reverse_deps.get(&current_broken_type) {
             for dep in dependents {
+                let dep_in_scope = udt_kind_of(old, dep)
+                    .map(|kind| scope.includes(udt_scope_area(dep, kind)))
+                    .unwrap_or_else(|| scope.includes(udt_area_for_name(dep)));
                 let key = (dep.clone(), root.clone());
                 if !cascaded.contains(&key) {
                     cascaded.insert(key);
                     queue.push((dep.clone(), root.clone()));
 
-                    report.findings.push(Finding {
-                        axes: Vec::new(),
-                        severity: Severity::Critical,
-                        category: FindingCategory::CascadingLayoutBreak.as_str().to_string(),
-                        message: format!(
-                            "Type '{}' layout is broken because it embeds modified type '{}'. \
-                             Stored data for '{}' is no longer compatible.",
-                            dep, current_broken_type, dep
-                        ),
-                        type_name: Some(dep.clone()),
-                        target: Some(dep.clone()),
-                        change: None,
-                        root_target: Some(root.clone()),
-                    });
+                    if dep_in_scope {
+                        report.findings.push(Finding {
+                            axes: Vec::new(),
+                            severity: Severity::Critical,
+                            category: FindingCategory::CascadingLayoutBreak.as_str().to_string(),
+                            message: format!(
+                                "Type '{}' layout is broken because it embeds modified type '{}'. \
+                                 Stored data for '{}' is no longer compatible.",
+                                dep, current_broken_type, dep
+                            ),
+                            type_name: Some(dep.clone()),
+                            target: Some(dep.clone()),
+                            change: None,
+                            root_target: Some(root.clone()),
+                        });
+                    }
                 }
             }
         }

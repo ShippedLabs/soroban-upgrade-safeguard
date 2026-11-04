@@ -323,6 +323,7 @@ fn complexity_violation_gates_is_safe() {
             lineage_store: None,
             contract: None,
             complexity_budget: Some(&budget),
+            ..Default::default()
         },
     )
     .expect("comparison must not error");
@@ -357,6 +358,7 @@ fn no_complexity_section_when_no_budget() {
             lineage_store: None,
             contract: None,
             complexity_budget: None,
+            ..Default::default()
         },
     )
     .expect("comparison must not error");
@@ -388,6 +390,7 @@ fn complexity_section_present_in_json_output_when_budget_set() {
             lineage_store: None,
             contract: None,
             complexity_budget: Some(&budget),
+            ..Default::default()
         },
     )
     .expect("comparison must not error");
@@ -423,6 +426,7 @@ fn text_output_contains_complexity_section_when_budget_set() {
             lineage_store: None,
             contract: None,
             complexity_budget: Some(&budget),
+            ..Default::default()
         },
     )
     .expect("comparison must not error");
@@ -459,6 +463,7 @@ fn markdown_output_contains_complexity_section_when_budget_set() {
             lineage_store: None,
             contract: None,
             complexity_budget: Some(&budget),
+            ..Default::default()
         },
     )
     .expect("comparison must not error");
