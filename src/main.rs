@@ -505,6 +505,18 @@ struct Args {
     #[arg(long, value_enum, default_value = "info")]
     min_severity: MinimumSeverity,
 
+    /// Restrict which parts of the contract spec and WASM metadata are compared.
+    /// Accepts a comma-separated list or repeated flags: `functions`, `types`
+    /// (alias: `storage`), `events`, `errors` (alias: `error-enums`), `env`
+    /// (alias: `environment`), or `all` (default when omitted). Excluded areas
+    /// are skipped at the diff stage and do not contribute findings or affect
+    /// the verdict or exit code; the report prominently records which areas were
+    /// excluded. Unlike `--min-severity` (display-only) or `.safeguard.toml`
+    /// suppressions (acknowledged findings), `--scope` leaves excluded areas
+    /// unanalyzed.
+    #[arg(long = "scope", value_name = "AREA", value_delimiter = ',')]
+    scope: Vec<String>,
+
     /// Output specification(s) in FORMAT:PATH format (e.g. json:report.json),
     /// or a bare path whose format comes from --format. Can be repeated.
     #[arg(long, value_name = "FORMAT:PATH|PATH", num_args = 1)]
@@ -885,6 +897,12 @@ struct Args {
     /// RPC URLs, file paths, or finding messages as label values.
     #[arg(long, value_name = "PATH")]
     metrics_file: Option<PathBuf>,
+}
+
+impl Args {
+    pub(crate) fn comparison_scope(&self) -> Result<diff::ComparisonScope> {
+        diff::ComparisonScope::from_cli_tokens(&self.scope).map_err(|e| anyhow::anyhow!(e))
+    }
 }
 
 /// Build the remote-fetch policy for `https://` inputs from the top-level CLI flags.
@@ -3223,6 +3241,10 @@ fn main() -> Result<()> {
         return run_show_config(&args);
     }
 
+    // Validate `--scope` up front so unknown or conflicting scope tokens fail
+    // immediately before loading manifests, directories, or WASM inputs.
+    let _ = args.comparison_scope()?;
+
     let is_batch = args.manifest.is_some() || (args.old_dir.is_some() && args.new_dir.is_some());
 
     if args.manifest.is_some() && (args.old_dir.is_some() || args.new_dir.is_some()) {
@@ -3668,6 +3690,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
         progress("\n----------------------------------------\n".to_string());
     }
 
+    let comparison_scope = args.comparison_scope()?;
     render_batch_summary(
         &BatchSummary {
             results: &results,
@@ -3678,6 +3701,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             plain: args.plain,
             width,
             resolved_manifest: resolved_manifest.as_ref(),
+            scope: &comparison_scope,
         },
         outputs,
         progress,
@@ -3911,6 +3935,7 @@ fn compare_batch_pair(
     let contract_labels = pair.labels.clone();
     let settings = &pair.settings;
     let explain = settings.explain.value;
+    let comparison_scope = args.comparison_scope().unwrap_or_default();
 
     let pair_suppressions = match suppressions_for_pair(settings, config_cache) {
         Ok(suppressions) => suppressions,
@@ -3976,6 +4001,7 @@ fn compare_batch_pair(
                             lineage_store: None,
                             contract: Some(contract_name.as_str()),
                             complexity_budget: None,
+                            scope: comparison_scope.clone(),
                         },
                     )?;
                     report.set_no_timestamp(settings.no_timestamp.value);
@@ -4003,6 +4029,7 @@ fn compare_batch_pair(
                             lineage_store: None,
                             contract: Some(contract_name.as_str()),
                             complexity_budget: None,
+                            scope: &comparison_scope,
                         },
                         progress,
                         &log,
@@ -4414,6 +4441,7 @@ struct BatchSummary<'a> {
     width: Option<usize>,
     /// `None` for directory-scan runs, which have no composition to describe.
     resolved_manifest: Option<&'a manifest::ResolvedManifest>,
+    scope: &'a diff::ComparisonScope,
 }
 
 fn render_batch_summary(
@@ -4431,6 +4459,7 @@ fn render_batch_summary(
         plain,
         width,
         resolved_manifest,
+        scope,
     } = *summary;
 
     let verdict_summary = BatchVerdictSummary::from_results(results);
@@ -4499,6 +4528,19 @@ fn render_batch_summary(
                     "summary": verdict_summary.to_json(),
                     "results": results_json,
                 });
+                if !scope.is_full() {
+                    let obj = batch_json
+                        .as_object_mut()
+                        .expect("batch_json is constructed as an object");
+                    obj.insert(
+                        "included_areas".to_string(),
+                        serde_json::json!(scope.included_names()),
+                    );
+                    obj.insert(
+                        "excluded_areas".to_string(),
+                        serde_json::json!(scope.excluded_names()),
+                    );
+                }
                 // Only manifest runs have a composition to describe; directory
                 // scans leave the key absent rather than emitting an empty one.
                 if let Some(resolved) = resolved_manifest {
@@ -4513,12 +4555,21 @@ fn render_batch_summary(
                 let mut markdown = String::new();
                 markdown.push_str("# Soroban Upgrade Safety Report (Batch Mode)\n\n");
 
-                let status = if overall_safe {
+                let status = if overall_safe && !scope.is_full() {
+                    "✅ PASSED (Scoped check only — excluded areas were NOT analyzed)"
+                } else if overall_safe {
                     "✅ PASSED (All contracts safe)"
                 } else {
                     "❌ FAILED (Some contracts have breaking changes)"
                 };
                 markdown.push_str(&format!("## Status: {}\n\n", status));
+                if !scope.is_full() {
+                    markdown.push_str(&format!(
+                        "> \u{26a0}\u{fe0f} **Scoped comparison active**: Excluded from analysis and verdict: `{}` (checked only: `{}`).\n\n",
+                        scope.excluded_names().join(", "),
+                        scope.included_names().join(", ")
+                    ));
+                }
 
                 markdown.push_str("### Verdict Summary\n\n");
                 markdown.push_str("| Safe | Unsafe | Errored | Incomplete | Total |\n");
@@ -4591,8 +4642,21 @@ fn render_batch_summary(
                 let mut text = String::new();
                 text.push_str("========================================\n");
                 text.push_str("    SOROBAN BATCH SAFETY REPORT\n");
+                if !scope.is_full() {
+                    text.push_str(
+                        &"    [SCOPED COMPARISON ACTIVE]\n"
+                            .bold()
+                            .yellow()
+                            .to_string(),
+                    );
+                }
                 text.push_str("========================================\n");
-                let status = if overall_safe {
+                let status = if overall_safe && !scope.is_full() {
+                    "✅ PASSED (Scoped check only — excluded areas were NOT analyzed)"
+                        .green()
+                        .bold()
+                        .to_string()
+                } else if overall_safe {
                     "✅ PASSED (All contracts safe)".green().bold().to_string()
                 } else {
                     "❌ FAILED (Some contracts have breaking changes)"
@@ -4600,7 +4664,21 @@ fn render_batch_summary(
                         .bold()
                         .to_string()
                 };
-                text.push_str(&format!("Overall Status: {}\n\n", status));
+                text.push_str(&format!("Overall Status: {}\n", status));
+                if !scope.is_full() {
+                    text.push_str(
+                        &format!(
+                            "\u{26a0}\u{fe0f}  SCOPED COMPARISON: Excluded from analysis and verdict: {} (checked only: {})\n\n",
+                            scope.excluded_names().join(", "),
+                            scope.included_names().join(", ")
+                        )
+                        .yellow()
+                        .bold()
+                        .to_string(),
+                    );
+                } else {
+                    text.push('\n');
+                }
                 text.push_str(&format!(
                     "Verdict Summary: {}\n\n",
                     verdict_summary.to_line()
@@ -4850,6 +4928,7 @@ fn run_single(
         policy_bundle_provenance = Some(provenance);
     }
     let suppressions: &SuppressionConfig = owned_suppressions.as_ref().unwrap_or(suppressions);
+    let comparison_scope = args.comparison_scope()?;
 
     let run_comparison = |progress: &dyn Fn(String)| -> Result<bool> {
         let log = DiagnosticLog::new(args, true);
@@ -4955,6 +5034,7 @@ fn run_single(
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,
+                    scope: comparison_scope.clone(),
                 },
             )?
             .with_symlinks(None, new.symlink.clone());
@@ -5014,6 +5094,7 @@ fn run_single(
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,
+                    scope: &comparison_scope,
                 },
                 progress,
                 &log,
@@ -5801,6 +5882,7 @@ struct ContractComparison<'a> {
     /// Complexity budgets for the WASM code section. `None` skips profiling.
     complexity_budget:
         Option<&'a soroban_upgrade_safeguard::wasm_complexity::ComplexityBudgetConfig>,
+    scope: &'a diff::ComparisonScope,
 }
 
 struct PairStorageSchemas {
@@ -5864,6 +5946,7 @@ fn compare_contracts(
         lineage_store,
         contract,
         complexity_budget,
+        scope,
     } = comparison;
     log.sections("Old", old_bytes);
     log.sections("New", new_bytes);
@@ -5920,24 +6003,26 @@ fn compare_contracts(
         "🔬 Analyzing structural compatibility...".cyan().bold()
     ));
     let compare_start = std::time::Instant::now();
-    let mut diff_report = diff::compare(&old_spec, &new_spec);
-    diff::compare_env_metadata(
-        old_meta.env_meta.as_ref(),
-        new_meta.env_meta.as_ref(),
-        &mut diff_report,
-    );
-    diff::compare_host_imports(
-        &old_meta.host_imports,
-        &new_meta.host_imports,
-        old_meta.env_meta.as_ref(),
-        new_meta.env_meta.as_ref(),
-        &mut diff_report,
-    );
-    diff::compare_runtime_surfaces(
-        &old_meta.runtime_surface,
-        &new_meta.runtime_surface,
-        &mut diff_report,
-    );
+    let mut diff_report = diff::compare_scoped(&old_spec, &new_spec, scope);
+    if scope.includes(diff::ScopeArea::Env) {
+        diff::compare_env_metadata(
+            old_meta.env_meta.as_ref(),
+            new_meta.env_meta.as_ref(),
+            &mut diff_report,
+        );
+        diff::compare_host_imports(
+            &old_meta.host_imports,
+            &new_meta.host_imports,
+            old_meta.env_meta.as_ref(),
+            new_meta.env_meta.as_ref(),
+            &mut diff_report,
+        );
+        diff::compare_runtime_surfaces(
+            &old_meta.runtime_surface,
+            &new_meta.runtime_surface,
+            &mut diff_report,
+        );
+    }
     log.diagnostic(
         1,
         format_args!(
@@ -5948,7 +6033,7 @@ fn compare_contracts(
     log.timing("Structural comparison", compare_start);
 
     let report_start = std::time::Instant::now();
-    let mut report = report::SafetyReport::with_suppressions_with_specs(
+    let mut report = report::SafetyReport::with_suppressions_with_specs_scoped(
         &diff_report,
         suppressions,
         *explain,
@@ -5956,8 +6041,14 @@ fn compare_contracts(
         &old_spec,
         &new_spec,
         *contract,
+        scope,
     )
     .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
+    if !scope.is_full() {
+        report.scope.exported_interface = scope.includes_any_spec_area();
+        report.scope.env_metadata = scope.includes(diff::ScopeArea::Env)
+            && (old_meta.env_meta.is_some() || new_meta.env_meta.is_some());
+    }
 
     report.no_timestamp = *no_timestamp;
 
@@ -5992,7 +6083,7 @@ fn compare_contracts(
         soroban_upgrade_safeguard::snapshot_manifest::SnapshotIntegrityReport,
     > = None;
 
-    if *empirical {
+    if *empirical && scope.includes(diff::ScopeArea::Types) {
         is_empirical = true;
         let mut entries = Vec::new();
 
@@ -6124,12 +6215,13 @@ fn compare_contracts(
 
     if let Some(store) = lineage_store {
         let lineage_report =
-            soroban_upgrade_safeguard::lineage::validate_candidate_against_lineage(
+            soroban_upgrade_safeguard::lineage::validate_candidate_against_lineage_scoped(
                 new_bytes,
                 &new_spec,
                 store,
                 suppressions,
                 *strict,
+                scope,
             )?;
         report.apply_lineage_report(&lineage_report, suppressions, *explain, *strict);
     }
@@ -6230,6 +6322,7 @@ fn setting<T: serde::Serialize>(value: T, source: impl Into<String>) -> serde_js
 /// variable name that would supply them at run time — so a printed config
 /// never leaks a secret even when redirected into a CI log.
 fn run_show_config(args: &Args) -> Result<()> {
+    let comparison_scope = args.comparison_scope()?;
     let (suppressions, config_source) = load_suppressions(
         args.no_config,
         args.config.as_deref(),
@@ -6265,6 +6358,21 @@ fn run_show_config(args: &Args) -> Result<()> {
     output.insert(
         "strict".to_string(),
         setting(args.strict, if args.strict { "cli" } else { "default" }),
+    );
+    output.insert(
+        "scope".to_string(),
+        if comparison_scope.is_full() {
+            setting(
+                "all",
+                if args.scope.is_empty() {
+                    "default"
+                } else {
+                    "cli"
+                },
+            )
+        } else {
+            setting(comparison_scope.included_names(), "cli")
+        },
     );
     let no_color_env = std::env::var_os("NO_COLOR").is_some();
     output.insert(

@@ -529,13 +529,25 @@ impl RenderableReport {
         if self.strict {
             output.push_str(&"    [STRICT MODE ACTIVE]\n".bold().yellow().to_string());
         }
+        if self.scope.is_scoped() {
+            output.push_str(
+                &"    [SCOPED COMPARISON ACTIVE]\n"
+                    .bold()
+                    .yellow()
+                    .to_string(),
+            );
+        }
         output.push_str(
             &"========================================\n"
                 .bold()
                 .to_string(),
         );
 
-        let status = if self.is_safe {
+        let status = if self.is_safe && self.scope.is_scoped() {
+            "✅ PASSED (Scoped check only — excluded areas were NOT analyzed)"
+                .green()
+                .bold()
+        } else if self.is_safe {
             "✅ PASSED (No breaking changes detected)".green().bold()
         } else if self.strict && self.counts.critical == 0 {
             "❌ FAILED (Warnings detected in strict mode)".red().bold()
@@ -545,6 +557,18 @@ impl RenderableReport {
                 .bold()
         };
         output.push_str(&format!("Status: {}\n", status));
+        if self.scope.is_scoped() {
+            output.push_str(
+                &format!(
+                    "\u{26a0}\u{fe0f}  SCOPED COMPARISON: Excluded from analysis and verdict: {} (checked only: {})\n",
+                    self.scope.excluded_areas.join(", "),
+                    self.scope.included_areas.join(", ")
+                )
+                .yellow()
+                .bold()
+                .to_string(),
+            );
+        }
         output.push_str(&format!("Analysis scope: {}\n", self.scope.summary_line()));
         output.push_str(&format!("Storage coverage: {}\n", self.storage_coverage));
 
@@ -619,7 +643,19 @@ impl RenderableReport {
         output.push_str(&self.provenance_block_text());
 
         if self.total_findings == 0 {
-            output.push_str(&"No relevant changes detected. The upgrade is identical in its exports and types.\n".green().to_string());
+            if self.scope.is_scoped() {
+                output.push_str(
+                    &"No relevant changes detected within the selected scope areas (excluded areas were not checked).\n"
+                        .green()
+                        .to_string(),
+                );
+            } else {
+                output.push_str(
+                    &"No relevant changes detected. The upgrade is identical in its exports and types.\n"
+                        .green()
+                        .to_string(),
+                );
+            }
             return output;
         }
 
@@ -1075,12 +1111,21 @@ impl RenderableReport {
         let mut output = String::new();
         output.push_str("# Soroban Upgrade Safety Report\n\n");
 
-        let status = if self.is_safe {
+        let status = if self.is_safe && self.scope.is_scoped() {
+            "✅ PASSED (Scoped check only — excluded areas were NOT analyzed)"
+        } else if self.is_safe {
             "✅ PASSED (No breaking changes detected)"
         } else {
             "❌ FAILED (Critical breaking changes detected)"
         };
         output.push_str(&format!("## Status: {}\n\n", status));
+        if self.scope.is_scoped() {
+            output.push_str(&format!(
+                "> \u{26a0}\u{fe0f} **Scoped Comparison**: Excluded from analysis and verdict: {} (checked only: {}). A passing result applies only to the selected scope areas.\n\n",
+                markdown_code_span(&self.scope.excluded_areas.join(", ")),
+                markdown_code_span(&self.scope.included_areas.join(", "))
+            ));
+        }
         output.push_str(&format!(
             "**Analysis scope**: {}  \n",
             markdown_code_span(&self.scope.summary_line())
@@ -1156,7 +1201,11 @@ impl RenderableReport {
         output.push_str("---\n\n");
 
         if self.total_findings == 0 {
-            output.push_str("No relevant changes detected. The upgrade is identical in its exports and types.\n");
+            if self.scope.is_scoped() {
+                output.push_str("No relevant changes detected within the selected scope areas (excluded areas were not checked).\n");
+            } else {
+                output.push_str("No relevant changes detected. The upgrade is identical in its exports and types.\n");
+            }
             return output;
         }
 
@@ -1335,6 +1384,13 @@ impl RenderableReport {
     /// severity, so they appear in the log without blocking the run.
     pub fn to_github_actions(&self) -> String {
         let mut output = String::new();
+        if self.scope.is_scoped() {
+            output.push_str(&format!(
+                "::warning::[Scoped Comparison] Excluded from analysis and verdict: {} (checked only: {})\n",
+                self.scope.excluded_areas.join(", "),
+                self.scope.included_areas.join(", ")
+            ));
+        }
         let mut categories: Vec<_> = self.findings_by_category.keys().collect();
         categories.sort();
         for category in categories {

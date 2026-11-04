@@ -381,6 +381,7 @@ fn test_suppression_of_runtime_surface_findings() {
         lineage_store: None,
         contract: None,
         complexity_budget: None,
+        ..Default::default()
     };
 
     let report =
@@ -439,6 +440,7 @@ fn test_gating_policy_allows_disabling_runtime_surface_axis() {
         lineage_store: None,
         contract: None,
         complexity_budget: None,
+        ..Default::default()
     };
 
     let report =

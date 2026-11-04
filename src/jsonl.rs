@@ -605,10 +605,7 @@ fn process_job(
             suppressions: Some(&suppressions),
             explain: job.overrides.explain,
             strict,
-            storage_schemas: None,
-            lineage_store: None,
-            contract: None,
-            complexity_budget: None,
+            ..Default::default()
         },
     ) {
         Ok(report) => {

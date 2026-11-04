@@ -285,7 +285,7 @@ pub use crate::config_schema::{
     ConfigValidationResult, EditorCompletionItem, EditorHoverMetadata, SafeguardConfigDocument,
     CONFIG_SCHEMA_VERSION, MANIFEST_SCHEMA_VERSION,
 };
-pub use crate::diff::{Finding, Severity};
+pub use crate::diff::{ComparisonScope, Finding, ScopeArea, Severity};
 pub use crate::lineage::{
     validate_candidate_against_lineage, HistoricalFinding, LineageRecord, LineageStore,
     LineageValidationReport, LiveStatus, LiveVersionPolicy,
@@ -394,6 +394,9 @@ pub struct CompareOptions<'a> {
     /// Complexity budgets for the WASM code section. When non-empty the
     /// profiler is invoked and exceeded entries gate `is_safe`.
     pub complexity_budget: Option<&'a crate::wasm_complexity::ComplexityBudgetConfig>,
+    /// Spec and metadata areas participating in the comparison. Defaults to
+    /// [`ComparisonScope::all`].
+    pub scope: ComparisonScope,
 }
 
 /// Compare two Soroban contract builds supplied as raw WASM byte slices with options.
@@ -413,29 +416,31 @@ pub fn compare_wasm_bytes_with_options(
     let old_spec = ContractSpec::from_entries(&old_meta.spec);
     let new_spec = ContractSpec::from_entries(&new_meta.spec);
 
-    let mut diff_report = diff::compare(&old_spec, &new_spec);
+    let mut diff_report = diff::compare_scoped(&old_spec, &new_spec, &options.scope);
 
-    diff::compare_env_metadata(
-        old_meta.env_meta.as_ref(),
-        new_meta.env_meta.as_ref(),
-        &mut diff_report,
-    );
+    if options.scope.includes(ScopeArea::Env) {
+        diff::compare_env_metadata(
+            old_meta.env_meta.as_ref(),
+            new_meta.env_meta.as_ref(),
+            &mut diff_report,
+        );
 
-    diff::compare_host_imports(
-        &old_meta.host_imports,
-        &new_meta.host_imports,
-        old_meta.env_meta.as_ref(),
-        new_meta.env_meta.as_ref(),
-        &mut diff_report,
-    );
+        diff::compare_host_imports(
+            &old_meta.host_imports,
+            &new_meta.host_imports,
+            old_meta.env_meta.as_ref(),
+            new_meta.env_meta.as_ref(),
+            &mut diff_report,
+        );
 
-    diff::compare_runtime_surfaces(
-        &old_meta.runtime_surface,
-        &new_meta.runtime_surface,
-        &mut diff_report,
-    );
+        diff::compare_runtime_surfaces(
+            &old_meta.runtime_surface,
+            &new_meta.runtime_surface,
+            &mut diff_report,
+        );
+    }
 
-    let mut safety_report = SafetyReport::with_suppressions_with_specs(
+    let mut safety_report = SafetyReport::with_suppressions_with_specs_scoped(
         &diff_report,
         suppressions,
         options.explain,
@@ -443,34 +448,39 @@ pub fn compare_wasm_bytes_with_options(
         &old_spec,
         &new_spec,
         options.contract,
+        &options.scope,
     );
-    safety_report.scope.exported_interface = true;
-    safety_report.scope.env_metadata = old_meta.env_meta.is_some() || new_meta.env_meta.is_some();
+    safety_report.scope.exported_interface = options.scope.includes_any_spec_area();
+    safety_report.scope.env_metadata = options.scope.includes(ScopeArea::Env)
+        && (old_meta.env_meta.is_some() || new_meta.env_meta.is_some());
     safety_report.old_spec_summary = Some(old_spec.summary());
     safety_report.new_spec_summary = Some(new_spec.summary());
 
-    if let Some((old_schema, new_schema)) = options.storage_schemas {
-        let storage_comparison = storage_schema::compare_storage_schemas(
-            old_schema,
-            &old_meta.storage,
-            new_schema,
-            &new_meta.storage,
-        );
-        safety_report.apply_storage_schema_comparison(
-            &storage_comparison,
-            suppressions,
-            options.explain,
-            options.strict,
-        );
+    if options.scope.includes(ScopeArea::Types) {
+        if let Some((old_schema, new_schema)) = options.storage_schemas {
+            let storage_comparison = storage_schema::compare_storage_schemas(
+                old_schema,
+                &old_meta.storage,
+                new_schema,
+                &new_meta.storage,
+            );
+            safety_report.apply_storage_schema_comparison(
+                &storage_comparison,
+                suppressions,
+                options.explain,
+                options.strict,
+            );
+        }
     }
 
     if let Some(store) = options.lineage_store {
-        let lineage_report = lineage::validate_candidate_against_lineage(
+        let lineage_report = lineage::validate_candidate_against_lineage_scoped(
             new_wasm,
             &new_spec,
             store,
             suppressions,
             options.strict,
+            &options.scope,
         )?;
         safety_report.apply_lineage_report(
             &lineage_report,
@@ -508,10 +518,10 @@ pub fn compare_wasm_against_interface_lockfile(
     let new_meta = parser::extract_metadata(new_wasm)
         .context("Failed to extract metadata from the candidate WASM")?;
     let new_spec = ContractSpec::from_entries(&new_meta.spec);
-    let diff_report = diff::compare(&old_spec, &new_spec);
+    let diff_report = diff::compare_scoped(&old_spec, &new_spec, &options.scope);
     let empty_suppressions = SuppressionConfig::default();
     let suppressions = options.suppressions.unwrap_or(&empty_suppressions);
-    let mut report = SafetyReport::with_suppressions_with_specs(
+    let mut report = SafetyReport::with_suppressions_with_specs_scoped(
         &diff_report,
         suppressions,
         options.explain,
@@ -519,9 +529,10 @@ pub fn compare_wasm_against_interface_lockfile(
         &old_spec,
         &new_spec,
         options.contract,
+        &options.scope,
     )
     .with_interface_hashes(old_spec.interface_hash(), new_spec.interface_hash());
-    report.scope.exported_interface = true;
+    report.scope.exported_interface = options.scope.includes_any_spec_area();
     report.old_spec_summary = Some(old_spec.summary());
     report.new_spec_summary = Some(new_spec.summary());
     Ok(report)

@@ -304,6 +304,57 @@ tool actually emits. The same data is maintained as a static reference in
 
 Common flags: `--format <text|json|markdown|html|github-actions|junit>`, `--explain`, `--strict`, `--expect-bump <patch|minor|major>`, `--config <PATH>`, the resource-limit overrides `--max-xdr-depth`, `--max-xdr-len`, `--max-entries`, and `--max-walk-depth` (see [Resource Limits](#resource-limits-and-hardening-against-malicious-input)), the `https://` input overrides `--remote-max-bytes`, `--remote-timeout-secs`, `--remote-max-redirects`, `--remote-cache-dir`, `--no-remote-cache`, and `--clear-remote-cache` (see [Remote HTTPS inputs](#remote-https-inputs)), and `--no-symlinks` for local paths (see [Local file inputs](#local-file-inputs)).
 
+### Scoping the comparison (`--scope`)
+
+By default, every part of the contract spec and WASM metadata is compared
+(`--scope all`). When a pipeline only governs part of the contract surface — for
+example, an off-chain indexer check that only cares about functions and events,
+or a storage-migration review that only inspects user-defined types — `--scope`
+restricts which areas enter the diff:
+
+```bash
+# Comma-separated list or repeated --scope flags
+soroban-upgrade-safeguard old.wasm new.wasm --scope functions,events
+soroban-upgrade-safeguard old.wasm new.wasm --scope types
+```
+
+Accepted area names (case-insensitive):
+
+- `functions` — exported contract function signatures (`contractspecv0`
+  functions and directional `call_abi` checks).
+- `types` (aliases: `storage`, `storage-types`, `udt`, `udts`) — structs,
+  regular enums, unions, declared storage schemas, empirical storage decoding,
+  and cascading layout breaks.
+- `events` — event schemas (`#[contractevent]` structs, enums, and heuristic
+  event types).
+- `errors` (alias: `error-enums`) — contract error enums (`#[contracterror]`).
+- `env` (aliases: `environment`, `env-metadata`) — `contractenvmetav0` interface
+  version, Soroban host imports, and WASM runtime surface.
+- `all` — full comparison across every area (default when `--scope` is omitted;
+  cannot be combined with narrowing areas).
+
+Excluded areas are skipped **at the diff stage**: they produce zero findings and
+do not affect `is_safe` or the process exit code, so a scoped run with zero
+findings in the requested areas exits `0`. Because a scoped pass is not a full
+upgrade-safety certification, every output format prominently states that a
+scoped comparison was active and lists the excluded areas
+(`scope.included_areas` and `scope.excluded_areas` in JSON, a
+`[SCOPED COMPARISON ACTIVE]` banner and warning line in text, a warning callout
+in Markdown, and a `::warning::` annotation in GitHub Actions).
+
+How `--scope` interacts with other filtering mechanisms:
+
+- **`--min-severity`**: display-only filter on rendered text findings; counts,
+  verdicts, and exit codes still reflect every area included in `--scope`.
+- **`.safeguard.toml` `[[suppress]]` rules**: acknowledge specific findings
+  produced within the included `--scope` areas while keeping them visible as
+  suppressed in the report. Excluded `--scope` areas are never analyzed and
+  therefore never matched against suppression rules.
+- **`.safeguard.toml` `[policy]` axis gates (`gate_*`)**: control which
+  compatibility axes gate `is_safe` while still analyzing and reporting findings
+  on ungated axes; `--scope` skips excluded spec areas before findings are
+  generated.
+
 ### Report output destinations
 
 By default a report is printed to stdout in the format chosen by `--format`

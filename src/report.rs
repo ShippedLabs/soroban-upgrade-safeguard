@@ -1267,14 +1267,41 @@ pub struct AnalysisScope {
     pub new_spec_section_count: usize,
     pub old_duplicate_names: Vec<String>,
     pub new_duplicate_names: Vec<String>,
+    /// Canonical scope areas included when `--scope` narrowed the comparison.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub included_areas: Vec<String>,
+    /// Canonical scope areas excluded when `--scope` narrowed the comparison.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_areas: Vec<String>,
 }
 
 impl AnalysisScope {
+    pub fn is_scoped(&self) -> bool {
+        !self.excluded_areas.is_empty()
+    }
+
+    pub fn apply_comparison_scope(&mut self, scope: &crate::diff::ComparisonScope) {
+        if scope.is_full() {
+            self.included_areas.clear();
+            self.excluded_areas.clear();
+        } else {
+            self.included_areas = scope.included_names();
+            self.excluded_areas = scope.excluded_names();
+        }
+    }
+
     pub fn storage_analyzed(&self) -> bool {
         matches!(self.storage_schema, StorageScopeState::Analyzed { .. })
     }
 
     pub fn summary_line(&self) -> String {
+        if self.is_scoped() {
+            return format!(
+                "scoped to {} (excluded: {})",
+                self.included_areas.join(", "),
+                self.excluded_areas.join(", ")
+            );
+        }
         let mut parts = Vec::new();
         if self.exported_interface {
             parts.push("exported interface");
@@ -1547,6 +1574,29 @@ impl SafetyReport {
         new_spec: &crate::spec::ContractSpec,
         contract: Option<&str>,
     ) -> Self {
+        Self::with_suppressions_with_specs_scoped(
+            diff,
+            suppressions,
+            explain,
+            strict,
+            old_spec,
+            new_spec,
+            contract,
+            &crate::diff::ComparisonScope::all(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_suppressions_with_specs_scoped(
+        diff: &DiffReport,
+        suppressions: &SuppressionConfig,
+        explain: bool,
+        strict: bool,
+        old_spec: &crate::spec::ContractSpec,
+        new_spec: &crate::spec::ContractSpec,
+        contract: Option<&str>,
+        comparison_scope: &crate::diff::ComparisonScope,
+    ) -> Self {
         let mut critical_count = 0;
         let mut warning_count = 0;
         let mut info_count = 0;
@@ -1564,7 +1614,7 @@ impl SafetyReport {
         let mut findings_by_category: HashMap<String, Vec<ReportedFinding>> = HashMap::new();
         let mut critical_root_count = 0;
         let mut cascade_critical_count = 0;
-        let call_abi = crate::call_abi::compare(old_spec, new_spec);
+        let call_abi = scoped_call_abi_compare(old_spec, new_spec, comparison_scope);
         let mut unsuppressed_call_abi_finding = false;
 
         // Verify declared migrations against the findings up front. Coverage
@@ -1819,6 +1869,9 @@ impl SafetyReport {
         // or the default gate policy, so any violation always fails the run.
         let is_safe = is_safe && budget_violations.is_empty();
 
+        let mut scope_info = AnalysisScope::default();
+        scope_info.apply_comparison_scope(comparison_scope);
+
         Self {
             call_abi,
             critical_count,
@@ -1842,7 +1895,7 @@ impl SafetyReport {
             no_timestamp: false,
             old_spec_summary: None,
             new_spec_summary: None,
-            scope: AnalysisScope::default(),
+            scope: scope_info,
             metrics: None,
             axis_verdicts,
             gated_axes,
@@ -2074,6 +2127,78 @@ pub fn get_remediation_guidance(category: &str) -> Option<&'static str> {
 
 fn canonical_rule_id(category: &str) -> String {
     crate::suppression::canonical_rule_id(category)
+}
+
+fn scoped_call_abi_compare(
+    old_spec: &crate::spec::ContractSpec,
+    new_spec: &crate::spec::ContractSpec,
+    scope: &crate::diff::ComparisonScope,
+) -> crate::call_abi::CallAbiCompatibility {
+    use crate::diff::ScopeArea;
+
+    if !scope.includes(ScopeArea::Functions) {
+        return crate::call_abi::CallAbiCompatibility::default();
+    }
+    if scope.is_full() {
+        return crate::call_abi::compare(old_spec, new_spec);
+    }
+
+    let udt_in_scope = |name: &str| {
+        if name.to_lowercase().contains("event") {
+            scope.includes(ScopeArea::Events)
+        } else {
+            scope.includes(ScopeArea::Types)
+        }
+    };
+
+    let mut structs = old_spec.structs.clone();
+    for (name, def) in &new_spec.structs {
+        if udt_in_scope(name) || !old_spec.structs.contains_key(name) {
+            structs.insert(name.clone(), def.clone());
+        }
+    }
+    if scope.includes(ScopeArea::Types) || scope.includes(ScopeArea::Events) {
+        structs.retain(|name, _| !udt_in_scope(name) || new_spec.structs.contains_key(name));
+    }
+
+    let mut enums = old_spec.enums.clone();
+    for (name, def) in &new_spec.enums {
+        if udt_in_scope(name) || !old_spec.enums.contains_key(name) {
+            enums.insert(name.clone(), def.clone());
+        }
+    }
+    if scope.includes(ScopeArea::Types) || scope.includes(ScopeArea::Events) {
+        enums.retain(|name, _| !udt_in_scope(name) || new_spec.enums.contains_key(name));
+    }
+
+    let mut unions = old_spec.unions.clone();
+    for (name, def) in &new_spec.unions {
+        if udt_in_scope(name) || !old_spec.unions.contains_key(name) {
+            unions.insert(name.clone(), def.clone());
+        }
+    }
+    if scope.includes(ScopeArea::Types) || scope.includes(ScopeArea::Events) {
+        unions.retain(|name, _| !udt_in_scope(name) || new_spec.unions.contains_key(name));
+    }
+
+    let error_enums = if scope.includes(ScopeArea::Errors) {
+        new_spec.error_enums.clone()
+    } else {
+        let mut merged = old_spec.error_enums.clone();
+        for (name, def) in &new_spec.error_enums {
+            merged.entry(name.clone()).or_insert_with(|| def.clone());
+        }
+        merged
+    };
+
+    let scoped_new = crate::spec::ContractSpec {
+        functions: new_spec.functions.clone(),
+        structs,
+        enums,
+        unions,
+        error_enums,
+    };
+    crate::call_abi::compare(old_spec, &scoped_new)
 }
 
 /// Best-effort lookup of the Git commit (full SHA) the tool is being run

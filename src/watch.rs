@@ -785,6 +785,7 @@ fn render_summary(
     let overall_safe = results.results().iter().all(|r| r.report().is_safe());
     let total_pairs = plan.pairs.len() + plan.gaps.len();
     let width = resolve_text_width(args.width, std::io::stdout().is_terminal());
+    let comparison_scope = args.comparison_scope()?;
 
     render_batch_summary(
         &BatchSummary {
@@ -796,6 +797,7 @@ fn render_summary(
             plain: args.plain,
             width,
             resolved_manifest: plan.resolved_manifest.as_ref(),
+            scope: &comparison_scope,
         },
         outputs,
         progress,

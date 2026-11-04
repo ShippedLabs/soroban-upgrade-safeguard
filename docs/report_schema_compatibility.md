@@ -63,6 +63,8 @@ Every field and enum value in the JSON output is classified as one of:
 | `provenance.code_hash` | `string` | absent | SHA-256 hex of fetched WASM. Set only in RPC mode. |
 | `provenance.live_until_ledger_seq` | `integer` | absent | Ledger sequence until which the sampled ledger entry is live (`liveUntilLedgerSeq`). Set only in RPC mode, and only when the endpoint reported a TTL for the sampled entry. |
 | `scope` | `object` | `{}` | Analysis scope summary (what dimensions were checked). |
+| `scope.included_areas` | `array<string>` | `[]` | Spec/metadata areas analyzed when `--scope` narrowed the comparison. Omitted on unscoped runs (all areas checked). |
+| `scope.excluded_areas` | `array<string>` | `[]` | Spec/metadata areas skipped at the diff stage when `--scope` narrowed the comparison. Omitted on unscoped runs. |
 | `storage_coverage` | `string` | `""` | Human-readable storage coverage description. |
 | `old_interface_hash` | `string` | absent | Hex interface hash of the old build. |
 | `new_interface_hash` | `string` | absent | Hex interface hash of the new build. |
