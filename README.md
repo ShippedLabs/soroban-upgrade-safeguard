@@ -1862,6 +1862,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Finding Category Reference](docs/finding-categories.md): every category emitted by the tool, with severity, trigger, and remediation guidance — the exact strings to use in suppression rules.
 - [Lint Rules Reference](docs/lint_rules_reference.md): reference for rules applied by the lint subcommand to validate single contract specs.
 - [Capability Reference](docs/capability-reference.md): Soroban protocol capabilities used to classify host import changes.
+- [Unstable & Programmatic API Integration Guide](docs/unstable_api_guide.md): integrating with the programmatic API and its unstable surface.
 - [Protocol-Versioned Contract-Spec Decoder Registry](docs/decoder_registry.md): how the contract-spec decoder is chosen by interface version from the contractenvmetav0 WASM custom section.
 - [Batch Manifests](docs/batch_manifests.md): the manifest schema, composing manifests with `include`, shared `[defaults]`, per-pair overrides, precedence, and resolution provenance.
 - [Contributing](docs/contributing.md): development setup, project structure, testing, and how to add new detection rules.
