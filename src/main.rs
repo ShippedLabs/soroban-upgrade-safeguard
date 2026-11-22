@@ -8,6 +8,8 @@ use std::io::{IsTerminal, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
+mod timestamp;
+
 use soroban_upgrade_safeguard::{
     attestation::{
         canonical_json_bytes, sign_statement, verify_artifacts, verify_signatures, ArtifactDigest,
@@ -5038,7 +5040,7 @@ fn run_single(
             let record = soroban_upgrade_safeguard::lineage::LineageRecord {
                 version_id: version_id.clone(),
                 order: 0,
-                created_at: "2026-08-25T00:00:00Z".to_string(),
+                created_at: timestamp::now_rfc3339(),
                 status: soroban_upgrade_safeguard::lineage::LiveStatus::Live,
                 wasm_hash: loader::sha256_hex(&new.bytes),
                 interface_hash: soroban_upgrade_safeguard::interface_hash::InterfaceHash::of_spec(

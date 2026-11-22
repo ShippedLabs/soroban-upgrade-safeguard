@@ -1866,6 +1866,8 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Batch Manifests](docs/batch_manifests.md): the manifest schema, composing manifests with `include`, shared `[defaults]`, per-pair overrides, precedence, and resolution provenance.
 - [Contributing](docs/contributing.md): development setup, project structure, testing, and how to add new detection rules.
 - [Semantic Versioning & Public API Policy](docs/semver_policy.md): what counts as a breaking change to the tool's own public API, the curated stable surface, and the deprecation policy.
+- [Public API Surface Hardening & Migration Guide](docs/api_migration.md): guidance for migrating to the curated public API and adapting to API hardening changes.
+- [Unstable & Programmatic API Integration Guide](docs/unstable_api_guide.md): integrating through the stable API and using unstable APIs with their stability guarantees.
 - [Signed Attestations](docs/attestations.md): DSSE signing, the in-toto predicate, offline verification, and security guidance.
 - [RPC Security Checklist](docs/rpc-security-checklist.md): operational checklist for endpoint trust, HTTPS, expected-hash pinning, credentials, and report retention when fetching a baseline over RPC.
 - [RPC Header Environment-Variable Convention](docs/rpc-header-convention.md): how `--rpc-header NAME=ENV_VAR` keeps RPC authentication secrets out of command-line arguments, process listings, and CI logs.
