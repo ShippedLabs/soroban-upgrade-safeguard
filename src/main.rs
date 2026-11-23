@@ -681,6 +681,10 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     lineage_store: Option<PathBuf>,
 
+    /// List versions in --lineage-store and exit without analyzing WASM inputs.
+    #[arg(long, requires = "lineage_store", conflicts_with_all = ["record_version", "retire_version"])]
+    list_versions: bool,
+
     /// Record candidate build as a new version in the lineage store with this tag.
     #[arg(long, value_name = "VERSION_ID")]
     record_version: Option<String>,
@@ -1984,6 +1988,26 @@ fn main() -> Result<()> {
     // before any WASM inputs are required.
     if args.show_config {
         return run_show_config(&args);
+    }
+
+    if args.list_versions {
+        let path = args
+            .lineage_store
+            .as_ref()
+            .expect("--list-versions requires --lineage-store (enforced by clap)");
+        let store = soroban_upgrade_safeguard::lineage::LineageStore::load_from_path(path)?;
+        println!("VERSION_ID\tORDER\tSTATUS\tINTERFACE_HASH");
+        for record in &store.records {
+            let status = match record.status {
+                soroban_upgrade_safeguard::lineage::LiveStatus::Live => "Live",
+                soroban_upgrade_safeguard::lineage::LiveStatus::Retired => "Retired",
+            };
+            println!(
+                "{}\t{}\t{}\t{}",
+                record.version_id, record.order, status, record.interface_hash
+            );
+        }
+        return Ok(());
     }
 
     let is_batch = args.manifest.is_some() || (args.old_dir.is_some() && args.new_dir.is_some());

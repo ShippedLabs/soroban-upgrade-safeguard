@@ -101,6 +101,7 @@ The lineage ledger file is portable, machine-readable, and human-editable. It ca
 | CLI Flag | Environment Variable | Description |
 | :--- | :--- | :--- |
 | `--lineage-store <PATH>` | `SAFEGUARD_LINEAGE_STORE` | Path to lineage store file (`.json` or `.toml`). |
+| `--list-versions` | — | Print each stored version's ID, order, status, and interface hash, then exit without analyzing. Requires `--lineage-store`. |
 | `--record-version <TAG>` | `SAFEGUARD_RECORD_VERSION` | Record candidate build as a new live version tag upon safe comparison. |
 | `--retire-version <TAG>` | `SAFEGUARD_RETIRE_VERSION` | Mark an existing historical version as `Retired`. |
 | `--max-live-versions <N>`| `SAFEGUARD_MAX_LIVE_VERSIONS`| Limit validation to the $N$ most recent live versions. |
@@ -108,6 +109,12 @@ The lineage ledger file is portable, machine-readable, and human-editable. It ca
 ---
 
 ## Workflow Example
+
+To inspect a store without loading a WASM build:
+
+```bash
+soroban-upgrade-safeguard --lineage-store lineage.json --list-versions
+```
 
 ### 1. Record Initial Build (`v1.0.0`)
 ```bash
