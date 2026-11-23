@@ -760,6 +760,7 @@ More detailed guides live in the [docs](docs/) folder:
 - [Documentation](docs/documentation.md): full explanation of how the analysis pipeline works, severity levels, cascading layout breaks, and CI integration.
 - [Release Compatibility Table](docs/compatibility-table.md): minimum Rust toolchain, Stellar XDR version, and report schema version for each release.
 - [Finding Category Reference](docs/finding-categories.md): every category emitted by the tool, with severity, trigger, and remediation guidance — the exact strings to use in suppression rules.
+- [Adding a New Finding Category](docs/adding-finding-categories.md): contributor steps for adding a category with stable IDs, guidance, suppression rules, and tests.
 - [Batch Manifests](docs/batch_manifests.md): the manifest schema, composing manifests with `include`, shared `[defaults]`, per-pair overrides, precedence, and resolution provenance.
 - [Contributing](docs/contributing.md): development setup, project structure, testing, and how to add new detection rules.
 - [Signed Attestations](docs/attestations.md): DSSE signing, the in-toto predicate, offline verification, and security guidance.
