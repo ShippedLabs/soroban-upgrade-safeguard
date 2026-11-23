@@ -622,7 +622,8 @@ struct Args {
         alias = "report-name-template",
         alias = "filename-template",
         value_name = "TEMPLATE",
-        default_value = "{name}.{ext}"
+        default_value = "{name}.{ext}",
+        requires = "per_contract_output_dir"
     )]
     per_contract_output_name_template: String,
 
@@ -7073,6 +7074,37 @@ mod tests {
         let spec: OutputSpec = "text".parse().unwrap();
         assert_eq!(spec.format, OutputFormat::Text);
         assert!(spec.path.is_none());
+    }
+
+    #[test]
+    fn output_name_template_without_output_dir_is_a_clap_error_naming_the_dir_flag() {
+        let err = Args::try_parse_from(["prog", "--per-contract-output-name-template", "{name}_x.{ext}"])
+            .expect_err("the template must require --per-contract-output-dir");
+        assert_eq!(err.exit_code(), 2);
+        assert!(
+            err.to_string().contains("--per-contract-output-dir"),
+            "error must name the missing flag: {err}"
+        );
+    }
+
+    #[test]
+    fn output_name_template_with_output_dir_is_accepted() {
+        let args = Args::try_parse_from([
+            "prog",
+            "--per-contract-output-dir",
+            "out",
+            "--per-contract-output-name-template",
+            "{name}_x.{ext}",
+        ])
+        .expect("template with an output dir must parse");
+        assert_eq!(args.per_contract_output_name_template, "{name}_x.{ext}");
+    }
+
+    #[test]
+    fn output_dir_alone_uses_default_template() {
+        let args = Args::try_parse_from(["prog", "--per-contract-output-dir", "out"])
+            .expect("output dir alone must parse");
+        assert_eq!(args.per_contract_output_name_template, "{name}.{ext}");
     }
 
     #[test]
