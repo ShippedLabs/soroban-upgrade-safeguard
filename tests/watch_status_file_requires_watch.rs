@@ -31,3 +31,14 @@ fn watch_status_file_without_watch_is_rejected() {
         "must point at the missing flag: {stderr}"
     );
 }
+
+#[test]
+fn watch_debounce_ms_without_watch_exits_2_naming_watch() {
+    let (code, stderr) = run(&["--watch-debounce-ms", "500"]);
+
+    assert_eq!(code, 2, "must be a clap usage error: {stderr}");
+    assert!(
+        stderr.contains("--watch"),
+        "must point at the missing flag: {stderr}"
+    );
+}
