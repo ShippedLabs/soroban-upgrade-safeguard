@@ -525,7 +525,7 @@ struct Args {
     /// Accept a JSON-RPC response whose `id` is missing or does not match
     /// the request's `id`. Off by default; only use this for a provider
     /// known not to echo request IDs correctly.
-    #[arg(long)]
+    #[arg(long, requires = "rpc_url")]
     rpc_allow_id_mismatch: bool,
 
     /// Path to a suppression config acknowledging known, intentional breaking
@@ -5074,10 +5074,7 @@ fn run_single(
         log.timing("Comparison cycle", cycle_start);
 
         let is_safe = safety_report.is_safe();
-        if !is_safe {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(is_safe)
     };
 
     let cycle_counter = std::cell::Cell::new(0u64);

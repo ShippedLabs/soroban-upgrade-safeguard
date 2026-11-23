@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn fixture_wasm_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("wasm")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("wasm")
 }
 
 fn list_wasm_fixtures() -> Vec<PathBuf> {
@@ -33,7 +35,12 @@ fn isolated_workdir(name: &str) -> PathBuf {
 }
 
 fn job_line(id: &str, wasm: &Path) -> String {
-    format!("{{\"id\":\"{}\",\"wasm\":\"{}\"}}", id, wasm.display())
+    format!(
+        "{{\"schema_version\":1,\"id\":\"{}\",\"old\":{{\"local\":\"{}\"}},\"new\":{{\"local\":\"{}\"}}}}",
+        id,
+        wasm.display(),
+        wasm.display()
+    )
 }
 
 #[test]
@@ -89,7 +96,10 @@ fn stream_input_order_preserves_job_order() {
                 return None;
             }
             let value: serde_json::Value = serde_json::from_str(trimmed).ok()?;
-            value.get("id").and_then(|v| v.as_str()).map(|s| s.to_string())
+            value
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
         })
         .collect();
 
