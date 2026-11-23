@@ -498,6 +498,15 @@ impl SuppressionConfig {
             });
         }
 
+        let expired = expired_rule_errors(&config.rules);
+        if !expired.is_empty() {
+            return Err(Error::SuppressionConfig {
+                path: None,
+                details: expired.join("; "),
+                source: None,
+            });
+        }
+
         Ok(config)
     }
 
@@ -586,20 +595,7 @@ impl SuppressionConfig {
             ));
         }
 
-        for (index, rule) in self.rules.iter().enumerate() {
-            if let Some(expiry) = &rule.expiry {
-                match expiry_is_past(expiry) {
-                    Ok(true) => errors.push(format!(
-                        "rule #{} for '{}' expired on {}",
-                        index + 1,
-                        rule.category,
-                        expiry
-                    )),
-                    Ok(false) => {}
-                    Err(error) => errors.push(format!("rule #{}: {error}", index + 1)),
-                }
-            }
-        }
+        errors.extend(expired_rule_errors(&self.rules));
 
         errors.extend(missing_required_reasons(&self.rules, &self.require_reason));
 
@@ -644,6 +640,29 @@ impl ConfigValidation {
     pub fn is_valid(&self) -> bool {
         self.unknown_categories.is_empty() && self.errors.is_empty()
     }
+}
+
+/// One message per rule whose `expiry` has passed (or is not a valid
+/// `YYYY-MM-DD` date), naming the rule and its expiry date. Shared by
+/// [`SuppressionConfig::from_toml_str`] (so every normal run rejects an
+/// expired rule at load time) and [`SuppressionConfig::validate`].
+fn expired_rule_errors(rules: &[SuppressionRule]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (index, rule) in rules.iter().enumerate() {
+        if let Some(expiry) = &rule.expiry {
+            match expiry_is_past(expiry) {
+                Ok(true) => errors.push(format!(
+                    "rule #{} for '{}' expired on {}",
+                    index + 1,
+                    rule.category,
+                    expiry
+                )),
+                Ok(false) => {}
+                Err(error) => errors.push(format!("rule #{}: {error}", index + 1)),
+            }
+        }
+    }
+    errors
 }
 
 fn expiry_is_past(expiry: &str) -> Result<bool, String> {
@@ -818,8 +837,8 @@ mod tests {
     }
 
     #[test]
-    fn validates_expired_and_future_rules_with_fixed_dates() {
-        let expired = SuppressionConfig::from_toml_str(
+    fn expired_rule_is_rejected_at_load_and_future_rule_is_accepted() {
+        let err = SuppressionConfig::from_toml_str(
             r#"
             [[suppress]]
             category = "Struct Field Removed"
@@ -827,32 +846,23 @@ mod tests {
             expiry   = "2000-01-01"
             "#,
         )
-        .unwrap();
+        .expect_err("an expired rule must be rejected when the config is loaded");
+        let message = err.to_string();
+        assert!(
+            message.contains("Struct Field Removed") && message.contains("2000-01-01"),
+            "error must name the rule and its expiry date, got: {message}"
+        );
+
         let future = SuppressionConfig::from_toml_str(
             r#"
             [[suppress]]
             category = "Struct Field Removed"
             target   = "Data.amount"
-            expiry   = "2100-01-01"
+            expiry   = "2099-01-01"
             "#,
         )
-        .unwrap();
-
-        let expired_validation = expired.validate();
-        let future_validation = future.validate();
-
-        assert!(
-            expired_validation
-                .errors
-                .iter()
-                .any(|message| message.contains("expired")),
-            "an expired rule must be rejected during validation"
-        );
-        assert!(
-            future_validation.errors.is_empty(),
-            "a future-dated rule must remain valid: {:?}",
-            future_validation.errors
-        );
+        .expect("a not-yet-expired rule must load");
+        assert!(future.validate().errors.is_empty());
     }
 
     #[test]

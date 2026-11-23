@@ -64,7 +64,12 @@ pub const SCHEMA_VERSION: u32 = 1;
 // ── Job schema ───────────────────────────────────────────────────────────────
 
 /// A single streaming job read from one line of stdin.
+///
+/// Unknown top-level fields are rejected (the job is reported as `malformed`,
+/// naming the field) so a misspelled field such as `overide` cannot be
+/// silently dropped and run with different settings than intended.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StreamingJob {
     /// Schema version; currently always `1`.
     pub schema_version: u32,
@@ -889,6 +894,38 @@ mod tests {
             has_duplicate,
             "expected a duplicate result for the repeated id"
         );
+    }
+
+    #[test]
+    fn unknown_top_level_field_yields_malformed_result_naming_the_field() {
+        let json = r#"{"schema_version":1,"id":"a","old":{"local":"x"},"new":{"local":"y"},"bogus":1}"#;
+        let mut output = Vec::new();
+        let config = StreamConfig::default();
+        run_streaming(json.as_bytes(), &mut output, &config).unwrap();
+
+        let out_str = String::from_utf8(output).unwrap();
+        let result: serde_json::Value = serde_json::from_str(out_str.trim()).unwrap();
+        assert_eq!(result["status"], "malformed");
+        let error = result["error"].as_str().unwrap();
+        assert!(
+            error.contains("bogus"),
+            "error must name the unknown field, got: {error}"
+        );
+    }
+
+    #[test]
+    fn fully_valid_job_is_not_malformed() {
+        let json = r#"{"schema_version":1,"id":"a","old":{"local":"x"},"new":{"local":"y"},"overrides":{"strict":true}}"#;
+        let mut output = Vec::new();
+        let config = StreamConfig::default();
+        run_streaming(json.as_bytes(), &mut output, &config).unwrap();
+
+        let out_str = String::from_utf8(output).unwrap();
+        let result: serde_json::Value = serde_json::from_str(out_str.trim()).unwrap();
+        // The inputs do not exist, so the job fails — but it must have been
+        // accepted and dispatched, not rejected as malformed.
+        assert_ne!(result["status"], "malformed", "got: {result}");
+        assert_eq!(result["id"], "a");
     }
 
     #[test]
