@@ -56,6 +56,13 @@ The old or original contract build being compared against. In RPC mode, this is 
 ### Candidate
 The new or proposed contract build being validated. This is the upgrade you want to deploy, compared against the baseline to detect breaking changes.
 
+### Host Import
+A host function that a contract's WASM imports from the Soroban environment, such as recording an event or reading storage. Each import is classified by the protocol capability it requires, so the tool can flag an upgrade that starts depending on a host function the target network may not provide.
+
+**Use with:** `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>`
+
+**See also:** [Capability Reference](capability-reference.md)
+
 ## Change Propagation
 
 ### Cascade
