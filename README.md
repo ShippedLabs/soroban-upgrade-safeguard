@@ -1955,6 +1955,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Protocol-Versioned Contract-Spec Decoder Registry](docs/decoder_registry.md): how the contract-spec decoder is chosen by interface version from the contractenvmetav0 WASM custom section.
 - [Batch Manifests](docs/batch_manifests.md): the manifest schema, composing manifests with `include`, shared `[defaults]`, per-pair overrides, precedence, and resolution provenance.
 - [Contributing](docs/contributing.md): development setup, project structure, testing, and how to add new detection rules.
+- [Changelog](CHANGELOG.md): notable changes in each release, following the Keep a Changelog layout.
 - [Semantic Versioning & Public API Policy](docs/semver_policy.md): what counts as a breaking change to the tool's own public API, the curated stable surface, and the deprecation policy.
 - [Public API Surface Hardening & Migration Guide](docs/api_migration.md): guidance for migrating to the curated public API and adapting to API hardening changes.
 - [Unstable & Programmatic API Integration Guide](docs/unstable_api_guide.md): integrating through the stable API and using unstable APIs with their stability guarantees.
