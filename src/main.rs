@@ -1066,6 +1066,7 @@ enum LintOutputFormat {
     Text,
     Json,
     Markdown,
+    GithubActions,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -2521,6 +2522,7 @@ fn run_lint(args: &LintArgs) -> Result<()> {
     let output_text = match args.format {
         LintOutputFormat::Text => report.render_text(args.explain),
         LintOutputFormat::Markdown => report.render_markdown(args.explain),
+        LintOutputFormat::GithubActions => report.render_github_actions(args.explain),
         LintOutputFormat::Json => {
             format!(
                 "{}\n",
