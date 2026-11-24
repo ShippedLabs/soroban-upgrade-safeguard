@@ -54,6 +54,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Re-rendering a saved report](#re-rendering-a-saved-report)
   - [Upgrading a saved report](#upgrading-a-saved-report)
   - [Signing and verifying reports](#signing-and-verifying-reports)
+  - [Applying a signed policy bundle](#applying-a-signed-policy-bundle)
   - [Validating a single contract spec (lint)](#validating-a-single-contract-spec-lint)
   - [Listing finding categories](#listing-finding-categories)
   - [Checking RPC connectivity (preflight)](#checking-rpc-connectivity-preflight)
@@ -1961,6 +1962,9 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Inferred Storage Schemas](docs/storage-inference.md): how storage schemas are inferred from SDK-generated WASM, and how unknown or indirect paths are reported as coverage gaps rather than guessed.
 - [Metrics Reference](docs/metrics.md): every OpenMetrics name, type, and label written by `--metrics-file`.
 - [Content-Addressed Metadata Cache](docs/metadata_cache.md): cache location flags, hit and miss behavior, and the inspection flags for listing cached entries.
+- [Protocol Version Policy & Directional Severity](docs/protocol_policy.md): how protocol version changes are classified by direction and the severity each direction carries.
+- [Real-World Corpus Findings & Issue Log](docs/real_world_corpus_issues.md): findings, edge cases, and false positives surfaced by running the tool against the real-world validation corpus.
+- [Upgrade Safeguard Suppression Security Policy](docs/suppression_security_policy.md): the security model, best practices, and verification constraints for suppression rules.
 
 ## License
 
