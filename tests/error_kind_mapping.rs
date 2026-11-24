@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Coverage for ErrorKind mapping from every Error variant.
 //!
 //! Each structured error variant maps to a stable ErrorKind, but a newly

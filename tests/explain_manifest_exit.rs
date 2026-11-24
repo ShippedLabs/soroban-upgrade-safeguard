@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for --explain-manifest early exit behavior.
 //!
 //! --explain-manifest resolves a manifest and its include chain, prints how

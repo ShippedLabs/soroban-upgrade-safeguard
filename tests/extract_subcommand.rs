@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `extract` subcommand.
 //!
 //! These run the compiled binary against the checked-in WASM fixtures, which is

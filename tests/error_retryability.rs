@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Coverage for error retryability and transience classification.
 //!
 //! Consumers use `is_retryable()` and `is_transient()` to decide whether an
