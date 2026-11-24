@@ -1030,6 +1030,10 @@ struct LintArgs {
     #[arg(long, value_enum, ignore_case = true, default_value_t = LintOutputFormat::Text)]
     format: LintOutputFormat,
 
+    /// Minimum severity shown in text output; summary counts stay unchanged.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = LintMinimumSeverity::Info)]
+    min_severity: LintMinimumSeverity,
+
     /// Include remediation guidance for each finding.
     #[arg(long)]
     explain: bool,
@@ -1062,6 +1066,24 @@ enum LintOutputFormat {
     Markdown,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum LintMinimumSeverity {
+    #[default]
+    Info,
+    Warning,
+    Error,
+}
+
+impl From<LintMinimumSeverity> for lint::LintSeverity {
+    fn from(value: LintMinimumSeverity) -> Self {
+        match value {
+            LintMinimumSeverity::Info => Self::Info,
+            LintMinimumSeverity::Warning => Self::Warning,
+            LintMinimumSeverity::Error => Self::Error,
+        }
+    }
+}
+
 #[derive(ClapArgs, Debug)]
 struct AttestArgs {
     #[arg(value_name = "REPORT_JSON")]
@@ -1089,6 +1111,9 @@ struct AttestArgs {
 struct VerifyAttestationArgs {
     #[arg(value_name = "DSSE_JSON")]
     attestation: PathBuf,
+    /// Verification output format.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = AttestationOutputFormat::Json)]
+    format: AttestationOutputFormat,
     #[arg(long, value_name = "REPORT_JSON")]
     report: Option<PathBuf>,
     #[arg(long, value_name = "WASM")]
