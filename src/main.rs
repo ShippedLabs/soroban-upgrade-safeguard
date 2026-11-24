@@ -1134,6 +1134,12 @@ struct VerifyAttestationArgs {
     policy_expires_at: Option<u64>,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum AttestationOutputFormat {
+    Json,
+    Text,
+}
+
 /// `stream`: JSON Lines streaming batch mode.
 ///
 /// The full wire-format documentation lives on the `stream` subcommand's
@@ -2673,7 +2679,7 @@ fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
                     message: error.to_string(),
                 }],
             });
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            println!("{}", render_attestation_verification(&result, args.format)?);
             std::io::stdout().flush().ok();
             std::process::exit(1);
         }
@@ -2733,12 +2739,76 @@ fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
         "signer_identities": signatures.signer_identities,
         "failures": failures,
     });
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    println!("{}", render_attestation_verification(&result, args.format)?);
     if result["verified"] != true {
         std::io::stdout().flush().ok();
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn render_attestation_verification(
+    result: &serde_json::Value,
+    format: AttestationOutputFormat,
+) -> Result<String> {
+    if format == AttestationOutputFormat::Json {
+        return Ok(serde_json::to_string_pretty(result)?);
+    }
+
+    let verified = result["verified"] == true;
+    let identities = result["signer_identities"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let mut lines = vec![
+        format!("Verified: {}", if verified { "yes" } else { "no" }),
+        format!(
+            "Signer identities: {}",
+            if identities.is_empty() {
+                "none"
+            } else {
+                &identities
+            }
+        ),
+    ];
+    if let Some(failures) = result["failures"].as_array() {
+        for failure in failures {
+            lines.push(format!(
+                "Failure: {}",
+                failure["message"].as_str().unwrap_or("unknown failure")
+            ));
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod attestation_format_tests {
+    use super::*;
+
+    #[test]
+    fn renders_json_and_text() {
+        let result = serde_json::json!({
+            "verified": false,
+            "signer_identities": ["build-key"],
+            "failures": [{"message": "signature mismatch"}],
+        });
+        let json = render_attestation_verification(&result, AttestationOutputFormat::Json).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            result
+        );
+        let text = render_attestation_verification(&result, AttestationOutputFormat::Text).unwrap();
+        assert!(text.contains("Verified: no"));
+        assert!(text.contains("Signer identities: build-key"));
+        assert!(text.contains("Failure: signature mismatch"));
+    }
 }
 
 /// Run the streaming JSONL batch protocol.
