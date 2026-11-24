@@ -1,3 +1,11 @@
+//! Public API snapshot check.
+//!
+//! The test needs a nightly toolchain to build rustdoc JSON. If that toolchain
+//! cannot be installed (for example when offline) the test fails with a clear
+//! message instead of passing without checking anything. Run it only where the
+//! install can succeed, or skip it explicitly with
+//! `cargo test -- --skip public_api`.
+
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -5,9 +13,11 @@ use std::path::Path;
 #[test]
 fn public_api() {
     // 1. Install a compatible nightly toolchain if missing.
-    if rustup_toolchain::install(public_api::MINIMUM_NIGHTLY_RUST_VERSION).is_err() {
-        println!("⚠️ Warning: Nightly toolchain installation failed (network offline?). Skipping public API snapshot check.");
-        return;
+    if let Err(e) = rustup_toolchain::install(public_api::MINIMUM_NIGHTLY_RUST_VERSION) {
+        panic!(
+            "Nightly toolchain installation failed ({e:?}), so the public API snapshot was not checked. \
+             Connect to the network and retry, or skip with `cargo test -- --skip public_api`."
+        );
     }
 
     // 2. Build rustdoc JSON for the project.
