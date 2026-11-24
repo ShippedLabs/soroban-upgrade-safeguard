@@ -73,6 +73,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Excluding artifacts from a directory scan](#excluding-artifacts-from-a-directory-scan)
   - [Comparing many contracts at once](#comparing-many-contracts-at-once)
   - [Deterministic output for snapshot testing](#deterministic-output-for-snapshot-testing)
+  - [Writing a metrics snapshot](#writing-a-metrics-snapshot)
   - [GitHub Action](#github-action)
 - [How it Works](#how-it-works)
 - [Severity Levels](#severity-levels)
