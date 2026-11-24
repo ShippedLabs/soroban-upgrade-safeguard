@@ -16,6 +16,30 @@ fn lint(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
+fn lint_help_lists_github_actions_format() {
+    let output = lint(&["--help"]);
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("github-actions"));
+}
+
+#[test]
+fn lint_github_actions_emits_warning_annotations() {
+    let wasm = fixture("tests/wasm/v1.wasm");
+    let schema = fixture("tests/fixtures/lint/warning_only_storage_schema.json");
+    let output = lint(&[
+        wasm.to_str().unwrap(),
+        "--storage-schema",
+        schema.to_str().unwrap(),
+        "--format",
+        "github-actions",
+    ]);
+    let annotations = String::from_utf8(output.stdout).unwrap();
+    assert!(output.status.success());
+    assert!(annotations.lines().any(|line| line.starts_with("::warning::")));
+    assert!(annotations.lines().all(|line| line.starts_with("::")));
+}
+
+#[test]
 fn lint_errors_clearly_when_no_input_is_given() {
     let output = lint(&[]);
 

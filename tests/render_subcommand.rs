@@ -97,6 +97,33 @@ fn text_is_the_default_format() {
 }
 
 #[test]
+fn render_min_severity_hides_info_details_but_keeps_counts() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/real_world_corpus/wasm");
+    let output = bin()
+        .arg(corpus.join("blend_pool_v1.wasm"))
+        .arg(corpus.join("blend_pool_v2.wasm"))
+        .args(["--format", "json", "--no-timestamp"])
+        .output()
+        .unwrap();
+    let report = String::from_utf8(output.stdout).unwrap();
+
+    let (all, _) = render(&report, &["--plain"]);
+    let (warnings, _) = render(&report, &["--plain", "--min-severity", "warning"]);
+    assert!(all.contains("[INFO]"));
+    assert!(!warnings.contains("[INFO]"));
+    assert!(warnings.contains("Info:     2"));
+}
+
+#[test]
+fn render_help_lists_min_severity() {
+    let output = bin().args(["render", "--help"]).output().unwrap();
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("--min-severity"));
+    assert!(help.contains("warning"));
+}
+
+#[test]
 fn a_safe_report_round_trips_and_exits_zero() {
     // Comparing a build against itself yields a passing verdict, which the
     // re-render must preserve — verdict included.

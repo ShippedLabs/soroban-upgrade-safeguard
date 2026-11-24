@@ -1066,6 +1066,7 @@ enum LintOutputFormat {
     Text,
     Json,
     Markdown,
+    GithubActions,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -1250,6 +1251,10 @@ struct RenderArgs {
     /// Output format
     #[arg(long, value_enum, ignore_case = true, default_value_t = RenderFormat::Text)]
     format: RenderFormat,
+
+    /// Minimum severity shown in text output; counts and verdict stay unchanged.
+    #[arg(long, value_enum, default_value = "info")]
+    min_severity: MinimumSeverity,
 
     /// Write the rendered report atomically to this path instead of stdout.
     #[arg(long, value_name = "PATH")]
@@ -2517,6 +2522,7 @@ fn run_lint(args: &LintArgs) -> Result<()> {
     let output_text = match args.format {
         LintOutputFormat::Text => report.render_text(args.explain),
         LintOutputFormat::Markdown => report.render_markdown(args.explain),
+        LintOutputFormat::GithubActions => report.render_github_actions(args.explain),
         LintOutputFormat::Json => {
             format!(
                 "{}\n",
@@ -2817,7 +2823,11 @@ fn run_render(args: &RenderArgs) -> Result<()> {
     let rendered = match args.format {
         RenderFormat::Text => {
             let width = resolve_text_width(args.width, std::io::stdout().is_terminal());
-            let text = report.to_text_with_width(args.explain, width);
+            let text = report.to_text_with_min_severity(
+                args.explain,
+                width,
+                args.min_severity.as_severity(),
+            );
             let text = if args.plain {
                 report::plainify(&text)
             } else {
@@ -3265,11 +3275,6 @@ fn main() -> Result<()> {
     if args.interface_lockfile.is_some() && is_batch {
         anyhow::bail!("Cannot use --interface-lockfile with batch mode");
     }
-    if args.policy_bundle.is_some() && is_batch {
-        anyhow::bail!(
-            "--policy-bundle is not yet supported in batch mode (--manifest or --old-dir/--new-dir)"
-        );
-    }
     if args.interface_lockfile.is_some() && args.contract_id.is_some() {
         anyhow::bail!("Cannot use --interface-lockfile with --contract-id; the lockfile supplies the baseline");
     }
@@ -3425,7 +3430,7 @@ struct BuiltBatch {
 /// Manifest mode resolves includes, defaults and per-pair overrides up front —
 /// including duplicate-identity detection, so a collision fails before any pair
 /// runs rather than mid-loop with earlier reports already on disk. Directory
-/// mode sweeps both directories for shared-name `.wasm` artifacts, leaving out
+/// mode sweeps both trees for shared relative-path `.wasm` artifacts, leaving out
 /// anything an `--exclude` pattern matches.
 fn build_batch(args: &Args) -> Result<BuiltBatch> {
     let cli = cli_settings(args)?;
@@ -3471,6 +3476,9 @@ fn build_batch(args: &Args) -> Result<BuiltBatch> {
 /// `Ok(false)` for an unsafe verdict, which the caller turns into exit code 1
 /// *after* it has written `--metrics-file`; exiting here would skip that write.
 fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> Result<bool> {
+    if args.watch && args.policy_bundle.is_some() {
+        anyhow::bail!("--policy-bundle cannot be combined with --watch in batch mode");
+    }
     // Watch mode for a whole batch re-runs only the pairs whose inputs
     // changed, rather than recomputing every pair on every file event.
     if args.watch {
@@ -3488,6 +3496,8 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
     // Manifest mode resolves includes, defaults and per-pair overrides up front —
     // including duplicate-identity detection, so a collision fails before any
     // pair runs rather than mid-loop with earlier reports already on disk.
+    // Reject an unverified bundle before any batch WASM is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
     let built = build_batch(args)?;
     let (resolved_manifest, pairs, mut gaps, new_only, skipped) = (
         built.resolved_manifest,
@@ -3684,6 +3694,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             args,
             &remote_config,
             &oci_config,
+            verified_bundle.as_ref(),
             &mut config_cache,
             progress,
         );
@@ -3930,6 +3941,7 @@ fn compare_batch_pair(
     args: &Args,
     remote_config: &RemoteFetchConfig,
     oci_config: &OciFetchConfig,
+    verified_bundle: Option<&VerifiedPolicyBundle>,
     config_cache: &mut HashMap<PathBuf, SuppressionConfig>,
     progress: &dyn Fn(String),
 ) -> BatchResult {
@@ -3941,7 +3953,7 @@ fn compare_batch_pair(
     let settings = &pair.settings;
     let explain = settings.explain.value;
 
-    let pair_suppressions = match suppressions_for_pair(settings, config_cache) {
+    let mut pair_suppressions = match suppressions_for_pair(settings, config_cache) {
         Ok(suppressions) => suppressions,
         Err(e) => {
             let enriched_error = format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
@@ -3969,6 +3981,13 @@ fn compare_batch_pair(
             };
         }
     };
+
+    if let Some(verified) = verified_bundle {
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut pair_suppressions,
+            &verified.policy,
+        );
+    }
 
     let mut pair_error = None;
     let report = match (
@@ -4040,7 +4059,11 @@ fn compare_batch_pair(
             }) {
                 Ok(report) => {
                     log.timing("Batch pair comparison", compare_start);
-                    report.with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
+                    report
+                        .with_policy_bundle(
+                            verified_bundle.map(|verified| verified.provenance.clone()),
+                        )
+                        .with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
                 }
                 Err(e) => {
                     let enriched_error =
@@ -4753,6 +4776,49 @@ fn load_policy_bundle_bytes(source: &str, args: &Args) -> Result<(Vec<u8>, Strin
     }
 }
 
+struct VerifiedPolicyBundle {
+    policy: soroban_upgrade_safeguard::policy_bundle::PolicyBundle,
+    provenance: soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
+}
+
+fn verify_policy_bundle(
+    args: &Args,
+    progress: &dyn Fn(String),
+) -> Result<Option<VerifiedPolicyBundle>> {
+    let Some(source) = args.policy_bundle.as_deref() else {
+        return Ok(None);
+    };
+    let (bytes, source_label) = load_policy_bundle_bytes(source, args)?;
+    let mut trusted = std::collections::BTreeMap::new();
+    for item in &args.trusted_bundle_key {
+        let (id, path) = item.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
+        })?;
+        trusted.insert(
+            id.to_string(),
+            std::fs::read(path)
+                .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
+        );
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (policy, provenance) = soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
+        &bytes,
+        &trusted,
+        now,
+        &source_label,
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+    progress(format!(
+        "Policy bundle '{}' verified (signer(s): {})",
+        provenance.bundle_id,
+        provenance.signer_identities.join(", ")
+    ));
+    Ok(Some(VerifiedPolicyBundle { policy, provenance }))
+}
+
 /// Run a single-pair comparison. Returns `Ok(true)` for a safe verdict and
 /// `Ok(false)` for an unsafe one, which the caller turns into exit code 1
 /// *after* it has written `--metrics-file`; exiting here would skip that write.
@@ -4835,50 +4901,18 @@ fn run_single(
         .and_then(|stem| stem.to_str())
         .map(String::from);
 
-    // --policy-bundle: opt-in, verified, and applied *before* any WASM is
-    // loaded (see docs/policy-bundles.md). `--manifest`/`--old-dir` batch
-    // mode already rejected this combination earlier in `main()`, so by
-    // construction nothing below needs to special-case batch mode.
-    let mut owned_suppressions: Option<SuppressionConfig> = None;
-    let mut policy_bundle_provenance: Option<
-        soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
-    > = None;
-    if let Some(bundle_source) = &args.policy_bundle {
-        let (bytes, source_label) = load_policy_bundle_bytes(bundle_source, args)?;
-        let mut trusted = std::collections::BTreeMap::new();
-        for item in &args.trusted_bundle_key {
-            let (id, path) = item.split_once('=').ok_or_else(|| {
-                anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
-            })?;
-            trusted.insert(
-                id.to_string(),
-                std::fs::read(path)
-                    .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
-            );
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let (bundle, provenance) =
-            soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
-                &bytes,
-                &trusted,
-                now,
-                &source_label,
-            )
-            .map_err(|e| anyhow::anyhow!(e))?;
-        progress(format!(
-            "🏛️  Policy bundle '{}' verified (signer(s): {})",
-            provenance.bundle_id,
-            provenance.signer_identities.join(", ")
-        ));
+    // Verify the bundle before either WASM input is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
+    let owned_suppressions = verified_bundle.as_ref().map(|verified| {
         let mut merged = suppressions.clone();
-        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(&mut merged, &bundle);
-        owned_suppressions = Some(merged);
-        policy_bundle_provenance = Some(provenance);
-    }
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut merged,
+            &verified.policy,
+        );
+        merged
+    });
     let suppressions: &SuppressionConfig = owned_suppressions.as_ref().unwrap_or(suppressions);
+    let policy_bundle_provenance = verified_bundle.as_ref().map(|verified| &verified.provenance);
 
     let run_comparison = |progress: &dyn Fn(String)| -> Result<bool> {
         let log = DiagnosticLog::new(args, true);
@@ -5039,7 +5073,7 @@ fn run_single(
                     rpc_headers: &args.rpc_headers,
                     rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
                     allow_http_local: args.allow_http_local,
-                    policy_bundle: policy_bundle_provenance.as_ref(),
+                    policy_bundle: policy_bundle_provenance,
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,
@@ -6854,10 +6888,8 @@ fn is_wasm_artifact(path: &Path) -> bool {
 /// literal rather than silently reinterpreted. Matching is case-sensitive over
 /// the path as the filesystem spelled it.
 ///
-/// Written out rather than pulled from a crate: the only strings ever matched
-/// are the names of files sitting in a directory, and a scan has no tree to
-/// walk and no pattern set worth compiling. A glob engine would be dependency
-/// weight with nothing to do, and the dialect above is the whole of it.
+/// Written out rather than pulled from a crate: patterns match the paths of
+/// scanned artifacts relative to their root, and the dialect above is complete.
 fn glob_matches(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = text.chars().collect();
@@ -7131,6 +7163,33 @@ struct ScannedArtifacts {
     skipped: Vec<SkippedFile>,
 }
 
+fn collect_wasm_artifacts(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut artifacts = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            // Do not descend through directory symlinks.
+            if entry.file_type()?.is_dir() {
+                pending.push(path);
+            } else if is_wasm_artifact(&path) {
+                artifacts.push(path);
+            }
+        }
+    }
+    artifacts.sort();
+    Ok(artifacts)
+}
+
+fn scan_contract_name(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .with_extension("")
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn scan_directories(
     old_dir: &Path,
     new_dir: &Path,
@@ -7147,12 +7206,7 @@ fn scan_directories(
     let mut pairs = Vec::new();
     let mut gaps = Vec::new();
     let mut skipped = Vec::new();
-    for entry in std::fs::read_dir(old_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_wasm_artifact(&path) {
-            continue;
-        }
+    for path in collect_wasm_artifacts(old_dir)? {
         if let Some(pattern) = excluded_by(&path, old_dir, exclude) {
             skipped.push(SkippedFile {
                 side: ScanSide::Old,
@@ -7163,10 +7217,10 @@ fn scan_directories(
             continue;
         }
         {
-            let filename = path.file_name().unwrap();
-            let new_path = new_dir.join(filename);
-            let name = path.file_stem().and_then(|s| s.to_str()).map(String::from);
-            if new_path.exists() {
+            let relative = path.strip_prefix(old_dir)?;
+            let new_path = new_dir.join(relative);
+            let name = scan_contract_name(&path, old_dir);
+            if new_path.is_file() {
                 // Reject self-comparison in directory scan mode too
                 use crate::manifest::canonical_identity;
                 if canonical_identity(&path) == canonical_identity(&new_path) {
@@ -7179,12 +7233,9 @@ fn scan_directories(
                         new_dir.display()
                     );
                 }
-                let derived = name
-                    .clone()
-                    .unwrap_or_else(|| filename.to_string_lossy().to_string());
                 pairs.push(BatchPair {
-                    name: derived.clone(),
-                    id: derived,
+                    name: name.clone(),
+                    id: name,
                     labels: Vec::new(),
                     old: path,
                     new: new_path,
@@ -7193,9 +7244,8 @@ fn scan_directories(
                     settings: settings.clone(),
                 });
             } else {
-                let gap_name = name.unwrap_or_else(|| filename.to_string_lossy().to_string());
                 gaps.push(GapContract {
-                    name: gap_name,
+                    name,
                     old_path: path,
                 });
             }
@@ -7204,18 +7254,13 @@ fn scan_directories(
 
     // The reverse sweep: new-side artifacts the old-side loop never looked at.
     // The match test mirrors that loop exactly — a pair is formed when the same
-    // file name exists as a file on both sides — so the two views can never
+    // relative path exists as a file on both sides — so the two views can never
     // disagree about what counts as matched. `--exclude` is applied here on the
     // same terms, and before the match test, so an excluded artifact is
     // accounted for as skipped rather than escaping through either the matched
     // branch or the new-only list.
     let mut new_only = Vec::new();
-    for entry in std::fs::read_dir(new_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_wasm_artifact(&path) {
-            continue;
-        }
+    for path in collect_wasm_artifacts(new_dir)? {
         if let Some(pattern) = excluded_by(&path, new_dir, exclude) {
             skipped.push(SkippedFile {
                 side: ScanSide::New,
@@ -7225,15 +7270,11 @@ fn scan_directories(
             });
             continue;
         }
-        let filename = path.file_name().unwrap();
-        if old_dir.join(filename).is_file() {
+        let relative = path.strip_prefix(new_dir)?;
+        if old_dir.join(relative).is_file() {
             continue;
         }
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| filename.to_string_lossy().to_string());
+        let name = scan_contract_name(&path, new_dir);
         new_only.push(NewOnlyContract {
             name,
             new_path: path,
@@ -7254,12 +7295,8 @@ fn scan_directories(
         if new_only.is_empty() {
             // Both directories contain no WASM files. Check if directories are truly empty
             // or just contain no WASM artifacts, for a better diagnostic.
-            let old_has_files = std::fs::read_dir(old_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
-            let new_has_files = std::fs::read_dir(new_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
+            let old_has_files = std::fs::read_dir(old_dir)?.next().is_some();
+            let new_has_files = std::fs::read_dir(new_dir)?.next().is_some();
 
             if !old_has_files && !new_has_files {
                 anyhow::bail!(

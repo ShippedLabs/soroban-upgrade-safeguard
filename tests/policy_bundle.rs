@@ -1,5 +1,5 @@
 //! CLI-level coverage for `--policy-bundle`: opt-in application, rejection
-//! before any WASM is loaded, and the batch-mode restriction.
+//! before any WASM is loaded, including in batch mode.
 //!
 //! Deterministic signing vectors, tampering rejections, and precedence
 //! (OR-union / most-restrictive-wins merge) are covered at the unit level
@@ -155,31 +155,59 @@ fn a_bundle_with_no_trusted_key_is_rejected_before_any_wasm_is_loaded() {
 }
 
 #[test]
-fn policy_bundle_is_rejected_in_batch_mode() {
-    let bundle = sample_bundle(false);
-    let (bundle_path, trusted_arg) = write_signed_bundle("batch-mode", &bundle);
-    let bundle_path_str = bundle_path.display().to_string();
+fn verified_bundle_applies_to_every_batch_pair() {
+    let (bundle_path, trusted_arg) = write_signed_bundle("batch-mode", &sample_bundle(true));
+    let manifest = temp_path("batch-mode-manifest.toml");
+    let old = wasm("v1.wasm").display().to_string();
+    let new = wasm("v3.wasm").display().to_string();
+    std::fs::write(
+        &manifest,
+        format!(
+            "[[pairs]]\nname = \"one\"\nold = {old:?}\nnew = {new:?}\n\
+             [[pairs]]\nname = \"two\"\nold = {old:?}\nnew = {new:?}\n"
+        ),
+    )
+    .unwrap();
 
     let (code, stdout, stderr) = run(&[
         "--manifest",
-        "/nonexistent/manifest.toml",
+        &manifest.display().to_string(),
         "--policy-bundle",
-        &bundle_path_str,
+        &bundle_path.display().to_string(),
         "--trusted-bundle-key",
         &trusted_arg,
+        "--format",
+        "json",
     ]);
+    assert_eq!(code, 0, "{stderr}");
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let results = json["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    for result in results {
+        assert_eq!(result["report"]["policy_bundle"]["bundle_id"], "test-org-baseline");
+        assert_eq!(result["report"]["policy_bundle"]["verified"], true);
+    }
+    assert_eq!(stderr.matches("Policy bundle").count(), 1);
+}
 
-    std::fs::remove_file(&bundle_path).ok();
+#[test]
+fn untrusted_batch_bundle_fails_before_loading_wasm() {
+    let (bundle_path, _) = write_signed_bundle("batch-untrusted", &sample_bundle(false));
+    let manifest = temp_path("batch-untrusted-manifest.toml");
+    std::fs::write(
+        &manifest,
+        "[[pairs]]\nname = \"missing\"\nold = \"/nonexistent/old.wasm\"\nnew = \"/nonexistent/new.wasm\"\n",
+    )
+    .unwrap();
 
-    assert_ne!(code, 0);
+    let (code, stdout, stderr) = run(&[
+        "--manifest",
+        &manifest.display().to_string(),
+        "--policy-bundle",
+        &bundle_path.display().to_string(),
+    ]);
     let combined = format!("{stdout}{stderr}");
-    assert!(
-        combined.contains("--policy-bundle") && combined.contains("batch mode"),
-        "error should name both --policy-bundle and batch mode, got: {combined}"
-    );
-    assert!(
-        !combined.to_lowercase().contains("no such file")
-            && !combined.to_lowercase().contains("not found"),
-        "the conflict must be caught before the manifest is ever opened, got: {combined}"
-    );
+    assert_ne!(code, 0);
+    assert!(combined.contains("verification") || combined.contains("trusted"), "{combined}");
+    assert!(!combined.contains("old.wasm"), "{combined}");
 }

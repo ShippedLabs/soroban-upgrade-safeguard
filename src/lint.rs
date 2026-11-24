@@ -358,6 +358,31 @@ impl LintReport {
         ));
         out
     }
+
+    /// Emit one GitHub Actions annotation for each finding.
+    pub fn render_github_actions(&self, explain: bool) -> String {
+        let mut out = String::new();
+        for finding in &self.findings {
+            let level = match finding.severity {
+                LintSeverity::Info => "notice",
+                LintSeverity::Warning => "warning",
+                LintSeverity::Error => "error",
+            };
+            let mut message = format!(
+                "{} ({}): {}",
+                finding.target, finding.rule_id, finding.message
+            );
+            if explain {
+                message.push_str(&format!(" Remediation: {}", finding.remediation));
+            }
+            let escaped = message
+                .replace('%', "%25")
+                .replace('\r', "%0D")
+                .replace('\n', "%0A");
+            out.push_str(&format!("::{level}::{escaped}\n"));
+        }
+        out
+    }
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -919,6 +944,42 @@ mod tests {
             inferred_storage: None,
             policy: ResourcePolicy::default(),
         }
+    }
+
+    #[test]
+    fn github_actions_annotations_match_severity_and_escape_newlines() {
+        let report = LintReport {
+            findings: vec![
+                LintFinding {
+                    rule_id: "info",
+                    severity: LintSeverity::Info,
+                    target: LintTarget::new("function", "added"),
+                    message: "new\nfunction".to_string(),
+                    remediation: "review",
+                },
+                LintFinding {
+                    rule_id: "warning",
+                    severity: LintSeverity::Warning,
+                    target: LintTarget::new("struct", "unused"),
+                    message: "unused".to_string(),
+                    remediation: "review",
+                },
+                LintFinding {
+                    rule_id: "error",
+                    severity: LintSeverity::Error,
+                    target: LintTarget::new("enum", "invalid"),
+                    message: "invalid".to_string(),
+                    remediation: "review",
+                },
+            ],
+        };
+        let annotations = report.render_github_actions(false);
+        let lines: Vec<_> = annotations.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("::notice::"));
+        assert!(lines[0].contains("new%0Afunction"));
+        assert!(lines[1].starts_with("::warning::"));
+        assert!(lines[2].starts_with("::error::"));
     }
 
     #[test]

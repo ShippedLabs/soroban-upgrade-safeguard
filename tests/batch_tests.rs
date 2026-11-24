@@ -31,6 +31,32 @@ fn portable(path: &Path) -> String {
 }
 
 #[test]
+fn directory_scan_pairs_nested_paths_and_excludes_nested_artifacts() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("nested-directory-scan");
+    let old = root.join("old");
+    let new = root.join("new");
+    std::fs::create_dir_all(old.join("sub")).unwrap();
+    std::fs::create_dir_all(new.join("sub")).unwrap();
+    std::fs::copy(wasm("v1.wasm"), old.join("sub/z.wasm")).unwrap();
+    std::fs::copy(wasm("v3.wasm"), new.join("sub/z.wasm")).unwrap();
+    std::fs::copy(wasm("v1.wasm"), old.join("sub/skip.wasm")).unwrap();
+    std::fs::copy(wasm("v3.wasm"), new.join("sub/skip.wasm")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .arg("--old-dir")
+        .arg(&old)
+        .arg("--new-dir")
+        .arg(&new)
+        .args(["--exclude", "sub/skip.wasm"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Loaded 1 pair(s) for comparison."), "{stdout}");
+    assert!(stdout.contains("Comparing contract pair: sub/z"), "{stdout}");
+    assert!(stdout.contains("Skipped 2 .wasm artifact(s)"), "{stdout}");
+}
+
+#[test]
 fn batch_manifest_toml_mode_fails_and_exits_one() {
     // Generate a TOML manifest
     let manifest_content = format!(
