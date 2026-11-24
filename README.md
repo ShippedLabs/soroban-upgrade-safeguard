@@ -70,6 +70,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Wrapping text output](#wrapping-text-output)
   - [Multiple output formats](#multiple-output-formats)
   - [Quiet output](#quiet-output)
+  - [Minimum severity](#minimum-severity)
   - [Watch mode](#watch-mode)
   - [Comparing two directories of builds](#comparing-two-directories-of-builds)
   - [Excluding artifacts from a directory scan](#excluding-artifacts-from-a-directory-scan)
