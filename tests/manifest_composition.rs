@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration tests for composable batch manifests: `include`, `[defaults]`,
 //! and per-pair overrides.
 //!
