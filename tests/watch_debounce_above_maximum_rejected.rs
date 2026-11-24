@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test for `--watch-debounce-ms` above the documented maximum.
 //!
 //! The debounce window is bounded so watch mode stays responsive to a

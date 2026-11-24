@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `stream` reports an unparseable job line as a `malformed` result rather
 //! than aborting, so one bad line cannot take down a long-running pipeline.
 

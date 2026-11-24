@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression coverage for zero-byte WASM file diagnostics.
 //!
 //! An empty file is a common artifact-path mistake and should produce a clear
