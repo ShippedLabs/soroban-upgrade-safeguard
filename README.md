@@ -114,7 +114,7 @@ brew install soroban-upgrade-safeguard
 ```
 
 The Homebrew formula is published with the first binary release. To install
-from source, use:
+from source, use Rust 1.85 or later (the minimum supported Rust version):
 
 ```bash
 cargo install --path .
