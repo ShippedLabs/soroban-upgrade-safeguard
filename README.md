@@ -1944,6 +1944,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Content-Addressed Metadata Cache](docs/metadata_cache.md): cache location flags, hit and miss behavior, and the inspection flags for listing cached entries.
 - [Protocol Version Policy & Directional Severity](docs/protocol_policy.md): how protocol version changes are classified by direction and the severity each direction carries.
 - [Real-World Corpus Findings & Issue Log](docs/real_world_corpus_issues.md): findings, edge cases, and false positives surfaced by running the tool against the real-world validation corpus.
+- [Upgrade Safeguard Suppression Security Policy](docs/suppression_security_policy.md): the security model, best practices, and verification constraints for suppression rules.
 
 ## License
 
