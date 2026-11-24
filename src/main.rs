@@ -882,6 +882,9 @@ struct AttestArgs {
 struct VerifyAttestationArgs {
     #[arg(value_name = "DSSE_JSON")]
     attestation: PathBuf,
+    /// Verification output format.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = AttestationOutputFormat::Json)]
+    format: AttestationOutputFormat,
     #[arg(long, value_name = "REPORT_JSON")]
     report: Option<PathBuf>,
     #[arg(long, value_name = "WASM")]
