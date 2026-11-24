@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that `lockfile --output <path> --force` updates an existing lockfile.
 
 use serde_json::Value;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `lint` subcommand CLI surface.
 
 use std::path::PathBuf;
