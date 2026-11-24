@@ -287,6 +287,13 @@ The run mode enabled with `--strict` that fails on Warning findings as well as C
 
 **See also:** [Strict mode](../README.md#strict-mode)
 
+### Watch Mode
+The mode enabled with `--watch` that keeps the process running and re-runs a comparison whenever the input files change.
+
+**Use with:** `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM> --watch`
+
+**See also:** [Watch mode](../README.md#watch-mode)
+
 ## Input Sources
 
 ### Batch Manifest
