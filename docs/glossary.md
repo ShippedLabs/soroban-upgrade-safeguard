@@ -266,6 +266,13 @@ A signed, centrally governed compatibility policy that a team distributes and ev
 
 **See also:** [Policy Bundles](policy-bundles.md)
 
+### Strict Mode
+The run mode enabled with `--strict` that fails on Warning findings as well as Critical ones. Without it, only Critical findings and structural errors produce a non-zero exit code.
+
+**Use with:** `--strict` flag
+
+**See also:** [Strict mode](../README.md#strict-mode)
+
 ## Input Sources
 
 ### Batch Manifest
