@@ -57,6 +57,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Validating a single contract spec (lint)](#validating-a-single-contract-spec-lint)
   - [Listing finding categories](#listing-finding-categories)
   - [Checking RPC connectivity (preflight)](#checking-rpc-connectivity-preflight)
+  - [Diagnosing a misbehaving run (doctor)](#diagnosing-a-misbehaving-run-doctor)
   - [Printing JSON schemas and completion](#printing-json-schemas-and-completion)
   - [Symlinked inputs](#symlinked-inputs)
   - [Fetching inputs over HTTPS](#fetching-inputs-over-https)
