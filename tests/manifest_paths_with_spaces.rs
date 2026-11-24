@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Regression coverage for manifest paths containing spaces.
 //!
 //! Batch manifests may reference artifacts stored beneath directories whose

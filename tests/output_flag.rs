@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration tests for the `--output` flag (Feature 4).
 //!
 //! Verifies that `--output PATH` writes the report to the given file,

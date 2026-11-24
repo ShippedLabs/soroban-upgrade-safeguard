@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration test for `--metrics-file`.
 //!
 //! No existing test exercises this flag. This spawns the binary directly,
