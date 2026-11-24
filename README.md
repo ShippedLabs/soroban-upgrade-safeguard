@@ -1962,6 +1962,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [GitHub Action Examples](docs/github-action-examples.md): the reusable GitHub Action's inputs and outputs, required permissions, and four complete workflow examples covering PR comments and Checks API annotations.
 - [WASM Complexity Delta Analysis](docs/wasm_complexity.md): the static instruction and complexity deltas reported between builds, and how to gate them with configurable budgets.
 - [Inferred Storage Schemas](docs/storage-inference.md): how storage schemas are inferred from SDK-generated WASM, and how unknown or indirect paths are reported as coverage gaps rather than guessed.
+- [Empirical Validation Type-Mapping Specification](docs/empirical_validation_spec.md): the formal type-mapping specification used to decode concrete on-chain `ScVal` XDR values against expected `ScSpecTypeDef` schemas.
 - [Metrics Reference](docs/metrics.md): every OpenMetrics name, type, and label written by `--metrics-file`.
 - [Content-Addressed Metadata Cache](docs/metadata_cache.md): cache location flags, hit and miss behavior, and the inspection flags for listing cached entries.
 - [Protocol Version Policy & Directional Severity](docs/protocol_policy.md): how protocol version changes are classified by direction and the severity each direction carries.
