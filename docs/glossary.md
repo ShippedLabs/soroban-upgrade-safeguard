@@ -70,6 +70,13 @@ When a change in one type propagates to affect all types that embed or reference
 ### Dependency Graph
 The internal representation of how types reference each other. The tool builds a dependency graph to trace cascading breaks and identify all affected types when a low-level type changes.
 
+### Impact Graph
+The versioned node and edge graph of functions, types, storage, events, findings, and policy decisions that the tool can export for downstream tooling. Nodes are those items; edges are the dependency, cascade, and reference relationships between them.
+
+**Use with:** `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM> --impact-graph --format json`
+
+**See also:** [Impact Graph Export](impact-graph.md)
+
 ## Policy and Control
 
 ### Suppression

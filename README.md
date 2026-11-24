@@ -165,6 +165,17 @@ soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
 ```
 
+### Checking the version
+
+`--version` (or `-V`) prints the tool name and version, then exits:
+
+```bash
+soroban-upgrade-safeguard --version
+# soroban-upgrade-safeguard 0.1.0
+```
+
+Please include this output when you report a bug.
+
 ### Subcommands
 
 Running the tool with two WASM paths, as in the example above, compares
@@ -422,6 +433,32 @@ soroban-upgrade-safeguard extract ./wasm/v1.wasm
 soroban-upgrade-safeguard extract ./wasm/v1.wasm --hash-only
 ```
 
+By default `extract` prints these top-level keys: `spec_schema_version`,
+`tool_version`, `source`, `interface_hash`, `source_kind`, `env_meta`,
+`duplicates`, `scope`, `functions`, `structs`, `enums`, `unions` and
+`error_enums`. Three flags omit a field from the output:
+
+| Flag | Field removed |
+|------|---------------|
+| `--no-env-meta` | `env_meta` (decoded `contractenvmetav0` metadata) |
+| `--no-duplicates` | `duplicates` (duplicate-declaration diagnostics) |
+| `--no-scope` | `scope` (interface scope information) |
+
+For example, the output keys change like this:
+
+```bash
+# Default output keys
+soroban-upgrade-safeguard extract ./wasm/v1.wasm
+# spec_schema_version, tool_version, source, interface_hash, source_kind,
+# env_meta, duplicates, scope, functions, structs, enums, unions, error_enums
+
+# Without the three optional fields
+soroban-upgrade-safeguard extract ./wasm/v1.wasm \
+  --no-env-meta --no-duplicates --no-scope
+# spec_schema_version, tool_version, source, interface_hash, source_kind,
+# functions, structs, enums, unions, error_enums
+```
+
 ### Pinning an interface with a lockfile
 
 Generate a lockfile from the build whose public interface you intend to protect:
@@ -624,6 +661,18 @@ soroban-upgrade-safeguard categories --severity warning --format json
 soroban-upgrade-safeguard categories --severity info --format markdown
 ```
 
+To look up a single category, pass its exact name with `--category <NAME>`.
+Only that category's details are printed, in any `--format`. The match is
+case-sensitive, and an unknown name prints an error and exits non-zero:
+
+```bash
+soroban-upgrade-safeguard categories --category "Function Removed"
+soroban-upgrade-safeguard categories --category "Function Removed" --format json
+
+# Unknown name: prints "Unknown category: 'function removed'" and exits non-zero
+soroban-upgrade-safeguard categories --category "function removed"
+```
+
 All formats are generated from the same source of truth the comparison
 analysis uses, so the listing can never drift from the categories the tool
 actually emits. See [docs/finding-categories.md](docs/finding-categories.md) for
@@ -669,7 +718,8 @@ command exits non-zero when any check fails.
 `doctor` reports the tool version, enabled Cargo features, cache directory
 paths, and the resolved suppression configuration — all in one place, without
 loading any WASM files or making any network requests. Use it to assemble a
-bug report, to confirm which build is installed, or to check that a cache
+bug report (alongside the output of `soroban-upgrade-safeguard --version`), to
+confirm which build is installed, or to check that a cache
 directory or config file is being picked up from the expected location:
 
 ```bash
