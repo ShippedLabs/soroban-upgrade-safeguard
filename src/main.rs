@@ -1860,11 +1860,33 @@ fn run_doctor(args: &DoctorArgs) -> Result<()> {
         colored::control::set_override(false);
     }
 
-    let (suppressions, config_source) = load_suppressions(
+    // doctor exists to diagnose a broken setup, so a config that fails to load
+    // is reported in the output instead of aborting the command.
+    let (suppressions, config_source, config_error) = match load_suppressions(
         args.no_config,
         args.config.as_deref(),
         args.search_parent_config,
-    )?;
+    ) {
+        Ok((suppressions, source)) => (suppressions, source, None),
+        Err(err) => {
+            let source = if let Some(path) = args.config.as_deref() {
+                Some((path.to_path_buf(), ConfigSource::Cli))
+            } else if let Some(env_path) = std::env::var_os(CONFIG_PATH_ENV_VAR) {
+                Some((PathBuf::from(env_path), ConfigSource::Env))
+            } else if Path::new(DEFAULT_CONFIG_FILE).exists() {
+                Some((
+                    PathBuf::from(DEFAULT_CONFIG_FILE),
+                    ConfigSource::AutoDiscovered,
+                ))
+            } else {
+                resolve_ancestor_config(args.search_parent_config)
+                    .ok()
+                    .flatten()
+                    .map(|path| (path, ConfigSource::AncestorSearch))
+            };
+            (SuppressionConfig::default(), source, Some(format!("{err:#}")))
+        }
+    };
 
     let version = env!("CARGO_PKG_VERSION");
 
@@ -1924,6 +1946,7 @@ fn run_doctor(args: &DoctorArgs) -> Result<()> {
                     }),
                 },
             );
+            config.insert("load_error".to_string(), serde_json::json!(config_error));
             config.insert(
                 "suppression_count".to_string(),
                 serde_json::json!(suppressions.rules().len()),
@@ -1942,6 +1965,7 @@ fn run_doctor(args: &DoctorArgs) -> Result<()> {
             &oci_cache_dir,
             &metadata_cache_dir,
             &config_source,
+            config_error.as_deref(),
             &suppressions,
         ),
     };
@@ -1957,6 +1981,7 @@ fn render_doctor_text(
     oci_cache_dir: &Path,
     metadata_cache_dir: &Path,
     config_source: &Option<(PathBuf, ConfigSource)>,
+    config_error: Option<&str>,
     suppressions: &SuppressionConfig,
 ) -> String {
     let mut out = String::new();
@@ -2006,6 +2031,9 @@ fn render_doctor_text(
             out.push_str("  Config file: (none found)\n");
             out.push_str("  Source:      default\n");
         }
+    }
+    if let Some(error) = config_error {
+        out.push_str(&format!("  Load error:  {}\n", error));
     }
     out.push_str(&format!(
         "  Suppressions loaded: {}\n",

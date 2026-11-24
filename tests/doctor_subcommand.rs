@@ -286,3 +286,39 @@ fn doctor_no_color_flag_disables_color() {
         "doctor --no-color must not contain ANSI escape codes"
     );
 }
+
+#[test]
+fn doctor_reports_a_missing_config_file_in_text_output() {
+    let missing = std::env::temp_dir().join("safeguard-doctor-missing-config.toml");
+    let missing_str = missing.to_str().expect("temp path is utf8");
+    let run = run_doctor(&["--no-color", "--config", missing_str]);
+    assert_eq!(run.code, 0, "doctor must exit 0, stderr:\n{}", run.stderr);
+    assert!(
+        run.stdout.contains(missing_str),
+        "text output must show the config path, got:\n{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains("Load error:") && run.stdout.contains("Failed to read"),
+        "text output must show the load error, got:\n{}",
+        run.stdout
+    );
+}
+
+#[test]
+fn doctor_reports_a_missing_config_file_in_json_output() {
+    let missing = std::env::temp_dir().join("safeguard-doctor-missing-config.toml");
+    let missing_str = missing.to_str().expect("temp path is utf8");
+    let run = run_doctor(&["--format", "json", "--config", missing_str]);
+    assert_eq!(run.code, 0, "doctor must exit 0, stderr:\n{}", run.stderr);
+    let report: serde_json::Value = serde_json::from_str(&run.stdout).expect("valid JSON");
+    let config = &report["configuration"];
+    assert_eq!(config["config_file"]["path"].as_str(), Some(missing_str));
+    assert!(
+        config["load_error"]
+            .as_str()
+            .is_some_and(|e| e.contains("Failed to read")),
+        "load_error must describe the failure, got:\n{}",
+        run.stdout
+    );
+}
