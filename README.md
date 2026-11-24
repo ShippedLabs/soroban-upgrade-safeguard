@@ -627,6 +627,14 @@ spec. The schema file may be JSON or TOML, inferred from the extension:
 soroban-upgrade-safeguard lint ./wasm/v1.wasm --storage-schema ./schemas/v1.json
 ```
 
+Pass `--max-walk-depth <N>` to override the built-in maximum recursive
+type-walk depth. A type that nests containers deeper than `N` cannot be safely
+analyzed, so `lint` reports an `unanalyzable-recursive-shape` warning for it:
+
+```bash
+soroban-upgrade-safeguard lint ./wasm/v1.wasm --max-walk-depth 4
+```
+
 Exit codes differ from the comparison command:
 
 - `0`: no findings, or only warning/info findings without `--strict`.
