@@ -80,6 +80,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
 - [How it Works](#how-it-works)
 - [Severity Levels](#severity-levels)
 - [Exit Codes](#exit-codes)
+- [Limitations](#limitations)
 - [Documentation](#documentation)
 - [License](#license)
 
@@ -1919,6 +1920,15 @@ The codes in this table apply to the default comparison command and to all subco
 | `1` | Failure. At least one unsuppressed Critical finding; or, with `--strict`, at least one Warning finding. Also returned for configuration errors (invalid flags, missing inputs, unknown format names), a baseline hash mismatch (via `--expected-wasm-hash`), a symlink input rejected by `--no-symlinks`, or an interface drift detected by `--interface-lockfile`. |
 
 Watch mode (`--watch`) keeps the process running regardless of comparison verdict — a `1` from a comparison cycle does **not** terminate the watcher.
+
+## Limitations
+
+What the tool does not cover today:
+
+- **Resource `[limits]` are not enforced.** In batch manifests the `[limits]` table is resolved and reported only, and the main comparison pipeline does not thread a `.safeguard.toml` `[limits]` table into live WASM parsing. See [Batch Manifests](docs/batch_manifests.md#schema) and [Policy Bundles](docs/policy-bundles.md#scope-of-this-pass).
+- **`[[dependencies]]` in a batch manifest is not propagated.** It parses and appears in provenance, but cross-contract propagation is not wired up. See [Batch Manifests](docs/batch_manifests.md#what-is-not-wired-up).
+- **Batch mode compares local files only.** Per-pair RPC settings and storage schemas are not supported. See [Batch Manifests](docs/batch_manifests.md#what-is-not-wired-up).
+- **A new artifact with no old counterpart is not compared.** In a directory comparison it is listed as a warning and does not affect the verdict. See [Comparing two directories of builds](#comparing-two-directories-of-builds).
 
 ## Documentation
 
