@@ -1,0 +1,47 @@
+name: Bug report
+description: Report something that does not work as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in the fields below.
+  - type: input
+    id: version
+    attributes:
+      label: Tool version
+      description: Output of `soroban-upgrade-safeguard --version`.
+      placeholder: soroban-upgrade-safeguard 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The full command line you ran. Remove any secrets, such as RPC headers.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What happened instead. Paste the report or error output if you have it.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Output of `soroban-upgrade-safeguard doctor`.
+      render: shell
+    validations:
+      required: true
