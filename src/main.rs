@@ -837,6 +837,24 @@ enum LintOutputFormat {
     Markdown,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum LintMinimumSeverity {
+    #[default]
+    Info,
+    Warning,
+    Error,
+}
+
+impl From<LintMinimumSeverity> for lint::LintSeverity {
+    fn from(value: LintMinimumSeverity) -> Self {
+        match value {
+            LintMinimumSeverity::Info => Self::Info,
+            LintMinimumSeverity::Warning => Self::Warning,
+            LintMinimumSeverity::Error => Self::Error,
+        }
+    }
+}
+
 #[derive(ClapArgs, Debug)]
 struct AttestArgs {
     #[arg(value_name = "REPORT_JSON")]

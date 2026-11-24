@@ -291,11 +291,24 @@ impl LintReport {
     }
 
     pub fn render_text(&self, explain: bool) -> String {
+        self.render_text_with_min_severity(explain, LintSeverity::Info)
+    }
+
+    /// Hide lower-severity detail lines without changing summary counts.
+    pub fn render_text_with_min_severity(
+        &self,
+        explain: bool,
+        min_severity: LintSeverity,
+    ) -> String {
         if self.is_clean() {
             return "[PASS] No lint findings.\n".to_string();
         }
         let mut out = String::new();
-        for finding in &self.findings {
+        for finding in self
+            .findings
+            .iter()
+            .filter(|finding| finding.severity >= min_severity)
+        {
             out.push_str(&format!(
                 "[{}] {} ({}): {}\n",
                 finding.severity.label(),
@@ -904,6 +917,29 @@ mod tests {
             inferred_storage: None,
             policy: ResourcePolicy::default(),
         }
+    }
+
+    #[test]
+    fn minimum_severity_filters_details_but_preserves_counts_and_status() {
+        let report = LintReport {
+            findings: vec![
+                LintFinding::new(
+                    LintRuleId::UnreachableDeclaration,
+                    LintTarget::new("struct", "Unused"),
+                    "unused type",
+                ),
+                LintFinding::new(
+                    LintRuleId::DuplicateCaseName,
+                    LintTarget::new("enum", "Duplicate"),
+                    "duplicate case",
+                ),
+            ],
+        };
+        let output = report.render_text_with_min_severity(false, LintSeverity::Warning);
+        assert!(!output.contains("unused type"));
+        assert!(output.contains("duplicate case"));
+        assert!(output.contains("0 error(s), 1 warning(s), 1 info finding(s)"));
+        assert!(report.has_warnings());
     }
 
     #[test]
