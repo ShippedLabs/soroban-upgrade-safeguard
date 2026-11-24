@@ -2906,7 +2906,7 @@ fn run_render(args: &RenderArgs) -> Result<()> {
             format!("{text}\n")
         }
         RenderFormat::Markdown => {
-            let markdown = report.to_markdown();
+            let markdown = report.to_markdown_with_min_severity(args.min_severity.as_severity());
             let markdown = if args.plain {
                 report::plainify(&markdown)
             } else {
@@ -4706,7 +4706,9 @@ fn render_batch_summary(
                     if let BatchResult::Error { error, .. } = result {
                         markdown.push_str(&format!("**Pair error**: `{}`\n\n", error));
                     }
-                    let report_md = report.generate_summary_markdown();
+                    let report_md = report
+                        .to_renderable()
+                        .to_markdown_with_min_severity(min_severity);
                     let stripped_md = report_md.replace("# Soroban Upgrade Safety Report\n\n", "");
                     markdown.push_str(&stripped_md);
                     markdown.push_str("\n---\n\n");
@@ -5465,7 +5467,7 @@ fn render_single(
     match format {
         OutputFormat::Json => Ok(serde_json::to_string_pretty(&renderable)?),
         OutputFormat::Markdown => {
-            let markdown = renderable.to_markdown();
+            let markdown = renderable.to_markdown_with_min_severity(min_severity);
             Ok(destyle_text(markdown, ascii, plain))
         }
         OutputFormat::Text => {

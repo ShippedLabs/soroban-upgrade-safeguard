@@ -1071,6 +1071,26 @@ impl RenderableReport {
         output.push('\n');
     }
 
+    /// Filter displayed findings while retaining the original counts and verdict.
+    pub fn to_markdown_with_min_severity(&self, minimum: &Severity) -> String {
+        if *minimum == Severity::Info {
+            return self.to_markdown();
+        }
+        let mut view = self.clone();
+        let visible = |finding: &ReportedFinding| match minimum {
+            Severity::Info => true,
+            Severity::Warning => finding.finding.severity != Severity::Info,
+            Severity::Critical => finding.finding.severity == Severity::Critical,
+        };
+        for findings in view.findings_by_category.values_mut() {
+            findings.retain(&visible);
+        }
+        for findings in view.findings_by_axis.values_mut() {
+            findings.retain(&visible);
+        }
+        view.to_markdown()
+    }
+
     pub fn to_markdown(&self) -> String {
         let mut output = String::new();
         output.push_str("# Soroban Upgrade Safety Report\n\n");
