@@ -97,6 +97,38 @@ fn run_manifest(manifest: &Path, extra: &[&str]) -> Run {
     run_in(None, &args)
 }
 
+#[test]
+fn manifest_xdr_limit_fails_the_pair_with_a_limit_error() {
+    let dir = temp_dir("mc-enforced-limits");
+    stage_wasm(&dir);
+    let manifest = write(
+        &dir,
+        "batch.toml",
+        r#"
+        [defaults.limits]
+        max_xdr_depth = 1
+
+        [[pairs]]
+        name = "limited"
+        old = "v1.wasm"
+        new = "v3.wasm"
+        "#,
+    );
+
+    let run = run_manifest(&manifest, &[]);
+    assert_eq!(run.code, 1);
+    let json = run.json();
+    assert_eq!(json["results"][0]["coverage"], "error");
+    assert!(
+        json["results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("max_xdr_depth"),
+        "expected a depth limit error: {}",
+        run.stdout
+    );
+}
+
 /// The `{value, origin}` pair for one setting of one named pair.
 fn setting<'a>(json: &'a Value, pair_name: &str, path: &[&str]) -> &'a Value {
     let pair = json["manifest"]["pairs"]

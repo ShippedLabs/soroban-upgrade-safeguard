@@ -4060,7 +4060,15 @@ fn compare_batch_pair(
         (Ok(old_wasm), Ok(new_wasm)) => {
             log.timing("Loading batch pair inputs", pair_start);
             let compare_start = std::time::Instant::now();
-            match load_pair_storage_schemas(pair).and_then(|storage_schemas| {
+            let policy = settings.resource_policy();
+            let limited_inputs = parser::enforce_limits(&old_wasm.bytes, &policy)
+                .context("Old WASM exceeded the manifest resource limits")
+                .and_then(|_| {
+                    parser::enforce_limits(&new_wasm.bytes, &policy)
+                        .context("New WASM exceeded the manifest resource limits")
+                });
+            let comparison = limited_inputs.and_then(|_| load_pair_storage_schemas(pair));
+            match comparison.and_then(|storage_schemas| {
                 if let Some(storage_schemas) = storage_schemas.as_ref() {
                     log.sections("Old", &old_wasm.bytes);
                     log.sections("New", &new_wasm.bytes);
@@ -4114,7 +4122,7 @@ fn compare_batch_pair(
                 }
                 Err(e) => {
                     let enriched_error =
-                        format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
+                        format!("pair '{}' (id: {}): {e:#}", contract_name, contract_id);
                     pair_error = Some(enriched_error.clone());
                     progress(format!(
                         "  ⚠️  Comparison failed for '{}': {}",
