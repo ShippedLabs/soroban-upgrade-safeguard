@@ -5860,10 +5860,10 @@ fn load_wasm_input(
     Ok(module)
 }
 
-/// Look up a locally loaded WASM in the metadata cache and, on a miss, decode
+/// Look up a loaded WASM in the metadata cache and, on a miss, decode
 /// it and store the result.
 ///
-/// Only local file inputs take part for now: stdin, `https://` and `oci://`
+/// Local files and digest-pinned OCI inputs take part; stdin and `https://`
 /// inputs are skipped. The cache is advisory, so a decode failure here is
 /// ignored; the analysis itself reports it with full context.
 fn use_metadata_cache(
@@ -5873,10 +5873,9 @@ fn use_metadata_cache(
     stats: &mut soroban_upgrade_safeguard::metadata_cache::CacheStats,
 ) {
     let text = path.to_string_lossy();
-    let is_local = !is_stdin_wasm_path(path)
-        && !matches!(RemoteRef::parse(&text), Ok(Some(_)))
-        && !matches!(OciReference::parse(&text), Ok(Some(_)));
-    if !is_local {
+    let cacheable = !is_stdin_wasm_path(path)
+        && !matches!(RemoteRef::parse(&text), Ok(Some(_)));
+    if !cacheable {
         return;
     }
     let _ = soroban_upgrade_safeguard::metadata_cache::extract_with_cache(
