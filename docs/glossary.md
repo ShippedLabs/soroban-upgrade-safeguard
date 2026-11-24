@@ -63,6 +63,13 @@ A host function that a contract's WASM imports from the Soroban environment, suc
 
 **See also:** [Capability Reference](capability-reference.md)
 
+### Runtime Surface
+The WASM-level interface beyond imports and exports: tables, globals, the start function and enabled proposals. It is compared as its own axis, separate from the exported interface.
+
+**Use with:** findings on the `runtime_surface` axis in `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>`
+
+**See also:** [Multi-Axis Compatibility](multi_axis_compatibility.md)
+
 ## Change Propagation
 
 ### Cascade
