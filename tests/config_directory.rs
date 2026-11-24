@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that passing a directory as `--config` is reported.
 //!
 //! When a user accidentally points `--config` to a directory instead of
