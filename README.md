@@ -57,6 +57,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Validating a single contract spec (lint)](#validating-a-single-contract-spec-lint)
   - [Listing finding categories](#listing-finding-categories)
   - [Checking RPC connectivity (preflight)](#checking-rpc-connectivity-preflight)
+  - [Diagnosing a misbehaving run (doctor)](#diagnosing-a-misbehaving-run-doctor)
   - [Printing JSON schemas and completion](#printing-json-schemas-and-completion)
   - [Symlinked inputs](#symlinked-inputs)
   - [Fetching inputs over HTTPS](#fetching-inputs-over-https)
@@ -73,6 +74,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Excluding artifacts from a directory scan](#excluding-artifacts-from-a-directory-scan)
   - [Comparing many contracts at once](#comparing-many-contracts-at-once)
   - [Deterministic output for snapshot testing](#deterministic-output-for-snapshot-testing)
+  - [Writing a metrics snapshot](#writing-a-metrics-snapshot)
   - [GitHub Action](#github-action)
 - [How it Works](#how-it-works)
 - [Severity Levels](#severity-levels)
@@ -197,6 +199,16 @@ flags.
 | `preflight` | Checks RPC connectivity and the JSON-RPC response format without fetching any contract code | [RPC security checklist](docs/rpc-security-checklist.md) |
 | `print-schema` | Prints JSON Schemas for reports, configs, manifests, or editor completion | [Printing JSON schemas and completion](#printing-json-schemas-and-completion) |
 | `doctor` | Reports the tool version, enabled features, cache directories, and resolved configuration | [Diagnosing a misbehaving run](#diagnosing-a-misbehaving-run-doctor) |
+
+`stream` also accepts two flags that control how jobs are processed:
+
+- `--concurrency <N>` sets the maximum number of concurrent worker threads
+  (default: 4).
+- `--input-order` preserves the input order in the output. This is slower
+  because results are buffered until earlier jobs finish.
+
+See [the subcommand guide](docs/subcommand-guide.md#stream) for the job and
+result format.
 
 ### Strict mode
 
@@ -695,6 +707,13 @@ endpoint, pass `--allow-http-local`; it permits plain HTTP for loopback hosts
 
 ```bash
 soroban-upgrade-safeguard preflight --rpc-url http://localhost:8000 --allow-http-local
+```
+
+`--timeout-secs <SECONDS>` sets the timeout, in seconds, for the preflight
+request (default: 10):
+
+```bash
+soroban-upgrade-safeguard preflight --rpc-url https://soroban-testnet.stellar.org --timeout-secs 30
 ```
 
 The check confirms three things in sequence:
