@@ -650,6 +650,18 @@ soroban-upgrade-safeguard categories --severity warning --format json
 soroban-upgrade-safeguard categories --severity info --format markdown
 ```
 
+To look up a single category, pass its exact name with `--category <NAME>`.
+Only that category's details are printed, in any `--format`. The match is
+case-sensitive, and an unknown name prints an error and exits non-zero:
+
+```bash
+soroban-upgrade-safeguard categories --category "Function Removed"
+soroban-upgrade-safeguard categories --category "Function Removed" --format json
+
+# Unknown name: prints "Unknown category: 'function removed'" and exits non-zero
+soroban-upgrade-safeguard categories --category "function removed"
+```
+
 All formats are generated from the same source of truth the comparison
 analysis uses, so the listing can never drift from the categories the tool
 actually emits. See [docs/finding-categories.md](docs/finding-categories.md) for
