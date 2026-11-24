@@ -3435,7 +3435,7 @@ struct BuiltBatch {
 /// Manifest mode resolves includes, defaults and per-pair overrides up front —
 /// including duplicate-identity detection, so a collision fails before any pair
 /// runs rather than mid-loop with earlier reports already on disk. Directory
-/// mode sweeps both directories for shared-name `.wasm` artifacts, leaving out
+/// mode sweeps both trees for shared relative-path `.wasm` artifacts, leaving out
 /// anything an `--exclude` pattern matches.
 fn build_batch(args: &Args) -> Result<BuiltBatch> {
     let cli = cli_settings(args)?;
@@ -6864,10 +6864,8 @@ fn is_wasm_artifact(path: &Path) -> bool {
 /// literal rather than silently reinterpreted. Matching is case-sensitive over
 /// the path as the filesystem spelled it.
 ///
-/// Written out rather than pulled from a crate: the only strings ever matched
-/// are the names of files sitting in a directory, and a scan has no tree to
-/// walk and no pattern set worth compiling. A glob engine would be dependency
-/// weight with nothing to do, and the dialect above is the whole of it.
+/// Written out rather than pulled from a crate: patterns match the paths of
+/// scanned artifacts relative to their root, and the dialect above is complete.
 fn glob_matches(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = text.chars().collect();
@@ -7141,6 +7139,33 @@ struct ScannedArtifacts {
     skipped: Vec<SkippedFile>,
 }
 
+fn collect_wasm_artifacts(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut artifacts = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            // Do not descend through directory symlinks.
+            if entry.file_type()?.is_dir() {
+                pending.push(path);
+            } else if is_wasm_artifact(&path) {
+                artifacts.push(path);
+            }
+        }
+    }
+    artifacts.sort();
+    Ok(artifacts)
+}
+
+fn scan_contract_name(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .with_extension("")
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn scan_directories(
     old_dir: &Path,
     new_dir: &Path,
@@ -7157,12 +7182,7 @@ fn scan_directories(
     let mut pairs = Vec::new();
     let mut gaps = Vec::new();
     let mut skipped = Vec::new();
-    for entry in std::fs::read_dir(old_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_wasm_artifact(&path) {
-            continue;
-        }
+    for path in collect_wasm_artifacts(old_dir)? {
         if let Some(pattern) = excluded_by(&path, old_dir, exclude) {
             skipped.push(SkippedFile {
                 side: ScanSide::Old,
@@ -7173,10 +7193,10 @@ fn scan_directories(
             continue;
         }
         {
-            let filename = path.file_name().unwrap();
-            let new_path = new_dir.join(filename);
-            let name = path.file_stem().and_then(|s| s.to_str()).map(String::from);
-            if new_path.exists() {
+            let relative = path.strip_prefix(old_dir)?;
+            let new_path = new_dir.join(relative);
+            let name = scan_contract_name(&path, old_dir);
+            if new_path.is_file() {
                 // Reject self-comparison in directory scan mode too
                 use crate::manifest::canonical_identity;
                 if canonical_identity(&path) == canonical_identity(&new_path) {
@@ -7189,12 +7209,9 @@ fn scan_directories(
                         new_dir.display()
                     );
                 }
-                let derived = name
-                    .clone()
-                    .unwrap_or_else(|| filename.to_string_lossy().to_string());
                 pairs.push(BatchPair {
-                    name: derived.clone(),
-                    id: derived,
+                    name: name.clone(),
+                    id: name,
                     labels: Vec::new(),
                     old: path,
                     new: new_path,
@@ -7203,9 +7220,8 @@ fn scan_directories(
                     settings: settings.clone(),
                 });
             } else {
-                let gap_name = name.unwrap_or_else(|| filename.to_string_lossy().to_string());
                 gaps.push(GapContract {
-                    name: gap_name,
+                    name,
                     old_path: path,
                 });
             }
@@ -7214,18 +7230,13 @@ fn scan_directories(
 
     // The reverse sweep: new-side artifacts the old-side loop never looked at.
     // The match test mirrors that loop exactly — a pair is formed when the same
-    // file name exists as a file on both sides — so the two views can never
+    // relative path exists as a file on both sides — so the two views can never
     // disagree about what counts as matched. `--exclude` is applied here on the
     // same terms, and before the match test, so an excluded artifact is
     // accounted for as skipped rather than escaping through either the matched
     // branch or the new-only list.
     let mut new_only = Vec::new();
-    for entry in std::fs::read_dir(new_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_wasm_artifact(&path) {
-            continue;
-        }
+    for path in collect_wasm_artifacts(new_dir)? {
         if let Some(pattern) = excluded_by(&path, new_dir, exclude) {
             skipped.push(SkippedFile {
                 side: ScanSide::New,
@@ -7235,15 +7246,11 @@ fn scan_directories(
             });
             continue;
         }
-        let filename = path.file_name().unwrap();
-        if old_dir.join(filename).is_file() {
+        let relative = path.strip_prefix(new_dir)?;
+        if old_dir.join(relative).is_file() {
             continue;
         }
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| filename.to_string_lossy().to_string());
+        let name = scan_contract_name(&path, new_dir);
         new_only.push(NewOnlyContract {
             name,
             new_path: path,
@@ -7264,12 +7271,8 @@ fn scan_directories(
         if new_only.is_empty() {
             // Both directories contain no WASM files. Check if directories are truly empty
             // or just contain no WASM artifacts, for a better diagnostic.
-            let old_has_files = std::fs::read_dir(old_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
-            let new_has_files = std::fs::read_dir(new_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
+            let old_has_files = std::fs::read_dir(old_dir)?.next().is_some();
+            let new_has_files = std::fs::read_dir(new_dir)?.next().is_some();
 
             if !old_has_files && !new_has_files {
                 anyhow::bail!(
