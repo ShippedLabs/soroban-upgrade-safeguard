@@ -1787,7 +1787,7 @@ fn run_categories(args: &CategoriesArgs) -> Result<()> {
         let all_categories = category::FindingCategory::all();
         let found = all_categories
             .iter()
-            .find(|cat| cat.as_str() == category_name);
+            .find(|cat| cat.as_str().eq_ignore_ascii_case(category_name));
 
         match found {
             Some(cat) => {

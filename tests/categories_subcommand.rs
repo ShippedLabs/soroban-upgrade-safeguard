@@ -283,3 +283,36 @@ fn categories_help_documents_severity() {
         assert!(stdout.contains(value), "{stdout}");
     }
 }
+
+#[test]
+fn category_lookup_ignores_case_and_prints_canonical_name() {
+    let canonical = FindingCategory::all()
+        .iter()
+        .find(|cat| cat.as_str().contains(' '))
+        .expect("at least one multi-word category")
+        .as_str();
+    let lower = canonical.to_lowercase();
+    let mixed: String = canonical
+        .chars()
+        .enumerate()
+        .map(|(i, c)| {
+            if i % 2 == 0 {
+                c.to_ascii_uppercase()
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
+        .collect();
+
+    for query in [lower, mixed] {
+        let output = categories(&["--category", &query, "--format", "json"]);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "--category '{query}' must succeed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let entry: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+        assert_eq!(entry["category"].as_str(), Some(canonical));
+    }
+}
