@@ -198,6 +198,16 @@ flags.
 | `print-schema` | Prints JSON Schemas for reports, configs, manifests, or editor completion | [Printing JSON schemas and completion](#printing-json-schemas-and-completion) |
 | `doctor` | Reports the tool version, enabled features, cache directories, and resolved configuration | [Diagnosing a misbehaving run](#diagnosing-a-misbehaving-run-doctor) |
 
+`stream` also accepts two flags that control how jobs are processed:
+
+- `--concurrency <N>` sets the maximum number of concurrent worker threads
+  (default: 4).
+- `--input-order` preserves the input order in the output. This is slower
+  because results are buffered until earlier jobs finish.
+
+See [the subcommand guide](docs/subcommand-guide.md#stream) for the job and
+result format.
+
 ### Strict mode
 
 By default the command exits `0` unless it finds **Critical** breaking changes
