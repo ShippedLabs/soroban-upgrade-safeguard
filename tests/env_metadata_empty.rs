@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression coverage distinguishing a missing `contractenvmetav0` section
 //! from a present-but-empty one, at the whole-report level. See
 //! `src/parser.rs` and `src/diff.rs` for the equivalent decode/compare unit

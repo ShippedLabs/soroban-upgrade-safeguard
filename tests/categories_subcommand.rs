@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `categories` subcommand.
 //!
 //! The subcommand must list every finding category with its severity and

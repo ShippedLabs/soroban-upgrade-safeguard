@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `doctor` subcommand.
 //!
 //! The `doctor` subcommand reports environment, version, enabled features,
