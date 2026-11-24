@@ -808,6 +808,10 @@ struct LintArgs {
     #[arg(long, value_enum, ignore_case = true, default_value_t = LintOutputFormat::Text)]
     format: LintOutputFormat,
 
+    /// Minimum severity shown in text output; summary counts stay unchanged.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = LintMinimumSeverity::Info)]
+    min_severity: LintMinimumSeverity,
+
     /// Include remediation guidance for each finding.
     #[arg(long)]
     explain: bool,
