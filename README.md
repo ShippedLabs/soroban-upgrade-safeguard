@@ -697,6 +697,13 @@ endpoint, pass `--allow-http-local`; it permits plain HTTP for loopback hosts
 soroban-upgrade-safeguard preflight --rpc-url http://localhost:8000 --allow-http-local
 ```
 
+`--timeout-secs <SECONDS>` sets the timeout, in seconds, for the preflight
+request (default: 10):
+
+```bash
+soroban-upgrade-safeguard preflight --rpc-url https://soroban-testnet.stellar.org --timeout-secs 30
+```
+
 The check confirms three things in sequence:
 
 - **Transport**: the endpoint responds to an HTTP request (status code reported).
