@@ -422,6 +422,32 @@ soroban-upgrade-safeguard extract ./wasm/v1.wasm
 soroban-upgrade-safeguard extract ./wasm/v1.wasm --hash-only
 ```
 
+By default `extract` prints these top-level keys: `spec_schema_version`,
+`tool_version`, `source`, `interface_hash`, `source_kind`, `env_meta`,
+`duplicates`, `scope`, `functions`, `structs`, `enums`, `unions` and
+`error_enums`. Three flags omit a field from the output:
+
+| Flag | Field removed |
+|------|---------------|
+| `--no-env-meta` | `env_meta` (decoded `contractenvmetav0` metadata) |
+| `--no-duplicates` | `duplicates` (duplicate-declaration diagnostics) |
+| `--no-scope` | `scope` (interface scope information) |
+
+For example, the output keys change like this:
+
+```bash
+# Default output keys
+soroban-upgrade-safeguard extract ./wasm/v1.wasm
+# spec_schema_version, tool_version, source, interface_hash, source_kind,
+# env_meta, duplicates, scope, functions, structs, enums, unions, error_enums
+
+# Without the three optional fields
+soroban-upgrade-safeguard extract ./wasm/v1.wasm \
+  --no-env-meta --no-duplicates --no-scope
+# spec_schema_version, tool_version, source, interface_hash, source_kind,
+# functions, structs, enums, unions, error_enums
+```
+
 ### Pinning an interface with a lockfile
 
 Generate a lockfile from the build whose public interface you intend to protect:
