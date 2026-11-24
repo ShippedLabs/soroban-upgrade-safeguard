@@ -165,6 +165,17 @@ soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>
 soroban-upgrade-safeguard ./wasm/v1.wasm ./wasm/v2.wasm
 ```
 
+### Checking the version
+
+`--version` (or `-V`) prints the tool name and version, then exits:
+
+```bash
+soroban-upgrade-safeguard --version
+# soroban-upgrade-safeguard 0.1.0
+```
+
+Please include this output when you report a bug.
+
 ### Subcommands
 
 Running the tool with two WASM paths, as in the example above, compares
@@ -707,7 +718,8 @@ command exits non-zero when any check fails.
 `doctor` reports the tool version, enabled Cargo features, cache directory
 paths, and the resolved suppression configuration — all in one place, without
 loading any WASM files or making any network requests. Use it to assemble a
-bug report, to confirm which build is installed, or to check that a cache
+bug report (alongside the output of `soroban-upgrade-safeguard --version`), to
+confirm which build is installed, or to check that a cache
 directory or config file is being picked up from the expected location:
 
 ```bash
