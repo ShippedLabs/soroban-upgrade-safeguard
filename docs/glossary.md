@@ -259,6 +259,20 @@ A structural break flagged by analysis, but empirical validation found that all 
 ### Unconfirmed Finding
 A structural break flagged by analysis, but no matching storage data was found in the empirical sample to test. Status is unknown for actual deployed data.
 
+### Policy Bundle
+A signed, centrally governed compatibility policy that a team distributes and every repository applies. A policy bundle can only tighten the local policy, never relax it, and its signature is verified against a trusted key before it is used.
+
+**Use with:** `--policy-bundle <PATH>` and `--trusted-bundle-key <KEY>` flags
+
+**See also:** [Policy Bundles](policy-bundles.md)
+
+### Strict Mode
+The run mode enabled with `--strict` that fails on Warning findings as well as Critical ones. Without it, only Critical findings and structural errors produce a non-zero exit code.
+
+**Use with:** `--strict` flag
+
+**See also:** [Strict mode](../README.md#strict-mode)
+
 ## Input Sources
 
 ### Batch Manifest
