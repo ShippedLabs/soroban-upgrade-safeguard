@@ -2906,7 +2906,7 @@ fn run_render(args: &RenderArgs) -> Result<()> {
             format!("{text}\n")
         }
         RenderFormat::Markdown => {
-            let markdown = report.to_markdown();
+            let markdown = report.to_markdown_with_min_severity(args.min_severity.as_severity());
             let markdown = if args.plain {
                 report::plainify(&markdown)
             } else {
@@ -2919,7 +2919,10 @@ fn run_render(args: &RenderArgs) -> Result<()> {
             colored::control::set_override(false);
             // The trailing newline matches what the live comparison prints,
             // so a re-rendered report is byte-identical to the original run.
-            format!("{}\n", report.to_github_actions())
+            format!(
+                "{}\n",
+                report.to_github_actions_with_min_severity(args.min_severity.as_severity())
+            )
         }
     };
 
@@ -4706,7 +4709,9 @@ fn render_batch_summary(
                     if let BatchResult::Error { error, .. } = result {
                         markdown.push_str(&format!("**Pair error**: `{}`\n\n", error));
                     }
-                    let report_md = report.generate_summary_markdown();
+                    let report_md = report
+                        .to_renderable()
+                        .to_markdown_with_min_severity(min_severity);
                     let stripped_md = report_md.replace("# Soroban Upgrade Safety Report\n\n", "");
                     markdown.push_str(&stripped_md);
                     markdown.push_str("\n---\n\n");
@@ -4802,7 +4807,11 @@ fn render_batch_summary(
                 for result in results {
                     output.push_str(&format!("::group::{}\n", result.name()));
                     let report = result.report();
-                    output.push_str(&report.to_renderable().to_github_actions());
+                    output.push_str(
+                        &report
+                            .to_renderable()
+                            .to_github_actions_with_min_severity(min_severity),
+                    );
                     output.push_str("::endgroup::\n");
                 }
                 output.push_str(&format!(
@@ -5465,14 +5474,16 @@ fn render_single(
     match format {
         OutputFormat::Json => Ok(serde_json::to_string_pretty(&renderable)?),
         OutputFormat::Markdown => {
-            let markdown = renderable.to_markdown();
+            let markdown = renderable.to_markdown_with_min_severity(min_severity);
             Ok(destyle_text(markdown, ascii, plain))
         }
         OutputFormat::Text => {
             let text = renderable.to_text_with_min_severity(explain, width, min_severity);
             Ok(destyle_text(text, ascii, plain))
         }
-        OutputFormat::GithubActions => Ok(renderable.to_github_actions()),
+        OutputFormat::GithubActions => {
+            Ok(renderable.to_github_actions_with_min_severity(min_severity))
+        }
     }
 }
 
@@ -5849,11 +5860,11 @@ fn load_wasm_input(
     Ok(module)
 }
 
-/// Look up a locally loaded WASM in the metadata cache and, on a miss, decode
+/// Look up a loaded WASM in the metadata cache and, on a miss, decode
 /// it and store the result.
 ///
-/// Only local file inputs take part for now: stdin, `https://` and `oci://`
-/// inputs are skipped. The cache is advisory, so a decode failure here is
+/// Local files, stdin and OCI inputs take part; `https://` inputs are skipped.
+/// The cache is advisory, so a decode failure here is
 /// ignored; the analysis itself reports it with full context.
 fn use_metadata_cache(
     path: &Path,
@@ -5862,10 +5873,8 @@ fn use_metadata_cache(
     stats: &mut soroban_upgrade_safeguard::metadata_cache::CacheStats,
 ) {
     let text = path.to_string_lossy();
-    let is_local = !is_stdin_wasm_path(path)
-        && !matches!(RemoteRef::parse(&text), Ok(Some(_)))
-        && !matches!(OciReference::parse(&text), Ok(Some(_)));
-    if !is_local {
+    let cacheable = !matches!(RemoteRef::parse(&text), Ok(Some(_)));
+    if !cacheable {
         return;
     }
     let _ = soroban_upgrade_safeguard::metadata_cache::extract_with_cache(
