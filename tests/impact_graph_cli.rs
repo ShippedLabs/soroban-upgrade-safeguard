@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! CLI-level coverage for `--impact-graph` and `print-schema --target
 //! impact-graph`: the graph fixtures the unit tests in
 //! `src/impact_graph.rs` don't reach, because they go through the full

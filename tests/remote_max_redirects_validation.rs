@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests that `--remote-max-redirects` rejects a non-numeric value.
 //!
 //! Spawns the compiled binary directly (via `CARGO_BIN_EXE_soroban-upgrade-safeguard`)

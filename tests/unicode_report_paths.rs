@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression coverage for Unicode report file paths.
 //!
 //! Report output may be written beneath directories or filenames containing

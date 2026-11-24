@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Comprehensive integration tests for WASM runtime surface comparisons.
 
 use soroban_upgrade_safeguard::diff::CompatibilityAxis;

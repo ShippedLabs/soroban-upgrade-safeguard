@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that `--interface-lockfile` rejects multiple candidate WASM paths.
 
 use std::fs;

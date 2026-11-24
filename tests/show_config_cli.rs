@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `--show-config` resolves and prints configuration exactly as a normal
 //! run would, then exits without touching any WASM input — see
 //! `run_show_config` in `src/main.rs`. These confirm it needs no WASM

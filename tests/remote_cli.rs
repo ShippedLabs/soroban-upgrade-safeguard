@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! CLI-level wiring tests for `https://` input positions.
 //!
 //! These don't hit the network (the CLI's remote-fetch policy always sets

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression test for passing a directory to `lint --storage-schema`.
 
 use std::path::PathBuf;
