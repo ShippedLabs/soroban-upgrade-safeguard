@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for provenance metadata embedded in reports.
 
 use std::path::PathBuf;

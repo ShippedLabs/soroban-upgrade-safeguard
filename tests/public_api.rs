@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Public API snapshot check.
 //!
 //! The test needs a nightly toolchain to build rustdoc JSON. If that toolchain

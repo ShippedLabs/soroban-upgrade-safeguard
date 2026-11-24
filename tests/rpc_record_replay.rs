@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Round-trip, tampering, redaction, compatibility, and documentation tests
 //! for the RPC record/replay bundle system.
 //!

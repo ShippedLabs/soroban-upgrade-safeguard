@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Local-server integration tests for the `https://` input resolver
 //! (`src/remote.rs`).
 //!

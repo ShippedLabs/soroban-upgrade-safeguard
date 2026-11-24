@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `--per-contract-output-name-template` only takes effect together with
 //! `--per-contract-output-dir`. clap enforces the dependency during argument
 //! parsing, so this test needs no fixtures.
