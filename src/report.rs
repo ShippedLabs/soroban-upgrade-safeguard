@@ -1889,6 +1889,15 @@ impl SafetyReport {
         self
     }
 
+    /// Record the verified policy bundle used for this comparison.
+    pub fn with_policy_bundle(
+        mut self,
+        provenance: Option<crate::policy_bundle::BundleProvenance>,
+    ) -> Self {
+        self.policy_bundle = provenance;
+        self
+    }
+
     pub fn interface_unchanged(&self) -> Option<bool> {
         match (self.old_interface_hash, self.new_interface_hash) {
             (Some(old), Some(new)) => Some(old == new),

@@ -3275,11 +3275,6 @@ fn main() -> Result<()> {
     if args.interface_lockfile.is_some() && is_batch {
         anyhow::bail!("Cannot use --interface-lockfile with batch mode");
     }
-    if args.policy_bundle.is_some() && is_batch {
-        anyhow::bail!(
-            "--policy-bundle is not yet supported in batch mode (--manifest or --old-dir/--new-dir)"
-        );
-    }
     if args.interface_lockfile.is_some() && args.contract_id.is_some() {
         anyhow::bail!("Cannot use --interface-lockfile with --contract-id; the lockfile supplies the baseline");
     }
@@ -3481,6 +3476,9 @@ fn build_batch(args: &Args) -> Result<BuiltBatch> {
 /// `Ok(false)` for an unsafe verdict, which the caller turns into exit code 1
 /// *after* it has written `--metrics-file`; exiting here would skip that write.
 fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> Result<bool> {
+    if args.watch && args.policy_bundle.is_some() {
+        anyhow::bail!("--policy-bundle cannot be combined with --watch in batch mode");
+    }
     // Watch mode for a whole batch re-runs only the pairs whose inputs
     // changed, rather than recomputing every pair on every file event.
     if args.watch {
@@ -3498,6 +3496,8 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
     // Manifest mode resolves includes, defaults and per-pair overrides up front —
     // including duplicate-identity detection, so a collision fails before any
     // pair runs rather than mid-loop with earlier reports already on disk.
+    // Reject an unverified bundle before any batch WASM is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
     let built = build_batch(args)?;
     let (resolved_manifest, pairs, mut gaps, new_only, skipped) = (
         built.resolved_manifest,
@@ -3694,6 +3694,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             args,
             &remote_config,
             &oci_config,
+            verified_bundle.as_ref(),
             &mut config_cache,
             progress,
         );
@@ -3940,6 +3941,7 @@ fn compare_batch_pair(
     args: &Args,
     remote_config: &RemoteFetchConfig,
     oci_config: &OciFetchConfig,
+    verified_bundle: Option<&VerifiedPolicyBundle>,
     config_cache: &mut HashMap<PathBuf, SuppressionConfig>,
     progress: &dyn Fn(String),
 ) -> BatchResult {
@@ -3951,7 +3953,7 @@ fn compare_batch_pair(
     let settings = &pair.settings;
     let explain = settings.explain.value;
 
-    let pair_suppressions = match suppressions_for_pair(settings, config_cache) {
+    let mut pair_suppressions = match suppressions_for_pair(settings, config_cache) {
         Ok(suppressions) => suppressions,
         Err(e) => {
             let enriched_error = format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
@@ -3979,6 +3981,13 @@ fn compare_batch_pair(
             };
         }
     };
+
+    if let Some(verified) = verified_bundle {
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut pair_suppressions,
+            &verified.policy,
+        );
+    }
 
     let mut pair_error = None;
     let report = match (
@@ -4050,7 +4059,11 @@ fn compare_batch_pair(
             }) {
                 Ok(report) => {
                     log.timing("Batch pair comparison", compare_start);
-                    report.with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
+                    report
+                        .with_policy_bundle(
+                            verified_bundle.map(|verified| verified.provenance.clone()),
+                        )
+                        .with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
                 }
                 Err(e) => {
                     let enriched_error =
@@ -4763,6 +4776,49 @@ fn load_policy_bundle_bytes(source: &str, args: &Args) -> Result<(Vec<u8>, Strin
     }
 }
 
+struct VerifiedPolicyBundle {
+    policy: soroban_upgrade_safeguard::policy_bundle::PolicyBundle,
+    provenance: soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
+}
+
+fn verify_policy_bundle(
+    args: &Args,
+    progress: &dyn Fn(String),
+) -> Result<Option<VerifiedPolicyBundle>> {
+    let Some(source) = args.policy_bundle.as_deref() else {
+        return Ok(None);
+    };
+    let (bytes, source_label) = load_policy_bundle_bytes(source, args)?;
+    let mut trusted = std::collections::BTreeMap::new();
+    for item in &args.trusted_bundle_key {
+        let (id, path) = item.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
+        })?;
+        trusted.insert(
+            id.to_string(),
+            std::fs::read(path)
+                .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
+        );
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (policy, provenance) = soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
+        &bytes,
+        &trusted,
+        now,
+        &source_label,
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+    progress(format!(
+        "Policy bundle '{}' verified (signer(s): {})",
+        provenance.bundle_id,
+        provenance.signer_identities.join(", ")
+    ));
+    Ok(Some(VerifiedPolicyBundle { policy, provenance }))
+}
+
 /// Run a single-pair comparison. Returns `Ok(true)` for a safe verdict and
 /// `Ok(false)` for an unsafe one, which the caller turns into exit code 1
 /// *after* it has written `--metrics-file`; exiting here would skip that write.
@@ -4845,50 +4901,18 @@ fn run_single(
         .and_then(|stem| stem.to_str())
         .map(String::from);
 
-    // --policy-bundle: opt-in, verified, and applied *before* any WASM is
-    // loaded (see docs/policy-bundles.md). `--manifest`/`--old-dir` batch
-    // mode already rejected this combination earlier in `main()`, so by
-    // construction nothing below needs to special-case batch mode.
-    let mut owned_suppressions: Option<SuppressionConfig> = None;
-    let mut policy_bundle_provenance: Option<
-        soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
-    > = None;
-    if let Some(bundle_source) = &args.policy_bundle {
-        let (bytes, source_label) = load_policy_bundle_bytes(bundle_source, args)?;
-        let mut trusted = std::collections::BTreeMap::new();
-        for item in &args.trusted_bundle_key {
-            let (id, path) = item.split_once('=').ok_or_else(|| {
-                anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
-            })?;
-            trusted.insert(
-                id.to_string(),
-                std::fs::read(path)
-                    .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
-            );
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let (bundle, provenance) =
-            soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
-                &bytes,
-                &trusted,
-                now,
-                &source_label,
-            )
-            .map_err(|e| anyhow::anyhow!(e))?;
-        progress(format!(
-            "🏛️  Policy bundle '{}' verified (signer(s): {})",
-            provenance.bundle_id,
-            provenance.signer_identities.join(", ")
-        ));
+    // Verify the bundle before either WASM input is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
+    let owned_suppressions = verified_bundle.as_ref().map(|verified| {
         let mut merged = suppressions.clone();
-        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(&mut merged, &bundle);
-        owned_suppressions = Some(merged);
-        policy_bundle_provenance = Some(provenance);
-    }
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut merged,
+            &verified.policy,
+        );
+        merged
+    });
     let suppressions: &SuppressionConfig = owned_suppressions.as_ref().unwrap_or(suppressions);
+    let policy_bundle_provenance = verified_bundle.as_ref().map(|verified| &verified.provenance);
 
     let run_comparison = |progress: &dyn Fn(String)| -> Result<bool> {
         let log = DiagnosticLog::new(args, true);
@@ -5049,7 +5073,7 @@ fn run_single(
                     rpc_headers: &args.rpc_headers,
                     rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
                     allow_http_local: args.allow_http_local,
-                    policy_bundle: policy_bundle_provenance.as_ref(),
+                    policy_bundle: policy_bundle_provenance,
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,

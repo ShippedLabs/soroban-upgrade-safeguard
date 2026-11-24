@@ -10,9 +10,9 @@ can opt into.
 
 > **Status**: first-pass implementation. Capability-registry overrides and
 > resource-limit merging are defined in the format and unit-tested, but not
-> yet wired into live WASM parsing or host-import classification; batch
-> mode (`--manifest`/`--old-dir`+`--new-dir`) doesn't support
-> `--policy-bundle` yet. See [Scope of this pass](#scope-of-this-pass).
+> yet wired into live WASM parsing or host-import classification. Batch
+> mode verifies a bundle once and applies it to each pair. See
+> [Scope of this pass](#scope-of-this-pass).
 
 ## Why this is safe to let a remote source affect a run at all
 
@@ -178,9 +178,9 @@ deterministic signing vector.
   accessible via `PolicyBundle::capability_overrides()`, but are not yet
   consulted by `crate::capability::lookup` (the live host-import
   classification path).
-- **Batch mode** (`--manifest`/`--old-dir`+`--new-dir`) rejects
-  `--policy-bundle` outright with a clear error rather than silently
-  ignoring it. Applying a bundle per-pair is a follow-up.
+- **Batch mode** (`--manifest`/`--old-dir`+`--new-dir`) verifies the bundle
+  before loading any WASM and applies its policy to every pair. Batch watch
+  mode still rejects `--policy-bundle`.
 - **Key rotation** works by configuring multiple `--trusted-bundle-key`
   entries (any one valid signature suffices) and reissuing bundles signed
   with the new key; there's no dedicated rotation tooling beyond that.

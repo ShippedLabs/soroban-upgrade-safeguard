@@ -762,6 +762,7 @@ fn run_cycle(
                 args,
                 &remote_config,
                 &oci_config,
+                None,
                 &mut config_cache,
                 progress,
             );
