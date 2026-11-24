@@ -1251,6 +1251,10 @@ struct RenderArgs {
     #[arg(long, value_enum, ignore_case = true, default_value_t = RenderFormat::Text)]
     format: RenderFormat,
 
+    /// Minimum severity shown in text output; counts and verdict stay unchanged.
+    #[arg(long, value_enum, default_value = "info")]
+    min_severity: MinimumSeverity,
+
     /// Write the rendered report atomically to this path instead of stdout.
     #[arg(long, value_name = "PATH")]
     output: Option<PathBuf>,
@@ -2817,7 +2821,11 @@ fn run_render(args: &RenderArgs) -> Result<()> {
     let rendered = match args.format {
         RenderFormat::Text => {
             let width = resolve_text_width(args.width, std::io::stdout().is_terminal());
-            let text = report.to_text_with_width(args.explain, width);
+            let text = report.to_text_with_min_severity(
+                args.explain,
+                width,
+                args.min_severity.as_severity(),
+            );
             let text = if args.plain {
                 report::plainify(&text)
             } else {
