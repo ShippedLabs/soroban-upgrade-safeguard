@@ -5068,7 +5068,7 @@ fn run_single(
             args.no_symlinks,
             progress,
         )?;
-        use_metadata_cache(new_wasm_path, &new, &mc_config, &mut mc_stats);
+        use_metadata_cache(&new, &mc_config, &mut mc_stats);
 
         let mut store_opt = if let Some(ref path) = args.lineage_store {
             let mut store = if path.exists() {
@@ -5154,7 +5154,7 @@ fn run_single(
                     args.no_symlinks,
                     progress,
                 )?;
-                use_metadata_cache(&args.wasm_paths[0], &old, &mc_config, &mut mc_stats);
+                use_metadata_cache(&old, &mc_config, &mut mc_stats);
                 old
             };
 
@@ -5891,20 +5891,15 @@ fn load_wasm_input(
 /// Look up a loaded WASM in the metadata cache and, on a miss, decode
 /// it and store the result.
 ///
-/// Local files, stdin and OCI inputs take part; `https://` inputs are skipped.
-/// The cache is advisory, so a decode failure here is
-/// ignored; the analysis itself reports it with full context.
+/// Every input kind takes part, including `https://` inputs, which are keyed by
+/// the content hash of the verified download. The cache is advisory, so a
+/// decode failure here is ignored; the analysis itself reports it with full
+/// context.
 fn use_metadata_cache(
-    path: &Path,
     module: &loader::WasmModule,
     config: &soroban_upgrade_safeguard::metadata_cache::MetadataCacheConfig,
     stats: &mut soroban_upgrade_safeguard::metadata_cache::CacheStats,
 ) {
-    let text = path.to_string_lossy();
-    let cacheable = !matches!(RemoteRef::parse(&text), Ok(Some(_)));
-    if !cacheable {
-        return;
-    }
     let _ = soroban_upgrade_safeguard::metadata_cache::extract_with_cache(
         config,
         &module.sha256,

@@ -21,6 +21,9 @@ use std::time::Duration;
 
 use soroban_upgrade_safeguard::error::Error;
 use soroban_upgrade_safeguard::loader::{load_wasm_from_url, sha256_hex};
+use soroban_upgrade_safeguard::metadata_cache::{
+    extract_with_cache, CacheStats, CachedExtractOutcome, MetadataCacheConfig,
+};
 use soroban_upgrade_safeguard::remote::{
     fetch_verified, CacheStatus, RemoteFetchConfig, RemoteRef,
 };
@@ -345,4 +348,39 @@ fn load_wasm_from_url_produces_a_validated_wasm_module() {
     assert_eq!(module.sha256, digest);
     assert_eq!(module.path, artifact.final_url);
     assert_eq!(artifact.cache_status, CacheStatus::Miss);
+}
+
+#[test]
+fn downloaded_https_input_misses_then_hits_the_metadata_cache() {
+    let wasm_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("wasm")
+        .join("v1.wasm");
+    let bytes = std::fs::read(&wasm_path).expect("fixture WASM should exist");
+    let digest = sha256_hex(&bytes);
+    let (addr, _server) = spawn_server(vec![ok_response("application/wasm", &bytes)]);
+
+    let remote = RemoteRef {
+        url: format!("http://{addr}/contract.wasm"),
+        expected_sha256: digest,
+    };
+    let cfg = config(fresh_cache_dir("metadata-cache"));
+    let (module, _artifact) =
+        load_wasm_from_url(&remote, &cfg).expect("a valid fixture WASM should load");
+
+    let mc_config = MetadataCacheConfig {
+        cache_dir: Some(fresh_cache_dir("metadata-cache-entries")),
+        ..Default::default()
+    };
+    let mut stats = CacheStats::default();
+
+    let first = extract_with_cache(&mc_config, &module.sha256, &module.bytes, &mut stats)
+        .expect("first lookup should decode and store");
+    assert!(matches!(first, CachedExtractOutcome::Computed(_)));
+    assert_eq!((stats.hits, stats.misses), (0, 1));
+
+    let second = extract_with_cache(&mc_config, &module.sha256, &module.bytes, &mut stats)
+        .expect("second lookup should read the stored entry");
+    assert!(matches!(second, CachedExtractOutcome::CacheHit(_)));
+    assert_eq!((stats.hits, stats.misses), (1, 1));
 }
