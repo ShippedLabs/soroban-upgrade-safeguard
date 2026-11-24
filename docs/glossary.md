@@ -192,6 +192,13 @@ A committed JSON snapshot of a contract's exported interface. CI validates that 
 
 **See also:** [Pinning an interface with a lockfile](../README.md#pinning-an-interface-with-a-lockfile)
 
+### Report Migration
+Upgrading a saved JSON report to the current report schema version, so an archived report can still be read after the report shape changes.
+
+**Use with:** `soroban-upgrade-safeguard upgrade-report <REPORT_JSON> --output <PATH>`
+
+**See also:** [Report Schema Migrations](report_migrations.md)
+
 ### Attestation
 A signed, versioned in-toto statement — wrapped in a DSSE envelope — that
 cryptographically binds an analysis run to its inputs and verdict. It
