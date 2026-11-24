@@ -1353,6 +1353,22 @@ impl RenderableReport {
     ///
     /// Suppressed findings are emitted as `::notice` instead of their original
     /// severity, so they appear in the log without blocking the run.
+    /// Filter annotations without changing the final pass/fail line.
+    pub fn to_github_actions_with_min_severity(&self, minimum: &Severity) -> String {
+        if *minimum == Severity::Info {
+            return self.to_github_actions();
+        }
+        let mut view = self.clone();
+        for findings in view.findings_by_category.values_mut() {
+            findings.retain(|reported| match minimum {
+                Severity::Info => true,
+                Severity::Warning => reported.finding.severity != Severity::Info,
+                Severity::Critical => reported.finding.severity == Severity::Critical,
+            });
+        }
+        view.to_github_actions()
+    }
+
     pub fn to_github_actions(&self) -> String {
         let mut output = String::new();
         let mut categories: Vec<_> = self.findings_by_category.keys().collect();

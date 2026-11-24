@@ -2919,7 +2919,10 @@ fn run_render(args: &RenderArgs) -> Result<()> {
             colored::control::set_override(false);
             // The trailing newline matches what the live comparison prints,
             // so a re-rendered report is byte-identical to the original run.
-            format!("{}\n", report.to_github_actions())
+            format!(
+                "{}\n",
+                report.to_github_actions_with_min_severity(args.min_severity.as_severity())
+            )
         }
     };
 
@@ -4804,7 +4807,11 @@ fn render_batch_summary(
                 for result in results {
                     output.push_str(&format!("::group::{}\n", result.name()));
                     let report = result.report();
-                    output.push_str(&report.to_renderable().to_github_actions());
+                    output.push_str(
+                        &report
+                            .to_renderable()
+                            .to_github_actions_with_min_severity(min_severity),
+                    );
                     output.push_str("::endgroup::\n");
                 }
                 output.push_str(&format!(
@@ -5474,7 +5481,9 @@ fn render_single(
             let text = renderable.to_text_with_min_severity(explain, width, min_severity);
             Ok(destyle_text(text, ascii, plain))
         }
-        OutputFormat::GithubActions => Ok(renderable.to_github_actions()),
+        OutputFormat::GithubActions => {
+            Ok(renderable.to_github_actions_with_min_severity(min_severity))
+        }
     }
 }
 
