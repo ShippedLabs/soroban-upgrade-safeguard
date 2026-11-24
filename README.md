@@ -1950,6 +1950,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Report Provenance Fields](docs/report-provenance.md): every field in the `provenance` block of a saved JSON report, with its type, meaning, and notes on which fields are omitted by `--no-timestamp` and `--redact-paths`.
 - [Watch Status File](docs/watch-status-file.md): the JSON shape `--watch-status-file` writes, its field semantics, why findings are never included, and how an external supervisor polls it for liveness.
 - [Multi-Axis Compatibility](docs/multi_axis_compatibility.md): covers the separate storage, call-ABI, and event-indexer compatibility axes and how findings are classified across each.
+- [Transitioning to Multi-Axis Compatibility Gating](docs/multi_axis_policy_tutorial.md): a step-by-step tutorial for moving CI from single-severity validation to per-axis gating.
 - [Compatibility Budgets](docs/compatibility_budgets.md): per-axis and per-rule compatibility budgets, how they are declared, and how budget exhaustion affects the run verdict.
 - [Named Policy Profiles](docs/named_policy_profiles.md): selecting named policy profiles from configuration and the CLI to apply pre-defined sets of compatibility rules.
 - [Configuration Resolution](docs/config-resolution.md): the precedence order for resolving a suppression config — CLI flag, environment variable, and default file discovery.
