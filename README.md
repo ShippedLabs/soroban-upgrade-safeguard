@@ -41,6 +41,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
 
 - [Features](#features)
 - [Installation](#installation)
+  - [Shell completions](#shell-completions)
 - [Usage](#usage)
   - [Subcommands](#subcommands)
   - [Strict mode](#strict-mode)
