@@ -54,6 +54,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Re-rendering a saved report](#re-rendering-a-saved-report)
   - [Upgrading a saved report](#upgrading-a-saved-report)
   - [Signing and verifying reports](#signing-and-verifying-reports)
+  - [Applying a signed policy bundle](#applying-a-signed-policy-bundle)
   - [Validating a single contract spec (lint)](#validating-a-single-contract-spec-lint)
   - [Listing finding categories](#listing-finding-categories)
   - [Checking RPC connectivity (preflight)](#checking-rpc-connectivity-preflight)
