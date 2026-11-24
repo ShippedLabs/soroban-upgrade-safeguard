@@ -1630,6 +1630,12 @@ Pairs are formed by file name: every `.wasm` file in the old directory is
 matched with the file of the same name in the new directory, and the file stem
 becomes the contract's name in the report.
 
+Only files directly inside each directory are compared. Subdirectories are not
+scanned, so a nested `sub/z.wasm` is not found and a monorepo layout like that
+ends in `No .wasm files found in batch directories.` For nested layouts, list
+the pairs explicitly with `--manifest` (see
+[Comparing many contracts at once](#comparing-many-contracts-at-once)).
+
 ```text
 artifacts/
 ├── v1/                 ├── v2/
