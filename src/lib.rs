@@ -129,6 +129,7 @@ pub mod manifest;
 mod manifest;
 
 pub mod metrics;
+mod timestamp;
 
 #[cfg(feature = "unstable")]
 pub mod metadata_cache;

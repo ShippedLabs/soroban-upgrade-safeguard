@@ -85,6 +85,7 @@ pub struct StreamingJob {
 }
 
 /// Allowed analysis overrides for a single job.
+#[serde(deny_unknown_fields)]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct JobOverrides {
     /// Treat warnings as errors (mirrors `--strict`).
@@ -830,6 +831,28 @@ mod tests {
         assert!(!job.overrides.ascii);
         assert!(!job.overrides.empirical);
         assert!(job.overrides.suppression_config.is_none());
+    }
+
+    #[test]
+    fn overrides_reject_unknown_keys_and_accept_strict() {
+        let unknown_key = r#"{"schema_version":1,"id":"typo","old":{"local":"x"},"new":{"local":"y"},"overrides":{"strictt":true}}"#;
+        let mut output = Vec::new();
+        run_streaming(unknown_key.as_bytes(), &mut output, &StreamConfig::default()).unwrap();
+
+        let result: serde_json::Value =
+            serde_json::from_slice(&output).expect("result should be JSON");
+        assert_eq!(result["status"], "malformed");
+        assert!(
+            result["error"]
+                .as_str()
+                .expect("malformed result should have an error")
+                .contains("strictt"),
+            "unknown key should be named in the error: {result}"
+        );
+
+        let valid = r#"{"schema_version":1,"id":"valid","old":{"local":"x"},"new":{"local":"y"},"overrides":{"strict":true}}"#;
+        let job: StreamingJob = serde_json::from_str(valid).expect("strict override is valid");
+        assert!(job.overrides.strict);
     }
 
     #[test]
