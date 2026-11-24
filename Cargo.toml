@@ -12,6 +12,9 @@ name = "soroban-upgrade-safeguard"
 version = "0.1.0"
 edition = "2021"
 description = "A safety tool to check for breaking changes in Soroban contract upgrades."
+keywords = ["soroban", "stellar", "wasm", "smart-contracts", "upgrade"]
+categories = ["command-line-utilities", "development-tools"]
+homepage = "https://github.com/ShippedLabs/soroban-upgrade-safeguard"
 
 [lib]
 name = "soroban_upgrade_safeguard"
