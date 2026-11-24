@@ -561,6 +561,10 @@ soroban-upgrade-safeguard verify-attestation report.dsse.json \
   --report report.json --old-wasm old.wasm --new-wasm new.wasm
 ```
 
+Pass `--policy-expires-at <UNIX_SECONDS>` to `verify-attestation` to reject an
+attestation whose policy has expired as of that Unix timestamp in seconds, for
+example `--policy-expires-at 1798761600`.
+
 See the [attestation guide](docs/attestations.md) for predicate details,
 resolved policy binding, offline verification, and key-handling guidance.
 
