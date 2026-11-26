@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! A single stream worker must still return one result for each input job.
 
 use serde_json::Value;

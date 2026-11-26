@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Manifest mode (`--manifest`), directory mode (`--old-dir`/`--new-dir`),
 //! and positional `<OLD_WASM> <NEW_WASM>` inputs are mutually exclusive —
 //! exactly one way of supplying a comparison's inputs may be used per run.

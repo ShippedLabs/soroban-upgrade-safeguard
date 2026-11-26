@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for `--search-parent-config`: an opt-in ancestor search
 //! for `.safeguard.toml` that stops at the workspace boundary (a directory
 //! containing `.git`) and rejects ambiguous matches.

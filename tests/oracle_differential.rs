@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Differential oracle integration tests.
 //!
 //! These tests compare safeguard's internal type-path model against the

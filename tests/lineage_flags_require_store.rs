@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `--record-version`, `--retire-version`, and `--max-live-versions` only act on
 //! a lineage store, so clap rejects them (exit code 2) when `--lineage-store`
 //! is absent, instead of running the comparison and silently doing nothing.

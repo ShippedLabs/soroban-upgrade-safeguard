@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `verify-attestation` must name the attestation file when it cannot read or
 //! parse it, like `lint`, `upgrade-report`, and `attest` do for their inputs.
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration coverage for environment metadata findings and exit codes.
 
 use serde_json::Value;

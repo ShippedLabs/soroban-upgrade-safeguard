@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Property-based tests for the diff rules (issue #130).
 //!
 //! The diff rules in `src/diff.rs` are tested by example: each unit test

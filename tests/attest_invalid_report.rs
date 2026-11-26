@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test for `attest` rejecting an invalid report file.
 //!
 //! The existing `attestation_cli.rs` covers the happy path (real report to

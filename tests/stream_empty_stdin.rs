@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `stream` reads one job per line from stdin, so empty stdin means no jobs:
 //! it must write nothing and exit cleanly.
 

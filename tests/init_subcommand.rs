@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `init` subcommand.
 //!
 //! `init` compares two builds and writes a starter `.safeguard.toml` with

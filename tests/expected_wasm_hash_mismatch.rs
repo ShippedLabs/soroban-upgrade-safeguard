@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for --expected-wasm-hash validation.
 //!
 //! --expected-wasm-hash asserts the SHA-256 of the baseline WASM. A mismatch

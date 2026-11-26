@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that passing a directory as `--lineage-store` is reported.
 //!
 //! When a user accidentally points `--lineage-store` to a directory instead of

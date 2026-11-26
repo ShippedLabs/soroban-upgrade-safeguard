@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that a corrupt `--lineage-store` JSON file is reported.
 //!
 //! A lineage store the loader cannot parse must stop the run with a message

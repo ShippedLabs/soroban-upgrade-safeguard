@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the public library API.
 //!
 //! Unlike `json_output.rs`, these never spawn the CLI binary — they link the

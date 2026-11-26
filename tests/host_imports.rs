@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration coverage for host-import protocol capability classification.
 //!
 //! These hand-craft minimal WASM modules (a type section, an import

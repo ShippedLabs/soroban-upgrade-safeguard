@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test for an unknown `--format` value.
 //!
 //! `--format` accepts a fixed set of names (text, json, markdown,

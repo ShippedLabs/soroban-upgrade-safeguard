@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for the RPC connectivity preflight check.
 //!
 //! These exercise `soroban_upgrade_safeguard::preflight::run_preflight_with_timeout`
