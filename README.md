@@ -44,6 +44,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
 
 - [Features](#features)
 - [Installation](#installation)
+  - [Shell completions](#shell-completions)
 - [Usage](#usage)
   - [Subcommands](#subcommands)
   - [Strict mode](#strict-mode)
@@ -73,6 +74,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Wrapping text output](#wrapping-text-output)
   - [Multiple output formats](#multiple-output-formats)
   - [Quiet output](#quiet-output)
+  - [Minimum severity](#minimum-severity)
   - [Diagnostic logging](#diagnostic-logging)
   - [Watch mode](#watch-mode)
   - [Comparing two directories of builds](#comparing-two-directories-of-builds)
@@ -1997,6 +1999,8 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [GitHub Action Examples](docs/github-action-examples.md): the reusable GitHub Action's inputs and outputs, required permissions, and four complete workflow examples covering PR comments and Checks API annotations.
 - [WASM Complexity Delta Analysis](docs/wasm_complexity.md): the static instruction and complexity deltas reported between builds, and how to gate them with configurable budgets.
 - [Inferred Storage Schemas](docs/storage-inference.md): how storage schemas are inferred from SDK-generated WASM, and how unknown or indirect paths are reported as coverage gaps rather than guessed.
+- [Empirical Validation Architecture](docs/empirical_validation_architecture.md): how the empirical storage validation mode is structured internally.
+- [Empirical Validation Type-Mapping Specification](docs/empirical_validation_spec.md): the formal type-mapping specification used to decode concrete on-chain `ScVal` XDR values against expected `ScSpecTypeDef` schemas.
 - [Metrics Reference](docs/metrics.md): every OpenMetrics name, type, and label written by `--metrics-file`.
 - [Content-Addressed Metadata Cache](docs/metadata_cache.md): cache location flags, hit and miss behavior, and the inspection flags for listing cached entries.
 - [Protocol Version Policy & Directional Severity](docs/protocol_policy.md): how protocol version changes are classified by direction and the severity each direction carries.
