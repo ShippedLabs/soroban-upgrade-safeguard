@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration regression test for CLI `--help` flag exit status.
 
 use std::process::Command;

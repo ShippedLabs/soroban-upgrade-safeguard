@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for `--width`: explicit, width-aware wrapping of
 //! finding messages in text output. Complements the exact-line "snapshot"
 //! tests in `src/render.rs` (which exercise `wrap_with_prefix` directly with

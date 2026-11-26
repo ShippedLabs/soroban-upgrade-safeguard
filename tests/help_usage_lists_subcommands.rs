@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The `Usage:` block of the top-level `--help` is a hand-written
 //! `override_usage` string, so it can drift from the generated `Commands:`
 //! list. Every subcommand in that list must also have a usage line.

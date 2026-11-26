@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the GitHub Checks API publisher embedded in the
 //! composite action shell script.
 //!

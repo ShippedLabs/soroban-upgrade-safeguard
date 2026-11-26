@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression coverage for empty contract spec section diagnostics.
 //!
 //! A present but empty contractspecv0 section is different from a section

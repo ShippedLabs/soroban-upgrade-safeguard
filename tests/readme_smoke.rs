@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Smoke tests for the commands shown in the README.
 //!
 //! The README shows many commands as documentation, not as tests — nothing

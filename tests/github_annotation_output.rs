@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for `--format github-actions` annotation output.
 //!
 //! GitHub Actions renders lines of the form `::level::message` as annotations

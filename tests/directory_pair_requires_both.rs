@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for incomplete `--old-dir` / `--new-dir` pairs.
 //!
 //! Both flags are required together (`clap`'s `requires` attribute enforces

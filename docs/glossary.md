@@ -56,6 +56,20 @@ The old or original contract build being compared against. In RPC mode, this is 
 ### Candidate
 The new or proposed contract build being validated. This is the upgrade you want to deploy, compared against the baseline to detect breaking changes.
 
+### Host Import
+A host function that a contract's WASM imports from the Soroban environment, such as recording an event or reading storage. Each import is classified by the protocol capability it requires, so the tool can flag an upgrade that starts depending on a host function the target network may not provide.
+
+**Use with:** `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>`
+
+**See also:** [Capability Reference](capability-reference.md)
+
+### Runtime Surface
+The WASM-level interface beyond imports and exports: tables, globals, the start function and enabled proposals. It is compared as its own axis, separate from the exported interface.
+
+**Use with:** findings on the `runtime_surface` axis in `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM>`
+
+**See also:** [Multi-Axis Compatibility](multi_axis_compatibility.md)
+
 ## Change Propagation
 
 ### Cascade
@@ -178,6 +192,13 @@ A committed JSON snapshot of a contract's exported interface. CI validates that 
 
 **See also:** [Pinning an interface with a lockfile](../README.md#pinning-an-interface-with-a-lockfile)
 
+### Report Migration
+Upgrading a saved JSON report to the current report schema version, so an archived report can still be read after the report shape changes.
+
+**Use with:** `soroban-upgrade-safeguard upgrade-report <REPORT_JSON> --output <PATH>`
+
+**See also:** [Report Schema Migrations](report_migrations.md)
+
 ### Attestation
 A signed, versioned in-toto statement — wrapped in a DSSE envelope — that
 cryptographically binds an analysis run to its inputs and verdict. It
@@ -258,6 +279,27 @@ A structural break flagged by analysis, but empirical validation found that all 
 
 ### Unconfirmed Finding
 A structural break flagged by analysis, but no matching storage data was found in the empirical sample to test. Status is unknown for actual deployed data.
+
+### Policy Bundle
+A signed, centrally governed compatibility policy that a team distributes and every repository applies. A policy bundle can only tighten the local policy, never relax it, and its signature is verified against a trusted key before it is used.
+
+**Use with:** `--policy-bundle <PATH>` and `--trusted-bundle-key <KEY>` flags
+
+**See also:** [Policy Bundles](policy-bundles.md)
+
+### Strict Mode
+The run mode enabled with `--strict` that fails on Warning findings as well as Critical ones. Without it, only Critical findings and structural errors produce a non-zero exit code.
+
+**Use with:** `--strict` flag
+
+**See also:** [Strict mode](../README.md#strict-mode)
+
+### Watch Mode
+The mode enabled with `--watch` that keeps the process running and re-runs a comparison whenever the input files change.
+
+**Use with:** `soroban-upgrade-safeguard <OLD_WASM> <NEW_WASM> --watch`
+
+**See also:** [Watch mode](../README.md#watch-mode)
 
 ## Input Sources
 

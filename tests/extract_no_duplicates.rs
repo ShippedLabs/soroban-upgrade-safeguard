@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test covering the `extract --no-duplicates` flag.
 
 use serde_json::Value;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Compile and integration test exercising the advanced/unstable pipeline API.
 //!
 //! This test is conditionalized on the `unstable` feature gate and verifies

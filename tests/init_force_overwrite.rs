@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that `init --force` overwrites an existing `.safeguard.toml` configuration.
 
 use std::fs;

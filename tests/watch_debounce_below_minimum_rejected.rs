@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test for `--watch-debounce-ms` below the documented minimum.
 //!
 //! The debounce window is bounded so a burst of filesystem events for a

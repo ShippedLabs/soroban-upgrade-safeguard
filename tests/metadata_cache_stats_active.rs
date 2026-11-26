@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration test for `--metadata-cache-stats` combined with
 //! `--metadata-cache-dir`.
 //!

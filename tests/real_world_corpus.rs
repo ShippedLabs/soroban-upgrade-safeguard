@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use serde::Deserialize;
 use soroban_upgrade_safeguard::{compare_wasm_bytes_with_options, CompareOptions};
 use std::collections::HashMap;

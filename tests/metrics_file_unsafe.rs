@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! `--metrics-file` must be written for every verdict, including an unsafe one.
 //!
 //! The snapshot used to be written only after the run function returned, but an

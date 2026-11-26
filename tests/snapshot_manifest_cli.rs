@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! CLI-level tests for integrity manifests on empirical storage snapshots.
 //!
 //! These confirm the end-to-end behavior that matters for

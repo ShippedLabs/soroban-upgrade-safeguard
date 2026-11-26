@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `upgrade-report` subcommand and the report
 //! migration framework, exercised end-to-end through the built binary.
 //!

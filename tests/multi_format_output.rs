@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration tests for multi-format output (`--output` flag).
 //!
 //! These verify that the binary correctly emits the same analysis to

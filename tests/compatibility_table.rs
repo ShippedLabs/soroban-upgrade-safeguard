@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Lightweight check that `docs/compatibility-table.md` is up to date.
 //!
 //! The test reads the table file and asserts that the current

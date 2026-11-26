@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test covering the `extract --no-env-meta` flag.
 
 use serde_json::Value;

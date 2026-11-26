@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression coverage for CRLF line endings and a leading UTF-8 BOM in
 //! text config inputs (suppression config, `--config`, manifest TOML) —
 //! both common artifacts of Windows tooling. TOML/JSON already tolerate

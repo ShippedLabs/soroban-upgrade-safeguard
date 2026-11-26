@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression coverage for unreadable inputs and unwritable output
 //! destinations.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! CLI-level coverage for `--policy-bundle`: opt-in application, rejection
 //! before any WASM is loaded, including in batch mode.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Compatibility tests for the protocol-versioned decoder registry.
 //!
 //! These tests verify the acceptance criteria for Issue 3:

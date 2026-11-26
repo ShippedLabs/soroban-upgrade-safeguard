@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! CLI-level coverage for `--retire-version`: marking an existing lineage
 //! version as retired via the main comparison command.
 //!

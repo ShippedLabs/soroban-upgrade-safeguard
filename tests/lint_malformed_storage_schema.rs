@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression test for malformed JSON passed to `lint --storage-schema`.
 
 use std::path::PathBuf;

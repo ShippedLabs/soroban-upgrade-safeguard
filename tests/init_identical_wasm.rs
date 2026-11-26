@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration coverage for `init` when both inputs are identical.
 
 use std::fs;

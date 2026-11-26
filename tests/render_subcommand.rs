@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `render` subcommand — the round trip that lets a
 //! stored JSON report stand in for the original WASM files.
 
