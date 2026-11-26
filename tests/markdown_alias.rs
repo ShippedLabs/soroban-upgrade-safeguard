@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration tests for the `md` output-format alias.
 //!
 //! `md` is accepted as a shorthand for `markdown` in `--output` specifications

@@ -1,0 +1,5 @@
+version = 99
+
+[[pairs]]
+old = "old.wasm"
+new = "new.wasm"

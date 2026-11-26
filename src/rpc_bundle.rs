@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Versioned, deterministic RPC record/replay bundle format.
 //!
 //! A [`ReplayBundle`] is a self-contained, inspectable artifact that captures

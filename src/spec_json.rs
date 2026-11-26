@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! A serializable projection of a decoded [`ContractSpec`], for `extract`.
 //!
 //! The tool already decodes a build's full `contractspecv0` interface, but

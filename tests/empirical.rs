@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use soroban_upgrade_safeguard::diff::{Finding, Severity};
 use soroban_upgrade_safeguard::empirical::{
     load_empirical_entries, run_empirical_check, validate_scval_type, validate_scval_udt,

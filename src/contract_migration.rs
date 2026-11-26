@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Declared data migrations, and verification that they actually cover the
 //! breaking changes they claim.
 //!
@@ -155,7 +157,7 @@ impl CoverageClaim {
 }
 
 /// How a finding came to be covered by a migration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FindingCoverage {
     /// The [`MigrationDeclaration::id`] that covers this finding.
     pub migration: String,
@@ -174,7 +176,7 @@ impl FindingCoverage {
 }
 
 /// What kind of problem a [`MigrationDiagnostic`] reports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticKind {
     /// The migration does not attest that it runs before the old layout is read.
@@ -200,7 +202,7 @@ pub enum DiagnosticKind {
 /// Diagnostics never fail the run on their own. They fail it the honest way:
 /// a claim that does not verify covers nothing, so the finding it named stays
 /// open and fails the gate exactly as it would have with no declaration at all.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MigrationDiagnostic {
     pub kind: DiagnosticKind,
     /// The migration this is about, when it is about one in particular.
@@ -249,7 +251,9 @@ impl MigrationDiagnostic {
 /// Computed over the findings that would otherwise fail the gate, excluding
 /// suppressed ones — suppression is the other axis and is reported separately,
 /// so an upgrade that suppresses everything is not thereby "migrated".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MigrationStatus {
     /// Nothing needed migrating (no breaking findings left to handle).

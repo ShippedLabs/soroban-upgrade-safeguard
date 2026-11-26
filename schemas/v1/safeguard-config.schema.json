@@ -1,0 +1,1316 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/ShippedLabs/soroban-upgrade-safeguard/main/schemas/v1/safeguard-config.schema.json",
+  "title": "Soroban Safeguard Configuration",
+  "description": "Machine-readable configuration schema for soroban-upgrade-safeguard (.safeguard.toml / .safeguard.json).",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "Schema reference for editor autocompletion and hover validation.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "allow_targetless": {
+      "description": "Allow targetless suppression rules that match findings without a specific target entity.",
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "budget": {
+      "description": "Per-axis and per-rule finding count budgets.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/BudgetEntryFileSchema"
+      }
+    },
+    "classification": {
+      "description": "Explicit classification of user-defined types as events vs storage types.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ClassificationConfigSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "complexity_budget": {
+      "description": "Static complexity budgets for the WASM code section.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ComplexityBudgetEntryFileSchema"
+      }
+    },
+    "contract_id": {
+      "description": "Stellar contract ID to fetch on-chain baseline WASM from.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default_profile": {
+      "description": "Default named profile to activate when `--profile` and `SAFEGUARD_PROFILE` are absent.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defaults": {
+      "description": "Default settings applied to every pair when used as a batch manifest.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/BatchDefaultsSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dependencies": {
+      "description": "Declared dependency edges when used as a batch manifest.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ContractDependencySchema"
+      }
+    },
+    "expected_wasm_hash": {
+      "description": "Expected SHA-256 hash (hex) of the on-chain WASM baseline.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "explain": {
+      "description": "Print a concise remediation explanation for each finding.",
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "format": {
+      "description": "Output format for the safety report: \"text\", \"json\", \"markdown\", or \"github-actions\".",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/OutputFormatEnum"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gating": {
+      "description": "Gating policy for compatibility axes at the base level.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PolicyConfigSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "include": {
+      "description": "Other manifest files to compose in when used as a batch manifest.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limits": {
+      "description": "Resource bounds for XDR decoding and recursive type traversal.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LimitsConfigSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lineage_store": {
+      "description": "Path to a persistent lineage store tracking historical versions.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "manifest": {
+      "description": "Path to a batch manifest file containing contract pairs.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "max_live_versions": {
+      "description": "Maximum live historical versions to validate candidate against.",
+      "default": null,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "max_suppressions": {
+      "description": "Ceiling on the number of active suppressions allowed before the run fails.",
+      "default": null,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "migration": {
+      "description": "Declared data migrations covering schema changes.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationDeclarationSchema"
+      }
+    },
+    "new_dir": {
+      "description": "Directory containing candidate WASM artifacts for directory comparison.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "no_color": {
+      "description": "Do not color terminal output.",
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "old_dir": {
+      "description": "Directory containing baseline WASM artifacts for directory comparison.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pairs": {
+      "description": "Contract pairs when this config file is also used as a batch manifest.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/BatchPairSchema"
+      }
+    },
+    "policy": {
+      "description": "Gating policy alias for `gating`.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PolicyConfigSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "profiles": {
+      "description": "Named policy profiles sharing this file's suppressions and classification data.",
+      "default": {},
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/ProfileConfigSchema"
+      }
+    },
+    "record_version": {
+      "description": "Record candidate build in lineage store with this tag.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "require_reason": {
+      "description": "Rules requiring a non-blank justification when suppressed.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RequireReasonPolicySchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "retire_version": {
+      "description": "Mark an existing historical version as retired in the lineage store.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rpc_url": {
+      "description": "Stellar RPC endpoint URL.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "strict": {
+      "description": "Exit with a non-zero code if any Warnings or Critical findings are found.",
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "suppress": {
+      "description": "Acknowledged findings that should no longer fail the run.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SuppressionRuleSchema"
+      }
+    },
+    "wasm_paths": {
+      "description": "Positional WASM paths: [old.wasm, new.wasm].",
+      "default": null,
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "BatchDefaultsSchema": {
+      "description": "Default settings applied to every contract pair in a batch manifest.",
+      "type": "object",
+      "properties": {
+        "ascii": {
+          "description": "Whether to restrict output to ASCII characters.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "base_dir": {
+          "description": "Base directory for resolving relative contract paths in this manifest.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "description": "Path to a suppression config applied to each pair.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "explain": {
+          "description": "Whether to include remediation guidance.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "limits": {
+          "description": "Resource limit overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LimitsConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "no_timestamp": {
+          "description": "Whether to omit timestamps for reproducible diffing.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "policy": {
+          "description": "Axis gating overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PolicyConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strict": {
+          "description": "Whether to fail on Warning findings.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "BatchPairSchema": {
+      "description": "A single contract upgrade pair in a batch manifest.",
+      "type": "object",
+      "required": [
+        "new",
+        "old"
+      ],
+      "properties": {
+        "ascii": {
+          "description": "Pair-specific ASCII mode override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "base_dir": {
+          "description": "Base directory for resolving relative paths for this pair.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "description": "Suppression config path for this pair.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "explain": {
+          "description": "Pair-specific explain override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable identifier for CI annotations and filters (alphanumeric, -, _, .).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "description": "Grouping tags for filtering (e.g. [\"service:auth\", \"stage:prod\"]).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limits": {
+          "description": "Pair-specific resource limit overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LimitsConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "Human-readable name for this contract pair. Defaults to the filename of `new`.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new": {
+          "description": "Path to the candidate (new) WASM artifact.",
+          "type": "string"
+        },
+        "new_storage_schema": {
+          "description": "Declared storage schema manifest for the candidate build.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "no_timestamp": {
+          "description": "Pair-specific timestamp omission override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "old": {
+          "description": "Path to the baseline (old) WASM artifact.",
+          "type": "string"
+        },
+        "old_storage_schema": {
+          "description": "Declared storage schema manifest for the baseline build.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "description": "Pair-specific policy overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PolicyConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strict": {
+          "description": "Pair-specific strict mode override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "BudgetEntryFileSchema": {
+      "description": "A finding count budget entry.",
+      "type": "object",
+      "required": [
+        "limit",
+        "scope"
+      ],
+      "properties": {
+        "axis": {
+          "description": "Axis when scope = \"axis\".",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CompatibilityAxisEnum"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "description": "Maximum allowed count for this scope (must be >= 0).",
+          "type": "integer",
+          "format": "int64"
+        },
+        "metric": {
+          "description": "Metric to evaluate: \"raw\" or \"unsuppressed\". Default: \"unsuppressed\".",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BudgetMetricEnum"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rule_id": {
+          "description": "Rule ID when scope = \"rule\".",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "description": "Budget scope: \"global\", \"axis\", or \"rule\".",
+          "type": "string"
+        },
+        "severity": {
+          "description": "Optional severity filter: \"critical\", \"warning\", or \"info\".",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FindingSeverityEnum"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "BudgetMetricEnum": {
+      "description": "Evaluation metric for finding count budgets.",
+      "oneOf": [
+        {
+          "description": "Evaluates all findings matching the scope, whether suppressed or not.",
+          "type": "string",
+          "enum": [
+            "raw"
+          ]
+        },
+        {
+          "description": "Evaluates only unsuppressed findings matching the scope.",
+          "type": "string",
+          "enum": [
+            "unsuppressed"
+          ]
+        }
+      ]
+    },
+    "ClassificationConfigSchema": {
+      "description": "Explicit type classification configuration.",
+      "type": "object",
+      "properties": {
+        "events": {
+          "description": "Exact type names to treat as emitted events.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name_heuristic": {
+          "description": "Opt-in: treat any type whose name contains \"event\" (case-insensitive) as an event.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "storage": {
+          "description": "Exact type names to treat as ordinary storage (overrides events list and name heuristic).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "CompatibilityAxisEnum": {
+      "description": "Compatibility evaluation axes.",
+      "oneOf": [
+        {
+          "description": "Changes affecting ledger storage layout and serialization compatibility.",
+          "type": "string",
+          "enum": [
+            "storage_layout"
+          ]
+        },
+        {
+          "description": "Changes affecting exported function signatures and parameter/return types.",
+          "type": "string",
+          "enum": [
+            "call_abi"
+          ]
+        },
+        {
+          "description": "Changes affecting emitted event schemas consumed by off-chain indexers.",
+          "type": "string",
+          "enum": [
+            "event_indexer"
+          ]
+        },
+        {
+          "description": "Changes affecting source-level bindings or client SDK compilation.",
+          "type": "string",
+          "enum": [
+            "source_level"
+          ]
+        },
+        {
+          "description": "Changes affecting protocol capability levels or required host function imports.",
+          "type": "string",
+          "enum": [
+            "runtime_surface"
+          ]
+        }
+      ]
+    },
+    "ComplexityBudgetEntryFileSchema": {
+      "description": "Static WASM complexity budget entry.",
+      "type": "object",
+      "required": [
+        "metric"
+      ],
+      "properties": {
+        "limit": {
+          "description": "Absolute ceiling limit (must be >= 0).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "metric": {
+          "description": "WASM complexity metric name or opcode family.",
+          "type": "string",
+          "enum": [
+            "total_instructions",
+            "defined_functions",
+            "control",
+            "calls",
+            "memory",
+            "numeric",
+            "const",
+            "parametric",
+            "variable"
+          ]
+        },
+        "pct_limit": {
+          "description": "Maximum percentage increase ratio allowed (must be >= 0.0).",
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContractDependencySchema": {
+      "description": "Contract dependency edge in a batch manifest.",
+      "type": "object",
+      "required": [
+        "callee",
+        "caller"
+      ],
+      "properties": {
+        "callee": {
+          "description": "The callee contract ID or name.",
+          "type": "string"
+        },
+        "caller": {
+          "description": "The caller contract ID or name.",
+          "type": "string"
+        },
+        "functions": {
+          "description": "Specific functions the caller relies on. Empty means all functions.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "required": {
+          "description": "Whether the caller requires this dependency to be valid.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "CoverageClaimSchema": {
+      "description": "A claim that a specific finding is covered by a migration.",
+      "type": "object",
+      "required": [
+        "category"
+      ],
+      "properties": {
+        "category": {
+          "description": "Finding category to match.",
+          "type": "string"
+        },
+        "change": {
+          "description": "Change fingerprint this claim is pinned to.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "Target entity to match.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FindingSeverityEnum": {
+      "description": "Finding severity level.",
+      "oneOf": [
+        {
+          "description": "High-impact breaking change that corrupts data or breaks execution.",
+          "type": "string",
+          "enum": [
+            "critical"
+          ]
+        },
+        {
+          "description": "Breaking change requiring migration or caller updates.",
+          "type": "string",
+          "enum": [
+            "warning"
+          ]
+        },
+        {
+          "description": "Additive, backward-compatible modification.",
+          "type": "string",
+          "enum": [
+            "info"
+          ]
+        }
+      ]
+    },
+    "LimitsConfigSchema": {
+      "description": "Resource limit bounds to guard against adversarial WASM specs.",
+      "type": "object",
+      "properties": {
+        "max_entries": {
+          "description": "Maximum decoded spec entries summed across sections. Must be >= 1. Default: 100,000.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "max_walk_depth": {
+          "description": "Maximum recursion depth for type traversal. Must be >= 1. Default: 128.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "max_xdr_depth": {
+          "description": "Maximum XDR recursion depth per decoded entry. Must be >= 1. Default: 64.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_xdr_len": {
+          "description": "Maximum bytes decoded per WASM custom section. Must be >= 1. Default: 33,554,432 (32 MiB).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "MigrationDeclarationSchema": {
+      "description": "Declared data migration.",
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "contracts": {
+          "description": "Contract names this migration applies to (empty means all).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "covers": {
+          "description": "Specific findings this migration resolves.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoverageClaimSchema"
+          }
+        },
+        "description": {
+          "description": "Prose description of what the migration does.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable identifier for this migration (e.g. 'v2-storage-cutover').",
+          "type": "string"
+        },
+        "migrates": {
+          "description": "User-defined types this migration rewrites.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "runs_before_read": {
+          "description": "Attestation that the migration runs before any new-code read of old layout.",
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "OutputFormatEnum": {
+      "description": "Supported report output formats.",
+      "oneOf": [
+        {
+          "description": "Human-readable terminal text output.",
+          "type": "string",
+          "enum": [
+            "text"
+          ]
+        },
+        {
+          "description": "Machine-readable JSON output for CI pipelines and dashboards.",
+          "type": "string",
+          "enum": [
+            "json"
+          ]
+        },
+        {
+          "description": "Markdown formatted report for pull request comments.",
+          "type": "string",
+          "enum": [
+            "markdown"
+          ]
+        },
+        {
+          "description": "GitHub Actions workflow annotations.",
+          "type": "string",
+          "enum": [
+            "github-actions"
+          ]
+        }
+      ]
+    },
+    "PolicyConfigSchema": {
+      "description": "Gating policy configuration for compatibility axes.",
+      "type": "object",
+      "properties": {
+        "gate_call_abi": {
+          "description": "Gate on call ABI breaks. Default: true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_event_indexer": {
+          "description": "Gate on event schema breaks. Default: false.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_runtime_surface": {
+          "description": "Gate on runtime surface breaks (host imports, protocol capability). Default: true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_source_level": {
+          "description": "Gate on source-level breaks. Default: false.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_storage_layout": {
+          "description": "Gate on storage layout breaks. Default: true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProfileConfigSchema": {
+      "description": "Named policy profile configuration.",
+      "type": "object",
+      "properties": {
+        "explain": {
+          "description": "Whether to include remediation explanations for findings.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "format": {
+          "description": "Output format for this profile: \"text\", \"json\", \"markdown\", or \"github-actions\".",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OutputFormatEnum"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gating": {
+          "description": "Axis gating overrides under this profile.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PolicyConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inherits": {
+          "description": "Name of another profile this one inherits from (up to depth 8).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limits": {
+          "description": "Resource limit overrides under this profile.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LimitsConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_suppressions": {
+          "description": "Ceiling on the number of active suppressions allowed under this profile.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "no_color": {
+          "description": "Whether to disable ANSI color codes.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "policy": {
+          "description": "Axis gating overrides alias for `gating`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PolicyConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strict": {
+          "description": "Whether to exit non-zero on Warnings as well as Critical findings.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RequireReasonPolicySchema": {
+      "description": "Require-reason policy configuration.",
+      "type": "object",
+      "properties": {
+        "axes": {
+          "description": "Compatibility axes requiring a non-blank justification when suppressed.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CompatibilityAxisEnum"
+          }
+        },
+        "rule_ids": {
+          "description": "Canonical rule IDs (snake_case) requiring a non-blank justification when suppressed.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SuppressionRuleSchema": {
+      "description": "Suppression rule acknowledging a specific finding.",
+      "type": "object",
+      "properties": {
+        "author": {
+          "description": "Author or reviewer who acknowledged the finding.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "category": {
+          "description": "Finding category string to match exactly (e.g. 'Struct Field Removed').",
+          "default": null,
+          "type": "string",
+          "enum": [
+            "Environment",
+            "Function Removed",
+            "Function Documentation Changed",
+            "Function Added",
+            "Function Signature Changed",
+            "Parameter Renamed",
+            "Parameter Reordered",
+            "Parameter Type Changed",
+            "Return Type Changed",
+            "BytesN Size Changed",
+            "Event Definition Removed",
+            "Struct Removed",
+            "Struct Documentation Changed",
+            "Struct Added",
+            "Struct Field Removed",
+            "Struct Field Inserted",
+            "Struct Field Reordered",
+            "Struct Field Type Changed",
+            "Struct Field Added",
+            "Event Schema Removed",
+            "Event Schema Reordered",
+            "Event Schema Type Changed",
+            "Event Enum Removed",
+            "Enum Removed",
+            "Enum Documentation Changed",
+            "Enum Added",
+            "Enum Case Removed",
+            "Enum Case Value Changed",
+            "Enum Case Added",
+            "Event Enum Case Removed",
+            "Event Enum Case Value Changed",
+            "Event Enum Case Added",
+            "Union Removed",
+            "Union Added",
+            "Union Case Removed",
+            "Union Case Reordered",
+            "Union Case Type Changed",
+            "Union Case Added",
+            "Error Enum Removed",
+            "Error Enum Added",
+            "Error Enum Case Removed",
+            "Error Enum Case Value Changed",
+            "Error Enum Case Added",
+            "Type Kind Changed",
+            "Cascading Layout Break",
+            "Host Import Added",
+            "Host Import Removed",
+            "Host Import Signature Changed",
+            "Unknown Host Import",
+            "Protocol Requirement Raised",
+            "Protocol Environment Mismatch",
+            "Memory Added",
+            "Memory Removed",
+            "Memory Limits Changed",
+            "Table Added",
+            "Table Removed",
+            "Table Limits Changed",
+            "Table Element Type Changed",
+            "Global Added",
+            "Global Removed",
+            "Global Mutability Changed",
+            "Global Type Changed",
+            "Start Function Added",
+            "Start Function Removed",
+            "Start Function Changed",
+            "Element Segment Changed",
+            "Data Segment Changed",
+            "WASM Proposal Added",
+            "WASM Proposal Removed",
+            "Storage Durability Changed",
+            "Storage Namespace Changed",
+            "Map Key Type Changed",
+            "Map Value Type Changed"
+          ]
+        },
+        "expiry": {
+          "description": "Expiry date in ISO 8601 format (YYYY-MM-DD) after which this rule is invalid.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fingerprint": {
+          "description": "SHA-256 fingerprint hex of the finding content to guard against message drift.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "Human-readable explanation of why this change was reviewed and accepted.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_id": {
+          "description": "Canonical snake_case rule identifier (e.g. 'struct_field_removed').",
+          "default": null,
+          "type": "string",
+          "enum": [
+            "environment",
+            "function_removed",
+            "function_documentation_changed",
+            "function_added",
+            "function_signature_changed",
+            "parameter_renamed",
+            "parameter_reordered",
+            "parameter_type_changed",
+            "return_type_changed",
+            "bytesn_size_changed",
+            "event_definition_removed",
+            "struct_removed",
+            "struct_documentation_changed",
+            "struct_added",
+            "struct_field_removed",
+            "struct_field_inserted",
+            "struct_field_reordered",
+            "struct_field_type_changed",
+            "struct_field_added",
+            "event_schema_removed",
+            "event_schema_reordered",
+            "event_schema_type_changed",
+            "event_enum_removed",
+            "enum_removed",
+            "enum_documentation_changed",
+            "enum_added",
+            "enum_case_removed",
+            "enum_case_value_changed",
+            "enum_case_added",
+            "event_enum_case_removed",
+            "event_enum_case_value_changed",
+            "event_enum_case_added",
+            "union_removed",
+            "union_added",
+            "union_case_removed",
+            "union_case_reordered",
+            "union_case_type_changed",
+            "union_case_added",
+            "error_enum_removed",
+            "error_enum_added",
+            "error_enum_case_removed",
+            "error_enum_case_value_changed",
+            "error_enum_case_added",
+            "type_kind_changed",
+            "cascading_layout_break",
+            "host_import_added",
+            "host_import_removed",
+            "host_import_signature_changed",
+            "unknown_host_import",
+            "protocol_requirement_raised",
+            "protocol_environment_mismatch",
+            "memory_added",
+            "memory_removed",
+            "memory_limits_changed",
+            "table_added",
+            "table_removed",
+            "table_limits_changed",
+            "table_element_type_changed",
+            "global_added",
+            "global_removed",
+            "global_mutability_changed",
+            "global_type_changed",
+            "start_function_added",
+            "start_function_removed",
+            "start_function_changed",
+            "element_segment_changed",
+            "data_segment_changed",
+            "wasm_proposal_added",
+            "wasm_proposal_removed",
+            "storage_durability_changed",
+            "storage_namespace_changed",
+            "map_key_type_changed",
+            "map_value_type_changed"
+          ]
+        },
+        "target": {
+          "description": "Target entity name (e.g. 'transfer', 'Data.amount', 'Status.Active').",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

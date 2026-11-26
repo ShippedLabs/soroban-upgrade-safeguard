@@ -1,0 +1,402 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/ShippedLabs/soroban-upgrade-safeguard/main/schemas/v1/batch-manifest.schema.json",
+  "title": "Soroban Safeguard Batch Manifest",
+  "description": "Machine-readable schema for soroban-upgrade-safeguard batch manifests (manifest.toml / manifest.json).",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "Schema reference for editor autocompletion and validation.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defaults": {
+      "description": "Default settings applied to every pair declared in this manifest or included fragments.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/BatchDefaultsSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dependencies": {
+      "description": "Declared caller -> callee dependency relationships.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ContractDependencySchema"
+      }
+    },
+    "include": {
+      "description": "Other manifest files to compose in, depth-first, in order.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pairs": {
+      "description": "The contract upgrade pairs to compare.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/BatchPairSchema"
+      }
+    },
+    "version": {
+      "description": "Manifest format version. Only version 1 is currently supported.",
+      "default": 1,
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "BatchDefaultsSchema": {
+      "description": "Default settings applied to every contract pair in a batch manifest.",
+      "type": "object",
+      "properties": {
+        "ascii": {
+          "description": "Whether to restrict output to ASCII characters.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "base_dir": {
+          "description": "Base directory for resolving relative contract paths in this manifest.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "description": "Path to a suppression config applied to each pair.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "explain": {
+          "description": "Whether to include remediation guidance.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "limits": {
+          "description": "Resource limit overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LimitsConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "no_timestamp": {
+          "description": "Whether to omit timestamps for reproducible diffing.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "policy": {
+          "description": "Axis gating overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PolicyConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strict": {
+          "description": "Whether to fail on Warning findings.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "BatchPairSchema": {
+      "description": "A single contract upgrade pair in a batch manifest.",
+      "type": "object",
+      "required": [
+        "new",
+        "old"
+      ],
+      "properties": {
+        "ascii": {
+          "description": "Pair-specific ASCII mode override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "base_dir": {
+          "description": "Base directory for resolving relative paths for this pair.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "description": "Suppression config path for this pair.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "explain": {
+          "description": "Pair-specific explain override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable identifier for CI annotations and filters (alphanumeric, -, _, .).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "description": "Grouping tags for filtering (e.g. [\"service:auth\", \"stage:prod\"]).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limits": {
+          "description": "Pair-specific resource limit overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LimitsConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "Human-readable name for this contract pair. Defaults to the filename of `new`.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new": {
+          "description": "Path to the candidate (new) WASM artifact.",
+          "type": "string"
+        },
+        "new_storage_schema": {
+          "description": "Declared storage schema manifest for the candidate build.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "no_timestamp": {
+          "description": "Pair-specific timestamp omission override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "old": {
+          "description": "Path to the baseline (old) WASM artifact.",
+          "type": "string"
+        },
+        "old_storage_schema": {
+          "description": "Declared storage schema manifest for the baseline build.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "description": "Pair-specific policy overrides.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PolicyConfigSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strict": {
+          "description": "Pair-specific strict mode override.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContractDependencySchema": {
+      "description": "Contract dependency edge in a batch manifest.",
+      "type": "object",
+      "required": [
+        "callee",
+        "caller"
+      ],
+      "properties": {
+        "callee": {
+          "description": "The callee contract ID or name.",
+          "type": "string"
+        },
+        "caller": {
+          "description": "The caller contract ID or name.",
+          "type": "string"
+        },
+        "functions": {
+          "description": "Specific functions the caller relies on. Empty means all functions.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "required": {
+          "description": "Whether the caller requires this dependency to be valid.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LimitsConfigSchema": {
+      "description": "Resource limit bounds to guard against adversarial WASM specs.",
+      "type": "object",
+      "properties": {
+        "max_entries": {
+          "description": "Maximum decoded spec entries summed across sections. Must be >= 1. Default: 100,000.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "max_walk_depth": {
+          "description": "Maximum recursion depth for type traversal. Must be >= 1. Default: 128.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "max_xdr_depth": {
+          "description": "Maximum XDR recursion depth per decoded entry. Must be >= 1. Default: 64.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_xdr_len": {
+          "description": "Maximum bytes decoded per WASM custom section. Must be >= 1. Default: 33,554,432 (32 MiB).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "PolicyConfigSchema": {
+      "description": "Gating policy configuration for compatibility axes.",
+      "type": "object",
+      "properties": {
+        "gate_call_abi": {
+          "description": "Gate on call ABI breaks. Default: true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_event_indexer": {
+          "description": "Gate on event schema breaks. Default: false.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_runtime_surface": {
+          "description": "Gate on runtime surface breaks (host imports, protocol capability). Default: true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_source_level": {
+          "description": "Gate on source-level breaks. Default: false.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gate_storage_layout": {
+          "description": "Gate on storage layout breaks. Default: true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

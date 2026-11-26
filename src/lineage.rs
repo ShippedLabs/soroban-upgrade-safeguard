@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Persistent compatibility ledger and multi-version lineage validation.
 //!
 //! Issue #146: Soroban contract upgrades accumulate historical versions on-chain.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Named policy profiles for `.safeguard.toml`.
 //!
 //! One repository often needs different policies for local development, pull

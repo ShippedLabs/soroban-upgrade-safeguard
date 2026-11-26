@@ -1,11 +1,14 @@
+// SPDX-License-Identifier: MIT
+
 use anyhow::{Context, Result};
-use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
+use clap::{Args as ClapArgs, CommandFactory, Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Component, Path, PathBuf};
-#[allow(unused_imports)]
 use std::time::Duration;
+
+mod timestamp;
 
 use soroban_upgrade_safeguard::{
     attestation::{
@@ -14,6 +17,7 @@ use soroban_upgrade_safeguard::{
         InTotoSubject, SafeguardPredicateV1, VerificationFailure, VerificationFailureKind,
         VerificationPolicy,
     },
+    category,
     color::{should_disable_color, ColorMode},
     diff,
     limits::ResourcePolicy,
@@ -22,7 +26,7 @@ use soroban_upgrade_safeguard::{
     parser, preflight,
     remote::{self, RemoteFetchConfig, RemoteRef},
     render::{self, RenderableReport},
-    report,
+    report, report_schema,
     rpc::RpcClientConfig,
     spec,
     spec_json::{ExtractedSpec, InterfaceLockfile},
@@ -39,6 +43,69 @@ mod watch;
 /// text. CI systems can set this once instead of repeating `--config` on
 /// every invocation; an explicit `--config` flag always takes precedence.
 const CONFIG_PATH_ENV_VAR: &str = "SOROBAN_SAFEGUARD_CONFIG";
+
+/// Keep narration separate from reports, and diagnostics on stderr.
+#[derive(Clone, Copy)]
+struct DiagnosticLog {
+    quiet: bool,
+    verbosity: u8,
+    progress_to_stderr: bool,
+}
+
+impl DiagnosticLog {
+    fn new(args: &Args, progress_to_stderr: bool) -> Self {
+        Self {
+            quiet: args.quiet,
+            verbosity: args.verbose,
+            progress_to_stderr,
+        }
+    }
+
+    fn progress(&self, line: impl std::fmt::Display) {
+        if !self.quiet {
+            if self.progress_to_stderr {
+                eprintln!("{line}");
+            } else {
+                println!("{line}");
+            }
+        }
+    }
+
+    fn diagnostic(&self, level: u8, message: impl std::fmt::Display) {
+        if !self.quiet && self.verbosity >= level {
+            eprintln!("[debug] {message}");
+        }
+    }
+
+    fn timing(&self, stage: &str, start: std::time::Instant) {
+        self.diagnostic(
+            1,
+            format_args!("{stage}: {:.3} ms", start.elapsed().as_secs_f64() * 1000.0),
+        );
+    }
+
+    fn sections(&self, label: &str, bytes: &[u8]) {
+        if self.quiet || self.verbosity < 2 {
+            return;
+        }
+        for payload in wasmparser::Parser::new(0).parse_all(bytes) {
+            match payload {
+                Ok(payload) => {
+                    if let Some((id, range)) = payload.as_section() {
+                        self.diagnostic(
+                            2,
+                            format_args!("{label} section {id}: {} bytes", range.len()),
+                        );
+                    }
+                }
+                Err(error) => {
+                    self.diagnostic(2, format_args!("{label} section scan: {error}"));
+                    break;
+                }
+            }
+        }
+    }
+}
 
 /// Where a resolved suppression config path came from, for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +248,24 @@ fn load_suppressions(
         return Ok((config, Some((path, ConfigSource::AncestorSearch))));
     }
     Ok((SuppressionConfig::default(), None))
+}
+
+/// CLI values kept separate from the shared report severity type.
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum MinimumSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl MinimumSeverity {
+    fn as_severity(&self) -> &diff::Severity {
+        match self {
+            Self::Info => &diff::Severity::Info,
+            Self::Warning => &diff::Severity::Warning,
+            Self::Critical => &diff::Severity::Critical,
+        }
+    }
 }
 
 /// Output format for the safety report.
@@ -371,6 +456,10 @@ enum RenderFormat {
     Text,
     /// Markdown document suitable for PR descriptions and comments.
     Markdown,
+    /// GitHub Actions workflow annotations (`::error::`, `::warning::`,
+    /// `::notice::`). Reuses the same renderer as `--format github-actions`
+    /// on the main comparison command.
+    GithubActions,
 }
 
 #[derive(Parser, Debug)]
@@ -386,9 +475,17 @@ enum RenderFormat {
                       soroban-upgrade-safeguard extract <WASM> [OPTIONS]\n       \
                       soroban-upgrade-safeguard lockfile <WASM> --output <PATH> [OPTIONS]\n       \
                       soroban-upgrade-safeguard render <REPORT_JSON> [OPTIONS]\n       \
+                      soroban-upgrade-safeguard upgrade-report <REPORT_JSON> [OPTIONS]\n       \
                       soroban-upgrade-safeguard init [OPTIONS]\n       \
+                      soroban-upgrade-safeguard attest <REPORT_JSON> --old-wasm <WASM> --new-wasm <WASM> --private-key <PKCS8_KEY> --key-id <IDENTITY> --output <DSSE_JSON> [OPTIONS]\n       \
+                      soroban-upgrade-safeguard verify-attestation <DSSE_JSON> --trusted-key <ID=PATH> [OPTIONS]\n       \
                       soroban-upgrade-safeguard stream [OPTIONS]\n       \
-                      soroban-upgrade-safeguard preflight --rpc-url <URL> [OPTIONS]",
+                      soroban-upgrade-safeguard lint <WASM> [OPTIONS]\n       \
+                      soroban-upgrade-safeguard preflight --rpc-url <URL> [OPTIONS]\n       \
+                      soroban-upgrade-safeguard fuzz-minimize <INPUT> [OPTIONS]\n       \
+                      soroban-upgrade-safeguard print-schema [OPTIONS]\n       \
+                      soroban-upgrade-safeguard categories [OPTIONS]\n       \
+                      soroban-upgrade-safeguard doctor [OPTIONS]",
     args_conflicts_with_subcommands = true,
     subcommand_negates_reqs = true,
 )]
@@ -405,6 +502,10 @@ struct Args {
     /// Output format for stdout. Omit or use --output for file output.
     #[arg(long, value_enum, ignore_case = true)]
     format: Option<OutputFormat>,
+
+    /// Minimum severity of displayed text findings; counts and exit codes remain unchanged.
+    #[arg(long, value_enum, default_value = "info")]
+    min_severity: MinimumSeverity,
 
     /// Output specification(s) in FORMAT:PATH format (e.g. json:report.json),
     /// or a bare path whose format comes from --format. Can be repeated.
@@ -426,7 +527,7 @@ struct Args {
     /// Accept a JSON-RPC response whose `id` is missing or does not match
     /// the request's `id`. Off by default; only use this for a provider
     /// known not to echo request IDs correctly.
-    #[arg(long)]
+    #[arg(long, requires = "rpc_url")]
     rpc_allow_id_mismatch: bool,
 
     /// Path to a suppression config acknowledging known, intentional breaking
@@ -455,6 +556,25 @@ struct Args {
     /// Validate a suppression config without analyzing WASM inputs.
     #[arg(long, value_name = "CONFIG")]
     validate_config: Option<PathBuf>,
+
+    /// Apply a signed, centrally governed policy bundle: a local file path,
+    /// or an `https://host/path#sha256=<hex>` reference (fetched and cached
+    /// the same way `https://` WASM inputs are, via --remote-*). Opt-in:
+    /// without this flag, nothing changes. Requires --trusted-bundle-key.
+    /// Rejected entirely (before any WASM is loaded) if verification fails
+    /// for any reason — wrong payload type, non-canonical payload,
+    /// unsupported version, no trusted signature, or an expired bundle.
+    /// See docs/policy-bundles.md. Not yet supported in batch mode.
+    #[arg(long, value_name = "PATH_OR_URL")]
+    policy_bundle: Option<String>,
+
+    /// Trusted Ed25519 key for verifying a --policy-bundle, in ID=PATH
+    /// form (PATH contains a raw 32-byte public key). Repeatable; a bundle
+    /// verifies if any one signature matches a key given here. The same
+    /// key material used for --trusted-key (report attestations) can be
+    /// reused here, since both use the same Ed25519/DSSE mechanism.
+    #[arg(long = "trusted-bundle-key", value_name = "ID=PATH")]
+    trusted_bundle_key: Vec<String>,
 
     /// Print the fully resolved configuration (CLI flags, environment
     /// variables, and the suppression config file) with the origin of every
@@ -508,15 +628,24 @@ struct Args {
     width: Option<usize>,
 
     /// Suppress decorative and progress output; the report and exit code are unchanged.
-    #[arg(long)]
+    #[arg(short = 'q', long)]
     quiet: bool,
 
+    /// Add diagnostic counts and stage timings; repeat for WASM section sizes.
+    #[arg(short = 'v', long, action = clap::ArgAction::Count)]
+    verbose: u8,
+
     /// Control when ANSI color is used. --no-color overrides this option.
-    #[arg(long, value_enum, default_value_t = ColorMode::Auto)]
+    /// Values are accepted in any case, like --format.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = ColorMode::Auto)]
     color: ColorMode,
 
-    /// Allow HTTP connections for RPC when the host is localhost/127.0.0.1.
-    /// Without this flag only HTTPS URLs are accepted.
+    /// Allow HTTP connections for RPC when the host is a loopback address
+    /// (`localhost`, `127.0.0.1`, or `::1`). Without this flag, and for
+    /// any non-loopback host regardless of this flag, only HTTPS URLs
+    /// are accepted. Applies to the main comparison's `--rpc-url` and to
+    /// the `preflight` subcommand's `--rpc-url`; the `extract`/`lint`/
+    /// `init` subcommands always require HTTPS for their own `--rpc-url`.
     #[arg(long)]
     allow_http_local: bool,
 
@@ -559,6 +688,20 @@ struct Args {
     #[arg(long, value_name = "NEW_DIR", requires = "old_dir")]
     new_dir: Option<PathBuf>,
 
+    /// Glob pattern for `.wasm` artifacts to leave out of a directory scan
+    /// (--old-dir/--new-dir), so vendored, example, or test builds sitting in
+    /// the scanned tree are not compared. Matched against each artifact's path
+    /// relative to the directory being scanned, where `*` stands for any run of
+    /// characters, `?` for exactly one, and `**` for any run including `/`;
+    /// every other character is literal. Can be repeated, and an artifact
+    /// matching any one of the patterns is excluded. Exclusion applies to both
+    /// scanned directories, and an excluded artifact is reported as skipped
+    /// rather than silently dropped: it forms no pair, is never reported as
+    /// old-only or new-only, and cannot move the verdict. Not accepted with
+    /// --manifest, which already names both sides of every pair.
+    #[arg(long, value_name = "GLOB", num_args = 1)]
+    exclude: Vec<String>,
+
     /// Directory to write one report file per contract into, using the selected format
     #[arg(
         long = "per-contract-output-dir",
@@ -581,7 +724,8 @@ struct Args {
         alias = "report-name-template",
         alias = "filename-template",
         value_name = "TEMPLATE",
-        default_value = "{name}.{ext}"
+        default_value = "{name}.{ext}",
+        requires = "per_contract_output_dir"
     )]
     per_contract_output_name_template: String,
 
@@ -600,6 +744,7 @@ struct Args {
         value_name = "MILLISECONDS",
         default_value_t = DEFAULT_WATCH_DEBOUNCE_MS,
         value_parser = parse_watch_debounce_ms,
+        requires = "watch",
     )]
     watch_debounce_ms: u64,
 
@@ -623,11 +768,25 @@ struct Args {
     #[arg(long, value_name = "EMPIRICAL_FILE")]
     empirical_file: Option<PathBuf>,
 
+    /// Export the upgrade's impact graph (functions, types, storage,
+    /// events, findings, and policy decisions, with their dependency/
+    /// cascade/reference edges) as part of the report. See
+    /// docs/impact-graph.md. Adds `impact_graph` to `--format json`
+    /// output; summarized only (node/edge counts) in text/markdown.
+    #[arg(long)]
+    impact_graph: bool,
+
     /// Maximum bytes accepted for any `https://` input download.
     #[arg(long, value_name = "BYTES", default_value_t = remote::DEFAULT_MAX_BYTES)]
     remote_max_bytes: usize,
 
     /// Timeout, in seconds, for any single `https://` input request.
+    ///
+    /// A value of 0 is a defined failure, not an unbounded wait: the
+    /// deadline is computed from when the request starts, so a
+    /// zero-second budget is already exhausted before the connection
+    /// can complete, and every request fails immediately with a timeout
+    /// error. There is no "0 means unlimited" special case.
     #[arg(long, value_name = "SECONDS", default_value_t = remote::DEFAULT_TIMEOUT_SECS)]
     remote_timeout_secs: u64,
 
@@ -654,6 +813,12 @@ struct Args {
     oci_max_bytes: usize,
 
     /// Timeout, in seconds, for any single `oci://` registry request.
+    ///
+    /// A value of 0 is a defined failure, not an unbounded wait: the
+    /// deadline is computed from when the request starts, so a
+    /// zero-second budget is already exhausted before the connection can
+    /// complete, and every request fails immediately with a timeout
+    /// error. There is no "0 means unlimited" special case.
     #[arg(long, value_name = "SECONDS", default_value_t = oci::DEFAULT_TIMEOUT_SECS)]
     oci_timeout_secs: u64,
 
@@ -677,6 +842,31 @@ struct Args {
     #[arg(long)]
     allow_oci_tags: bool,
 
+    /// Directory used to cache parsed WASM metadata (decoded XDR, interface
+    /// hashes, normalized specs) keyed by the WASM content hash.  Shared
+    /// across all input sources (local file, HTTPS, OCI, RPC).
+    /// Defaults to `$TMPDIR/soroban-upgrade-safeguard/metadata-cache/` or the
+    /// `SOROBAN_SAFEGUARD_METADATA_CACHE` environment variable if set.
+    #[arg(long, value_name = "DIR")]
+    metadata_cache_dir: Option<PathBuf>,
+
+    /// Do not read from or write to the parsed-metadata cache for this run.
+    /// The WASM is always re-decoded from scratch.
+    #[arg(long)]
+    no_metadata_cache: bool,
+
+    /// Delete every entry in the parsed-metadata cache and exit.
+    #[arg(long)]
+    clear_metadata_cache: bool,
+
+    /// Print hit, miss, and invalidation counts to stderr after the run.
+    #[arg(long)]
+    metadata_cache_stats: bool,
+
+    /// List all entries currently in the parsed-metadata cache and exit.
+    #[arg(long)]
+    inspect_metadata_cache: bool,
+
     /// Path to a persistent lineage store (JSON/TOML) tracking historical versions.
     #[arg(long, value_name = "PATH")]
     lineage_store: Option<PathBuf>,
@@ -686,16 +876,23 @@ struct Args {
     list_versions: bool,
 
     /// Record candidate build as a new version in the lineage store with this tag.
-    #[arg(long, value_name = "VERSION_ID")]
+    #[arg(long, value_name = "VERSION_ID", requires = "lineage_store")]
     record_version: Option<String>,
 
     /// Mark an existing historical version as retired in the lineage store.
-    #[arg(long, value_name = "VERSION_ID")]
+    #[arg(long, value_name = "VERSION_ID", requires = "lineage_store")]
     retire_version: Option<String>,
 
     /// Maximum live historical versions to validate candidate against.
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", requires = "lineage_store")]
     max_live_versions: Option<usize>,
+
+    /// Write an OpenMetrics-format metrics snapshot to this file after the
+    /// run completes. The file is written atomically (rename from a temp
+    /// file in the same directory). Metrics never include contract IDs,
+    /// RPC URLs, file paths, or finding messages as label values.
+    #[arg(long, value_name = "PATH")]
+    metrics_file: Option<PathBuf>,
 }
 
 /// Build the remote-fetch policy for `https://` inputs from the top-level CLI flags.
@@ -722,8 +919,26 @@ fn oci_fetch_config(args: &Args) -> OciFetchConfig {
     }
 }
 
+/// Build the metadata-cache configuration from the top-level CLI flags.
+fn metadata_cache_config(
+    args: &Args,
+) -> soroban_upgrade_safeguard::metadata_cache::MetadataCacheConfig {
+    soroban_upgrade_safeguard::metadata_cache::MetadataCacheConfig {
+        no_cache: args.no_metadata_cache,
+        cache_dir: args.metadata_cache_dir.clone(),
+        print_stats: args.metadata_cache_stats,
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Generate a shell completion script on stdout
+    #[command(hide = true)]
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Dump a single contract's decoded spec as JSON
     Extract(ExtractArgs),
     /// Generate or update a committed interface lockfile from one WASM build
@@ -739,11 +954,54 @@ enum Command {
     /// Verify a safeguard DSSE attestation and all referenced artifacts offline
     VerifyAttestation(VerifyAttestationArgs),
     /// Streaming JSON Lines batch mode: one job per line on stdin, one result per line on stdout
+    ///
+    /// Reads one JSON job per line from stdin and writes one JSON result per line
+    /// to stdout. Diagnostics go to stderr. All schema versions are `1`.
+    ///
+    /// # Job line (stdin)
+    ///
+    /// `{"schema_version":1,"id":"job-42","old":{"local":"/path/to/old.wasm"},"new":{"local":"/path/to/new.wasm"},"overrides":{"strict":true}}`
+    ///
+    /// Required fields: `schema_version`, `id`, `old`, `new`.
+    ///
+    /// Optional `overrides`: `strict`, `explain`, `ascii`, `empirical`, `suppression_config`.
+    ///
+    /// # Result line (stdout)
+    ///
+    /// `{"schema_version":1,"id":"job-42","status":"success","report":{...},"elapsed_ms":123}`
+    ///
+    /// `status` values: `success`, `failure`, `duplicate`, `malformed`.
+    ///
+    /// `report` is present on `success`; `error` is present on `failure`, `duplicate`, and `malformed`.
+    ///
+    /// # Input descriptors
+    ///
+    /// Every `old` / `new` field is a single-key object that names the source:
+    ///
+    /// - `local`: `{"local": "/path/to/file.wasm"}`
+    ///
+    /// - `rpc`: `{"rpc": {"url": "...", "contract_id": "C..."}}`
+    ///
+    /// - `hash`: `{"hash": {"path": "...", "sha256": "<hex>"}}`
+    ///
+    /// - `extracted`: `{"extracted": "/path/to/spec.json"}`
+    ///
+    /// - `remote`: `{"remote": "https://example.com/file.wasm#sha256=<hex>"}`
+    ///
+    /// For full wire-format documentation see the module comment in `src/jsonl.rs`.
     Stream(StreamArgs),
     /// Validate one contract spec (and optional storage schema) in isolation
     Lint(LintArgs),
     /// Validate RPC connectivity and JSON-RPC protocol shape without fetching contract code
     Preflight(PreflightArgs),
+    /// Minimize a failing fuzz input and promote it to a deterministic fixture
+    FuzzMinimize(FuzzMinimizeArgs),
+    /// Print the JSON Schema for the `--format json` report to stdout and exit
+    PrintSchema(PrintSchemaArgs),
+    /// List every finding category with its severity and remediation guidance
+    Categories(CategoriesArgs),
+    /// Report environment, version, enabled features, cache locations, and resolved configuration
+    Doctor(DoctorArgs),
 }
 
 /// `lint`: validate a single decoded contract spec (and optional storage
@@ -778,6 +1036,10 @@ struct LintArgs {
     #[arg(long, value_enum, ignore_case = true, default_value_t = LintOutputFormat::Text)]
     format: LintOutputFormat,
 
+    /// Minimum severity shown in text output; summary counts stay unchanged.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = LintMinimumSeverity::Info)]
+    min_severity: LintMinimumSeverity,
+
     /// Include remediation guidance for each finding.
     #[arg(long)]
     explain: bool,
@@ -790,6 +1052,13 @@ struct LintArgs {
     #[arg(long, value_name = "N")]
     max_walk_depth: Option<usize>,
 
+    /// Destination path for the lint output. Defaults to stdout.
+    /// Written atomically (temp file + rename) and always overwrites an
+    /// existing file at this path. The exit code is unchanged: only the
+    /// destination of the rendered output changes.
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
+
     #[arg(long)]
     no_color: bool,
 }
@@ -801,6 +1070,25 @@ enum LintOutputFormat {
     Text,
     Json,
     Markdown,
+    GithubActions,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum LintMinimumSeverity {
+    #[default]
+    Info,
+    Warning,
+    Error,
+}
+
+impl From<LintMinimumSeverity> for lint::LintSeverity {
+    fn from(value: LintMinimumSeverity) -> Self {
+        match value {
+            LintMinimumSeverity::Info => Self::Info,
+            LintMinimumSeverity::Warning => Self::Warning,
+            LintMinimumSeverity::Error => Self::Error,
+        }
+    }
 }
 
 #[derive(ClapArgs, Debug)]
@@ -830,6 +1118,9 @@ struct AttestArgs {
 struct VerifyAttestationArgs {
     #[arg(value_name = "DSSE_JSON")]
     attestation: PathBuf,
+    /// Verification output format.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = AttestationOutputFormat::Json)]
+    format: AttestationOutputFormat,
     #[arg(long, value_name = "REPORT_JSON")]
     report: Option<PathBuf>,
     #[arg(long, value_name = "WASM")]
@@ -848,7 +1139,18 @@ struct VerifyAttestationArgs {
     policy_expires_at: Option<u64>,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum AttestationOutputFormat {
+    Json,
+    Text,
+}
+
 /// `stream`: JSON Lines streaming batch mode.
+///
+/// The full wire-format documentation lives on the `stream` subcommand's
+/// entry in [`Command`]; clap shows a subcommand's `about`/`long_about`
+/// from the enum variant, so documenting only this struct would leave
+/// `stream --help` without the job and result schemas.
 #[derive(ClapArgs, Debug)]
 struct StreamArgs {
     /// Maximum number of concurrent worker threads.
@@ -895,7 +1197,7 @@ struct ExtractArgs {
     rpc_headers: Vec<String>,
 
     /// Print only the interface hash, with no other output.
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["compact", "no_env_meta", "no_duplicates", "no_scope"])]
     hash_only: bool,
 
     /// Destination path for the extracted output. Defaults to stdout.
@@ -924,6 +1226,12 @@ struct ExtractArgs {
     /// Omit interface scope information (the `scope` field) from the output.
     #[arg(long)]
     no_scope: bool,
+
+    /// Emit the JSON on a single line instead of pretty-printing it.
+    /// Convenient for piping into other tools or archiving as a single-line
+    /// entry.
+    #[arg(long)]
+    compact: bool,
 }
 
 /// `lockfile`: write a committed snapshot of one contract's exported interface.
@@ -953,6 +1261,14 @@ struct RenderArgs {
     /// Output format
     #[arg(long, value_enum, ignore_case = true, default_value_t = RenderFormat::Text)]
     format: RenderFormat,
+
+    /// Minimum severity shown in text output; counts and verdict stay unchanged.
+    #[arg(long, value_enum, default_value = "info")]
+    min_severity: MinimumSeverity,
+
+    /// Write the rendered report atomically to this path instead of stdout.
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
 
     /// Print the remediation guidance stored in the report, if it has any.
     #[arg(long)]
@@ -991,9 +1307,13 @@ struct UpgradeReportArgs {
 /// `init`: generate a suppression config from current findings.
 #[derive(ClapArgs, Debug)]
 struct InitArgs {
-    /// Overwrite existing .safeguard.toml if it exists
+    /// Overwrite the selected config file if it exists
     #[arg(long)]
     force: bool,
+
+    /// Destination path for the generated config.
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_CONFIG_FILE)]
+    output: PathBuf,
 
     /// Path to the old WASM file (or contract ID with --rpc-url)
     #[arg(value_name = "OLD")]
@@ -1015,6 +1335,40 @@ struct InitArgs {
     rpc_headers: Vec<String>,
 }
 
+/// `fuzz-minimize`: minimize a failing fuzz input and promote it to a fixture.
+#[derive(ClapArgs, Debug)]
+struct FuzzMinimizeArgs {
+    /// Path to the failing input to minimize.
+    #[arg(value_name = "INPUT")]
+    input: PathBuf,
+
+    /// The kind of input: parser, decoder, mapper, or report.
+    #[arg(long, value_name = "KIND", default_value = "parser")]
+    kind: String,
+
+    /// Directory to write the promoted fixture into. Created if absent.
+    #[arg(long, value_name = "DIR", default_value = "fuzz/fixtures")]
+    output_dir: PathBuf,
+
+    /// Maximum number of reduction iterations (default: 1 000).
+    #[arg(long, value_name = "N", default_value_t = 1_000)]
+    max_iterations: usize,
+
+    /// Record every attempted reduction step in the metadata, not just
+    /// accepted ones. Produces larger metadata files.
+    #[arg(long)]
+    verbose_history: bool,
+
+    /// Print the minimization result as JSON instead of human-readable text.
+    #[arg(long)]
+    json: bool,
+
+    /// Minimize only — do not promote to a fixture. Prints the minimized
+    /// bytes to stdout (binary safe).
+    #[arg(long, conflicts_with = "output_dir")]
+    no_promote: bool,
+}
+
 /// `preflight`: validate RPC connectivity and protocol shape only.
 #[derive(ClapArgs, Debug)]
 struct PreflightArgs {
@@ -1025,6 +1379,13 @@ struct PreflightArgs {
     /// RPC headers as NAME=ENV_VAR. The secret is read only from the environment.
     #[arg(long = "rpc-header", value_name = "NAME=ENV_VAR")]
     rpc_headers: Vec<String>,
+
+    /// Allow plain HTTP for `--rpc-url` when the host is a loopback address
+    /// (`localhost`, `127.0.0.1`, or `::1`), so a locally running RPC
+    /// endpoint can be checked. Without this flag only HTTPS URLs are
+    /// accepted; a non-loopback host is rejected either way.
+    #[arg(long)]
+    allow_http_local: bool,
 
     /// Timeout, in seconds, for the preflight request.
     #[arg(long, value_name = "SECONDS", default_value_t = preflight::DEFAULT_PREFLIGHT_TIMEOUT.as_secs())]
@@ -1037,9 +1398,176 @@ struct PreflightArgs {
     /// Do not color output
     #[arg(long)]
     no_color: bool,
+
+    /// Destination path for the preflight output. Defaults to stdout.
+    /// Written atomically (temp file + rename) and always overwrites an
+    /// existing file at this path.
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
 }
 
-fn rpc_config(url: &str, headers: &[String]) -> Result<RpcClientConfig> {
+/// Output format for the `categories` listing.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum CategoriesFormat {
+    /// Human-readable listing (default).
+    #[default]
+    Text,
+    /// Machine-readable JSON array, one object per category.
+    Json,
+    /// Markdown table for documentation and pull requests.
+    Markdown,
+}
+
+/// `categories`: list every finding category with its default severity,
+/// what triggers it, and remediation guidance.
+///
+/// The listing is generated from [`category::FindingCategory::all()`] — the
+/// exact same enum the analysis uses when classifying findings — so it can
+/// never drift from the categories the tool actually emits.
+#[derive(ClapArgs, Debug)]
+struct CategoriesArgs {
+    /// Output format.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = CategoriesFormat::Text)]
+    format: CategoriesFormat,
+
+    /// Look up a specific finding category by name. When given, only that
+    /// category's details are printed. Exit code is non-zero if the category
+    /// name is not recognized.
+    #[arg(long, value_name = "NAME")]
+    category: Option<String>,
+
+    /// List only categories with this exact default severity.
+    #[arg(long, value_enum, ignore_case = true, value_name = "SEVERITY")]
+    severity: Option<MinimumSeverity>,
+
+    /// Do not color output.
+    #[arg(long)]
+    no_color: bool,
+
+    /// Destination path for the output. Defaults to stdout.
+    /// Written atomically (temp file + rename).
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
+}
+
+/// `doctor`: report environment, version, enabled features, cache locations,
+/// and resolved configuration for diagnosing misbehaving runs and assembling
+/// bug reports.
+#[derive(ClapArgs, Debug)]
+struct DoctorArgs {
+    /// Output format for the diagnostic report.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = DoctorFormat::Text)]
+    format: DoctorFormat,
+
+    /// Path to a suppression config. Falls back to SOROBAN_SAFEGUARD_CONFIG,
+    /// then to `.safeguard.toml` in the current directory if present, then
+    /// (with --search-parent-config) an ancestor directory.
+    #[arg(long, value_name = "CONFIG")]
+    config: Option<PathBuf>,
+
+    /// Do not load a suppression config automatically.
+    #[arg(long, conflicts_with = "config")]
+    no_config: bool,
+
+    /// Search ancestor directories for `.safeguard.toml` when nothing more
+    /// specific resolved one.
+    #[arg(long, conflicts_with = "no_config")]
+    search_parent_config: bool,
+
+    /// Do not color output.
+    #[arg(long)]
+    no_color: bool,
+
+    /// Destination path for the output. Defaults to stdout.
+    /// Written atomically (temp file + rename).
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
+}
+
+/// Output format for the `doctor` subcommand.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum DoctorFormat {
+    #[default]
+    Text,
+    Json,
+}
+
+/// `print-schema`: emit the JSON Schema describing the report shape the
+/// running binary produces to stdout, then exit.
+///
+/// Target schema to print.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[value(rename_all = "kebab-case")]
+enum SchemaTarget {
+    #[default]
+    Report,
+    Config,
+    Manifest,
+    ImpactGraph,
+}
+
+/// Output format for schema or metadata.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[value(rename_all = "kebab-case")]
+enum PrintSchemaFormat {
+    #[default]
+    JsonSchema,
+    Completion,
+    Markdown,
+}
+
+/// Requires no WASM inputs and no network access: the schema is generated
+/// from the canonical schemas, so the document a consumer fetches with this command
+/// is identical to what the same build would validate against.
+///
+/// Exit code is `0` on success.
+#[derive(ClapArgs, Debug)]
+struct PrintSchemaArgs {
+    /// Pretty-print the schema with two-space indentation (default). Use
+    /// `--compact` for single-line output suitable for piping into a
+    /// one-line tool.
+    #[arg(long)]
+    compact: bool,
+
+    /// Target schema to print: report (default), config, manifest, or impact-graph.
+    #[arg(long, value_enum, default_value_t = SchemaTarget::Report)]
+    target: SchemaTarget,
+
+    /// Shorthand to print the safeguard configuration schema (`--target config`).
+    #[arg(long)]
+    config: bool,
+
+    /// Shorthand to print the batch manifest schema (`--target manifest`).
+    #[arg(long)]
+    manifest: bool,
+
+    /// Output format: json-schema (default), completion, or markdown.
+    #[arg(long, value_enum, default_value_t = PrintSchemaFormat::JsonSchema)]
+    format: PrintSchemaFormat,
+
+    /// Shorthand to output editor completion and hover catalog (`--format completion`).
+    #[arg(long)]
+    completion: bool,
+
+    /// Shorthand to output Markdown documentation (`--format markdown`).
+    #[arg(long)]
+    markdown: bool,
+
+    /// Destination path for the schema output. Defaults to stdout.
+    /// Written atomically (temp file + rename) and always overwrites an
+    /// existing file at this path.
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
+}
+
+/// `allow_http_local` is `true` only at call sites that expose
+/// `--allow-http-local` as a flag: the top-level `Args` (the main
+/// comparison flow) and the `preflight` subcommand. `extract`, `lint`,
+/// and `init` each have their own `Args`-like struct without it, so they
+/// pass `false` and always require HTTPS.
+fn rpc_config(url: &str, headers: &[String], allow_http_local: bool) -> Result<RpcClientConfig> {
+    soroban_upgrade_safeguard::rpc::enforce_rpc_url_scheme_policy(url, allow_http_local)
+        .map_err(|e| anyhow::anyhow!(e))?;
     let mut config = RpcClientConfig::new(url.to_string()).map_err(|e| anyhow::anyhow!(e))?;
     for spec in headers {
         let (name, env_var) = spec.split_once('=').ok_or_else(|| {
@@ -1071,7 +1599,7 @@ fn run_extract(args: &ExtractArgs) -> Result<()> {
                 .expect("clap requires --rpc-url alongside --contract-id");
             loader::fetch_wasm_from_rpc_with_config(
                 contract_id,
-                &rpc_config(rpc_url, &args.rpc_headers)?,
+                &rpc_config(rpc_url, &args.rpc_headers, false)?,
             )?
         }
         (Some(_), Some(_)) => anyhow::bail!(
@@ -1113,10 +1641,12 @@ fn run_extract(args: &ExtractArgs) -> Result<()> {
             object.remove("scope");
         }
     }
-    write_extract_output(
-        args.output.as_deref(),
-        &serde_json::to_string_pretty(&value)?,
-    )
+    let json = if args.compact {
+        serde_json::to_string(&value)?
+    } else {
+        serde_json::to_string_pretty(&value)?
+    };
+    write_extract_output(args.output.as_deref(), &json)
 }
 
 /// Print `content` to stdout, or write it atomically to `path` when given —
@@ -1138,6 +1668,24 @@ fn write_extract_output(path: Option<&Path>, content: &str) -> Result<()> {
     }
 }
 
+/// Print `content` to stdout, or write it atomically to `path` when given.
+/// Uses the same atomic-write (temp file + rename) pattern as extract and
+/// comparison report output. `content` gets exactly one trailing newline.
+fn write_categories_output(path: Option<&Path>, content: &str) -> Result<()> {
+    match path {
+        Some(path) => {
+            let mut formatted = content.trim_end_matches('\n').to_string();
+            formatted.push('\n');
+            write_atomically(path, formatted.as_bytes())
+                .with_context(|| format!("Failed to write output file '{}'.", path.display()))
+        }
+        None => {
+            print!("{content}");
+            Ok(())
+        }
+    }
+}
+
 /// Validate RPC connectivity and JSON-RPC protocol shape without fetching
 /// any contract code. See [`preflight::run_preflight_with_timeout`] for the
 /// exact checks performed.
@@ -1151,86 +1699,688 @@ fn run_preflight(args: &PreflightArgs) -> Result<()> {
         colored::control::set_override(false);
     }
 
-    let config = rpc_config(&args.rpc_url, &args.rpc_headers)?;
+    let config = rpc_config(&args.rpc_url, &args.rpc_headers, args.allow_http_local)?;
     let report =
         preflight::run_preflight_with_timeout(&config, Duration::from_secs(args.timeout_secs));
 
-    if args.format == OutputFormat::Json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+    let content = if args.format == OutputFormat::Json {
+        serde_json::to_string_pretty(&report)?
     } else {
-        println!("Preflight check: {}", report.rpc_endpoint);
-        println!();
+        render_preflight_text(&report)
+    };
 
-        let transport_detail = if report.transport.success {
-            Some(format!(
-                "HTTP {}",
-                report.transport.status_code.unwrap_or_default()
-            ))
-        } else {
-            report.transport.error.clone()
-        };
-        print_preflight_line("Transport", report.transport.success, transport_detail);
+    write_preflight_output(args.output.as_deref(), &content)?;
 
-        let protocol_detail = if report.protocol.success {
-            Some(format!(
-                "jsonrpc {}, id matches",
-                report.protocol.jsonrpc_version.as_deref().unwrap_or("?")
-            ))
-        } else {
-            report.protocol.error.clone()
-        };
-        print_preflight_line("Protocol", report.protocol.success, protocol_detail);
-
-        let capability_detail = if report.capability.success {
-            Some(match report.capability.latest_ledger {
-                Some(seq) => format!(
-                    "{} succeeded (latestLedger {seq})",
-                    report.capability.method
-                ),
-                None => format!("{} succeeded", report.capability.method),
-            })
-        } else {
-            report.capability.error.clone()
-        };
-        print_preflight_line("Capability", report.capability.success, capability_detail);
-
-        println!();
-        println!(
-            "Overall: {}",
-            if report.all_passed() {
-                "PASS".green().bold()
-            } else {
-                "FAIL".red().bold()
-            }
-        );
-        println!();
-        println!(
-            "Note: a passing preflight check confirms endpoint connectivity only. \
-             It does not verify that any specific contract or network is compatible."
-        );
-    }
-
-    std::io::stdout().flush().ok();
     if !report.all_passed() {
         std::process::exit(1);
     }
     Ok(())
 }
 
-fn print_preflight_line(label: &str, success: bool, detail: Option<String>) {
+fn severity_colored(severity: diff::Severity) -> colored::ColoredString {
+    let plain = match severity {
+        diff::Severity::Critical => "Critical",
+        diff::Severity::Warning => "Warning",
+        diff::Severity::Info => "Info",
+    };
+    let line = format!("  Severity:   {plain:>9}");
+    match severity {
+        diff::Severity::Critical => line.red(),
+        diff::Severity::Warning => line.yellow(),
+        diff::Severity::Info => line.blue(),
+    }
+}
+
+/// Wrap `text` so the first line starts with `prefix` and every continuation
+/// line is indented to align under it, never exceeding `width` columns.
+fn wrap_with_prefix(prefix: &str, text: &str, width: usize) -> String {
+    let indent_width = prefix.chars().count();
+    let indent = " ".repeat(indent_width);
+    let available = width.saturating_sub(indent_width);
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let candidate_len = if current.is_empty() {
+            word.chars().count()
+        } else {
+            current.chars().count() + 1 + word.chars().count()
+        };
+        if !current.is_empty() && available > 0 && candidate_len > available {
+            lines.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+
+    let mut out = String::with_capacity(prefix.len() + text.len());
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 {
+            out.push_str(prefix);
+        } else {
+            out.push('\n');
+            out.push_str(&indent);
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+/// `categories`: list every finding category with its default severity and
+/// remediation guidance, in `--format` `text`, `json`, or `markdown`. All formats are
+/// generated from [`category::FindingCategory::all()`] — the single source of
+/// truth the analysis uses to classify findings — so the listing cannot drift
+/// from the categories the tool actually emits.
+fn run_categories(args: &CategoriesArgs) -> Result<()> {
+    if should_disable_color(
+        args.no_color,
+        ColorMode::Auto,
+        std::env::var_os("NO_COLOR").is_some(),
+        std::io::stdout().is_terminal(),
+    ) {
+        colored::control::set_override(false);
+    }
+
+    // If --category is specified, look up that specific category
+    if let Some(ref category_name) = args.category {
+        let all_categories = category::FindingCategory::all();
+        let found = all_categories
+            .iter()
+            .find(|cat| cat.as_str().eq_ignore_ascii_case(category_name));
+
+        match found {
+            Some(cat) => {
+                let content = match args.format {
+                    CategoriesFormat::Json => {
+                        let entry = serde_json::json!({
+                            "category": cat.as_str(),
+                            "severity": cat.severity(),
+                            "trigger_description": cat.trigger_description(),
+                            "remediation": cat.remediation(),
+                        });
+                        serde_json::to_string_pretty(&entry)?
+                    }
+                    CategoriesFormat::Text => render_categories_text(&[*cat]),
+                    CategoriesFormat::Markdown => render_categories_markdown(&[*cat]),
+                };
+                return write_categories_output(args.output.as_deref(), &content);
+            }
+            None => {
+                anyhow::bail!(
+                    "Unknown category: '{}'\n\
+                     Run `categories` without --category to see the full list of recognized categories.",
+                    category_name
+                );
+            }
+        }
+    }
+
+    let categories: Vec<_> = category::FindingCategory::all()
+        .iter()
+        .copied()
+        .filter(|cat| {
+            args.severity
+                .as_ref()
+                .is_none_or(|severity| &cat.severity() == severity.as_severity())
+        })
+        .collect();
+
+    let content = match args.format {
+        CategoriesFormat::Json => {
+            let entries: Vec<serde_json::Value> = categories
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "category": c.as_str(),
+                        "severity": c.severity(),
+                        "trigger_description": c.trigger_description(),
+                        "remediation": c.remediation(),
+                    })
+                })
+                .collect();
+            serde_json::to_string_pretty(&entries)?
+        }
+        CategoriesFormat::Text => render_categories_text(&categories),
+        CategoriesFormat::Markdown => render_categories_markdown(&categories),
+    };
+
+    write_categories_output(args.output.as_deref(), &content)
+}
+
+/// `doctor`: report environment, version, enabled features, cache locations,
+/// and resolved configuration for debugging and assembling bug reports.
+fn run_doctor(args: &DoctorArgs) -> Result<()> {
+    if should_disable_color(
+        args.no_color,
+        ColorMode::Auto,
+        std::env::var_os("NO_COLOR").is_some(),
+        std::io::stdout().is_terminal(),
+    ) {
+        colored::control::set_override(false);
+    }
+
+    // doctor exists to diagnose a broken setup, so a config that fails to load
+    // is reported in the output instead of aborting the command.
+    let (suppressions, config_source, config_error) = match load_suppressions(
+        args.no_config,
+        args.config.as_deref(),
+        args.search_parent_config,
+    ) {
+        Ok((suppressions, source)) => (suppressions, source, None),
+        Err(err) => {
+            let source = if let Some(path) = args.config.as_deref() {
+                Some((path.to_path_buf(), ConfigSource::Cli))
+            } else if let Some(env_path) = std::env::var_os(CONFIG_PATH_ENV_VAR) {
+                Some((PathBuf::from(env_path), ConfigSource::Env))
+            } else if Path::new(DEFAULT_CONFIG_FILE).exists() {
+                Some((
+                    PathBuf::from(DEFAULT_CONFIG_FILE),
+                    ConfigSource::AutoDiscovered,
+                ))
+            } else {
+                resolve_ancestor_config(args.search_parent_config)
+                    .ok()
+                    .flatten()
+                    .map(|path| (path, ConfigSource::AncestorSearch))
+            };
+            (SuppressionConfig::default(), source, Some(format!("{err:#}")))
+        }
+    };
+
+    let version = env!("CARGO_PKG_VERSION");
+
+    let enabled_features = {
+        let mut features = Vec::new();
+        if cfg!(feature = "unstable") {
+            features.push("unstable");
+        }
+        if cfg!(feature = "watch") {
+            features.push("watch");
+        }
+        features
+    };
+
+    let remote_cache_dir = remote::default_cache_dir();
+    let oci_cache_dir = oci::default_cache_dir();
+    let metadata_cache_dir = soroban_upgrade_safeguard::metadata_cache::default_cache_dir();
+
+    let content = match args.format {
+        DoctorFormat::Json => {
+            let mut root = serde_json::Map::new();
+
+            root.insert("version".to_string(), serde_json::json!(version));
+            root.insert(
+                "enabled_features".to_string(),
+                serde_json::json!(enabled_features),
+            );
+
+            let mut cache = serde_json::Map::new();
+            cache.insert(
+                "remote_cache_dir".to_string(),
+                serde_json::json!(remote_cache_dir.display().to_string()),
+            );
+            cache.insert(
+                "oci_cache_dir".to_string(),
+                serde_json::json!(oci_cache_dir.display().to_string()),
+            );
+            cache.insert(
+                "metadata_cache_dir".to_string(),
+                serde_json::json!(metadata_cache_dir.display().to_string()),
+            );
+            root.insert("cache".to_string(), serde_json::Value::Object(cache));
+
+            let mut config = serde_json::Map::new();
+            config.insert(
+                "config_file".to_string(),
+                match &config_source {
+                    Some((path, source)) => {
+                        serde_json::json!({
+                            "path": path.display().to_string(),
+                            "source": source.to_string()
+                        })
+                    }
+                    None => serde_json::json!({
+                        "path": null,
+                        "source": "default (none found)"
+                    }),
+                },
+            );
+            config.insert("load_error".to_string(), serde_json::json!(config_error));
+            config.insert(
+                "suppression_count".to_string(),
+                serde_json::json!(suppressions.rules().len()),
+            );
+            root.insert(
+                "configuration".to_string(),
+                serde_json::Value::Object(config),
+            );
+
+            serde_json::to_string_pretty(&root)?
+        }
+        DoctorFormat::Text => render_doctor_text(
+            version,
+            &enabled_features,
+            &remote_cache_dir,
+            &oci_cache_dir,
+            &metadata_cache_dir,
+            &config_source,
+            config_error.as_deref(),
+            &suppressions,
+        ),
+    };
+
+    write_doctor_output(args.output.as_deref(), &content)
+}
+
+/// Render the doctor diagnostic report as human-readable text.
+fn render_doctor_text(
+    version: &str,
+    enabled_features: &[&str],
+    remote_cache_dir: &Path,
+    oci_cache_dir: &Path,
+    metadata_cache_dir: &Path,
+    config_source: &Option<(PathBuf, ConfigSource)>,
+    config_error: Option<&str>,
+    suppressions: &SuppressionConfig,
+) -> String {
+    let mut out = String::new();
+
+    out.push_str(&format!(
+        "{}\n",
+        "Soroban Upgrade Safeguard - Environment Report".bold()
+    ));
+    out.push('\n');
+
+    out.push_str(&format!("{}\n", "Version:".bold()));
+    out.push_str(&format!("  {}\n", version));
+    out.push('\n');
+
+    out.push_str(&format!("{}\n", "Enabled Features:".bold()));
+    if enabled_features.is_empty() {
+        out.push_str("  (none)\n");
+    } else {
+        for feature in enabled_features {
+            out.push_str(&format!("  {}\n", feature));
+        }
+    }
+    out.push('\n');
+
+    out.push_str(&format!("{}\n", "Cache Directories:".bold()));
+    out.push_str(&format!(
+        "  Remote (https://): {}\n",
+        remote_cache_dir.display()
+    ));
+    out.push_str(&format!(
+        "  OCI (oci://):      {}\n",
+        oci_cache_dir.display()
+    ));
+    out.push_str(&format!(
+        "  Metadata:          {}\n",
+        metadata_cache_dir.display()
+    ));
+    out.push('\n');
+
+    out.push_str(&format!("{}\n", "Configuration:".bold()));
+    match config_source {
+        Some((path, source)) => {
+            out.push_str(&format!("  Config file: {}\n", path.display()));
+            out.push_str(&format!("  Source:      {}\n", source));
+        }
+        None => {
+            out.push_str("  Config file: (none found)\n");
+            out.push_str("  Source:      default\n");
+        }
+    }
+    if let Some(error) = config_error {
+        out.push_str(&format!("  Load error:  {}\n", error));
+    }
+    out.push_str(&format!(
+        "  Suppressions loaded: {}\n",
+        suppressions.rules().len()
+    ));
+    out.push('\n');
+
+    out.push_str(&format!("{}\n", "Environment:".bold()));
+    if let Some(val) = std::env::var_os(CONFIG_PATH_ENV_VAR) {
+        out.push_str(&format!(
+            "  {}={}\n",
+            CONFIG_PATH_ENV_VAR,
+            val.to_string_lossy()
+        ));
+    } else {
+        out.push_str(&format!("  {} (not set)\n", CONFIG_PATH_ENV_VAR));
+    }
+    if let Some(val) = std::env::var_os(remote::CACHE_DIR_ENV_VAR) {
+        out.push_str(&format!(
+            "  {}={}\n",
+            remote::CACHE_DIR_ENV_VAR,
+            val.to_string_lossy()
+        ));
+    }
+    if let Some(val) = std::env::var_os(oci::CACHE_DIR_ENV_VAR) {
+        out.push_str(&format!(
+            "  {}={}\n",
+            oci::CACHE_DIR_ENV_VAR,
+            val.to_string_lossy()
+        ));
+    }
+    if let Some(val) = std::env::var_os("NO_COLOR") {
+        out.push_str(&format!("  NO_COLOR={}\n", val.to_string_lossy()));
+    }
+
+    out
+}
+
+/// Print `content` to stdout, or write it atomically to `path` when given.
+/// Uses the same atomic-write (temp file + rename) pattern as extract,
+/// categories, and preflight output. `content` gets exactly one trailing newline.
+fn write_doctor_output(path: Option<&Path>, content: &str) -> Result<()> {
+    match path {
+        Some(path) => {
+            let mut formatted = content.trim_end_matches('\n').to_string();
+            formatted.push('\n');
+            write_atomically(path, formatted.as_bytes())
+                .with_context(|| format!("Failed to write output file '{}'.", path.display()))
+        }
+        None => {
+            print!("{content}");
+            Ok(())
+        }
+    }
+}
+
+fn markdown_table_cell(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\\', "&#92;")
+        .replace('`', "&#96;")
+        .replace('|', "&#124;")
+        .replace('\r', "")
+        .replace('\n', "<br>")
+}
+
+fn render_categories_markdown(categories: &[category::FindingCategory]) -> String {
+    let mut out = String::from(
+        "| Category | Severity | Trigger | Remediation |\n\
+         | --- | --- | --- | --- |\n",
+    );
+    for cat in categories {
+        out.push_str(&format!(
+            "| {} | {:?} | {} | {} |\n",
+            markdown_table_cell(cat.as_str()),
+            cat.severity(),
+            markdown_table_cell(cat.trigger_description()),
+            markdown_table_cell(cat.remediation()),
+        ));
+    }
+    out
+}
+
+fn render_categories_text(categories: &[category::FindingCategory]) -> String {
+    const WIDTH: usize = 80;
+    let mut out = String::new();
+    out.push_str("Finding categories, with their default severity, what triggers them, and\n");
+    out.push_str("remediation guidance. See docs/finding-categories.md for the full reference.\n");
+
+    let mut first = true;
+    for cat in categories {
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        out.push_str(&format!(
+            "{}\n{}\n{}\n{}\n",
+            cat.as_str(),
+            severity_colored(cat.severity()),
+            wrap_with_prefix("  Trigger:    ", cat.trigger_description(), WIDTH),
+            wrap_with_prefix("  Remediation: ", cat.remediation(), WIDTH),
+        ));
+    }
+
+    out.push('\n');
+    out.push_str(
+        "Note: the `Environment` category may be promoted to `Warning` at runtime when the\n",
+    );
+    out.push_str("protocol version changes; `Info` is its default severity.\n");
+    out
+}
+
+/// Render the preflight report as human-readable text.
+fn render_preflight_text(report: &preflight::PreflightReport) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Preflight check: {}\n", report.rpc_endpoint));
+    out.push('\n');
+
+    let transport_detail = if report.transport.success {
+        Some(format!(
+            "HTTP {}",
+            report.transport.status_code.unwrap_or_default()
+        ))
+    } else {
+        report.transport.error.clone()
+    };
+    append_preflight_line(
+        &mut out,
+        "Transport",
+        report.transport.success,
+        transport_detail,
+    );
+
+    let protocol_detail = if report.protocol.success {
+        Some(format!(
+            "jsonrpc {}, id matches",
+            report.protocol.jsonrpc_version.as_deref().unwrap_or("?")
+        ))
+    } else {
+        report.protocol.error.clone()
+    };
+    append_preflight_line(
+        &mut out,
+        "Protocol",
+        report.protocol.success,
+        protocol_detail,
+    );
+
+    let capability_detail = if report.capability.success {
+        Some(match report.capability.latest_ledger {
+            Some(seq) => format!(
+                "{} succeeded (latestLedger {seq})",
+                report.capability.method
+            ),
+            None => format!("{} succeeded", report.capability.method),
+        })
+    } else {
+        report.capability.error.clone()
+    };
+    append_preflight_line(
+        &mut out,
+        "Capability",
+        report.capability.success,
+        capability_detail,
+    );
+
+    out.push('\n');
+    out.push_str(&format!(
+        "Overall: {}\n",
+        if report.all_passed() {
+            "PASS".green().bold()
+        } else {
+            "FAIL".red().bold()
+        }
+    ));
+    out.push('\n');
+    out.push_str(
+        "Note: a passing preflight check confirms endpoint connectivity only. \
+         It does not verify that any specific contract or network is compatible.\n",
+    );
+    out
+}
+
+/// Append a preflight check line to a string buffer.
+fn append_preflight_line(out: &mut String, label: &str, success: bool, detail: Option<String>) {
     let status = if success {
         "PASS".green()
     } else {
         "FAIL".red()
     };
     match detail {
-        Some(detail) => println!("{label:<12}{status}  {detail}"),
-        None => println!("{label:<12}{status}"),
+        Some(detail) => out.push_str(&format!("{label:<12}{status}  {detail}\n")),
+        None => out.push_str(&format!("{label:<12}{status}\n")),
+    }
+}
+
+/// Print `content` to stdout, or write it atomically to `path` when given.
+/// Uses the same atomic-write (temp file + rename) pattern as extract and
+/// categories output. `content` gets exactly one trailing newline.
+fn write_preflight_output(path: Option<&Path>, content: &str) -> Result<()> {
+    match path {
+        Some(path) => {
+            let mut formatted = content.trim_end_matches('\n').to_string();
+            formatted.push('\n');
+            write_atomically(path, formatted.as_bytes())
+                .with_context(|| format!("Failed to write output file '{}'.", path.display()))
+        }
+        None => {
+            print!("{content}");
+            std::io::stdout().flush().ok();
+            Ok(())
+        }
+    }
+}
+
+/// Print the JSON Schema describing the JSON-report document the running
+/// binary produces. Pure function over the in-process `RenderableReport`
+/// type, so the output is exactly the schema this build validates
+/// against — a tool that wants to validate a report it just produced can
+/// fetch the schema from the same binary that produced it.
+fn run_print_schema(args: &PrintSchemaArgs) -> Result<()> {
+    let target = if args.config {
+        SchemaTarget::Config
+    } else if args.manifest {
+        SchemaTarget::Manifest
+    } else {
+        args.target
+    };
+
+    let format = if args.completion {
+        PrintSchemaFormat::Completion
+    } else if args.markdown {
+        PrintSchemaFormat::Markdown
+    } else {
+        args.format
+    };
+
+    let content = match (target, format) {
+        (SchemaTarget::Report, PrintSchemaFormat::Markdown) => {
+            "# Report JSON Schema\n\nRun `print-schema` without flags to print the Draft-07 JSON Schema.\n".to_string()
+        }
+        (SchemaTarget::Report, _) => {
+            let value = report_schema::report_schema_value();
+            if args.compact {
+                serde_json::to_string(&value).context("serializing report schema to JSON")?
+            } else {
+                serde_json::to_string_pretty(&value)
+                    .context("serializing report schema to JSON")?
+            }
+        }
+        (SchemaTarget::Config, PrintSchemaFormat::JsonSchema) => {
+            let schema = soroban_upgrade_safeguard::config_schema::config_schema();
+            if args.compact {
+                serde_json::to_string(&schema).context("serializing config schema to JSON")?
+            } else {
+                serde_json::to_string_pretty(&schema)
+                    .context("serializing config schema to JSON")?
+            }
+        }
+        (SchemaTarget::Config, PrintSchemaFormat::Completion) => {
+            let catalog = soroban_upgrade_safeguard::config_schema::generate_config_completion();
+            if args.compact {
+                serde_json::to_string(&catalog)
+                    .context("serializing config completion to JSON")?
+            } else {
+                serde_json::to_string_pretty(&catalog)
+                    .context("serializing config completion to JSON")?
+            }
+        }
+        (SchemaTarget::Config, PrintSchemaFormat::Markdown) => {
+            soroban_upgrade_safeguard::config_schema::generate_config_markdown()
+        }
+        (SchemaTarget::Manifest, PrintSchemaFormat::JsonSchema) => {
+            let schema = soroban_upgrade_safeguard::config_schema::manifest_schema();
+            if args.compact {
+                serde_json::to_string(&schema).context("serializing manifest schema to JSON")?
+            } else {
+                serde_json::to_string_pretty(&schema)
+                    .context("serializing manifest schema to JSON")?
+            }
+        }
+        (SchemaTarget::Manifest, PrintSchemaFormat::Completion) => {
+            let catalog = soroban_upgrade_safeguard::config_schema::generate_manifest_completion();
+            if args.compact {
+                serde_json::to_string(&catalog)
+                    .context("serializing manifest completion to JSON")?
+            } else {
+                serde_json::to_string_pretty(&catalog)
+                    .context("serializing manifest completion to JSON")?
+            }
+        }
+        (SchemaTarget::Manifest, PrintSchemaFormat::Markdown) => {
+            soroban_upgrade_safeguard::config_schema::generate_manifest_markdown()
+        }
+        (SchemaTarget::ImpactGraph, PrintSchemaFormat::Markdown) => {
+            "# Impact Graph JSON Schema\n\nRun `print-schema --target impact-graph` without `--markdown` to print the Draft-07 JSON Schema. See docs/impact-graph.md for the node/edge kind reference.\n".to_string()
+        }
+        (SchemaTarget::ImpactGraph, _) => {
+            let value = report_schema::impact_graph_schema_value();
+            if args.compact {
+                serde_json::to_string(&value)
+                    .context("serializing impact graph schema to JSON")?
+            } else {
+                serde_json::to_string_pretty(&value)
+                    .context("serializing impact graph schema to JSON")?
+            }
+        }
+    };
+
+    write_print_schema_output(args.output.as_deref(), &content)
+}
+
+/// Write print-schema output to stdout or to a file atomically.
+fn write_print_schema_output(path: Option<&Path>, content: &str) -> Result<()> {
+    match path {
+        Some(path) => {
+            let mut formatted = content.trim_end_matches('\n').to_string();
+            formatted.push('\n');
+            write_atomically(path, formatted.as_bytes())
+                .with_context(|| format!("Failed to write output file '{}'.", path.display()))
+        }
+        None => {
+            print!("{content}");
+            if !content.ends_with('\n') {
+                println!();
+            }
+            Ok(())
+        }
     }
 }
 
 /// Extract one build and write its exported interface as a lockfile.
 fn run_lockfile(args: &LockfileArgs) -> Result<()> {
+    // Check if the output path is a directory first, regardless of --force.
+    if args.output.is_dir() {
+        anyhow::bail!(
+            "Output path '{}' is a directory. Provide a file path instead, for example '{}'.",
+            args.output.display(),
+            args.output.join("interface.lock.json").display()
+        );
+    }
+
     if args.output.exists() && !args.force {
         anyhow::bail!(
             "{} already exists. Use --force to update it.",
@@ -1347,7 +2497,7 @@ fn run_lint(args: &LintArgs) -> Result<()> {
                 .expect("clap requires --rpc-url alongside --contract-id");
             loader::fetch_wasm_from_rpc_with_config(
                 contract_id,
-                &rpc_config(rpc_url, &args.rpc_headers)?,
+                &rpc_config(rpc_url, &args.rpc_headers, false)?,
             )?
         }
         (Some(_), Some(_)) => anyhow::bail!(
@@ -1407,12 +2557,24 @@ fn run_lint(args: &LintArgs) -> Result<()> {
 
     let report = lint::lint(&metadata.spec, &options);
 
-    match args.format {
-        LintOutputFormat::Text => print!("{}", report.render_text(args.explain)),
-        LintOutputFormat::Markdown => print!("{}", report.render_markdown(args.explain)),
+    let output_text = match args.format {
+        LintOutputFormat::Text => report.render_text(args.explain),
+        LintOutputFormat::Markdown => report.render_markdown(args.explain),
+        LintOutputFormat::GithubActions => report.render_github_actions(args.explain),
         LintOutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&report.to_json_value())?)
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&report.to_json_value())?
+            )
         }
+    };
+
+    match &args.output {
+        Some(path) => {
+            write_atomically(path, output_text.as_bytes())
+                .with_context(|| format!("Failed to write lint output to '{}'.", path.display()))?;
+        }
+        None => print!("{output_text}"),
     }
 
     if report.has_errors() {
@@ -1531,7 +2693,18 @@ fn run_attest(args: &AttestArgs) -> Result<()> {
 }
 
 fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
-    let envelope: DsseEnvelope = serde_json::from_slice(&std::fs::read(&args.attestation)?)?;
+    let attestation_bytes = std::fs::read(&args.attestation).with_context(|| {
+        format!(
+            "Failed to read attestation '{}'.",
+            args.attestation.display()
+        )
+    })?;
+    let envelope: DsseEnvelope = serde_json::from_slice(&attestation_bytes).with_context(|| {
+        format!(
+            "Failed to parse attestation '{}' as JSON.",
+            args.attestation.display()
+        )
+    })?;
     let statement = match envelope.statement() {
         Ok(statement) => statement,
         Err(error) => {
@@ -1544,7 +2717,7 @@ fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
                     message: error.to_string(),
                 }],
             });
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            println!("{}", render_attestation_verification(&result, args.format)?);
             std::io::stdout().flush().ok();
             std::process::exit(1);
         }
@@ -1604,12 +2777,76 @@ fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
         "signer_identities": signatures.signer_identities,
         "failures": failures,
     });
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    println!("{}", render_attestation_verification(&result, args.format)?);
     if result["verified"] != true {
         std::io::stdout().flush().ok();
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn render_attestation_verification(
+    result: &serde_json::Value,
+    format: AttestationOutputFormat,
+) -> Result<String> {
+    if format == AttestationOutputFormat::Json {
+        return Ok(serde_json::to_string_pretty(result)?);
+    }
+
+    let verified = result["verified"] == true;
+    let identities = result["signer_identities"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let mut lines = vec![
+        format!("Verified: {}", if verified { "yes" } else { "no" }),
+        format!(
+            "Signer identities: {}",
+            if identities.is_empty() {
+                "none"
+            } else {
+                &identities
+            }
+        ),
+    ];
+    if let Some(failures) = result["failures"].as_array() {
+        for failure in failures {
+            lines.push(format!(
+                "Failure: {}",
+                failure["message"].as_str().unwrap_or("unknown failure")
+            ));
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod attestation_format_tests {
+    use super::*;
+
+    #[test]
+    fn renders_json_and_text() {
+        let result = serde_json::json!({
+            "verified": false,
+            "signer_identities": ["build-key"],
+            "failures": [{"message": "signature mismatch"}],
+        });
+        let json = render_attestation_verification(&result, AttestationOutputFormat::Json).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            result
+        );
+        let text = render_attestation_verification(&result, AttestationOutputFormat::Text).unwrap();
+        assert!(text.contains("Verified: no"));
+        assert!(text.contains("Signer identities: build-key"));
+        assert!(text.contains("Failure: signature mismatch"));
+    }
 }
 
 /// Run the streaming JSONL batch protocol.
@@ -1685,30 +2922,46 @@ fn run_render(args: &RenderArgs) -> Result<()> {
         )
     })?;
 
-    match args.format {
+    let rendered = match args.format {
         RenderFormat::Text => {
             let width = resolve_text_width(args.width, std::io::stdout().is_terminal());
-            let text = report.to_text_with_width(args.explain, width);
-            println!(
-                "{}",
-                if args.plain {
-                    report::plainify(&text)
-                } else {
-                    text
-                }
+            let text = report.to_text_with_min_severity(
+                args.explain,
+                width,
+                args.min_severity.as_severity(),
             );
+            let text = if args.plain {
+                report::plainify(&text)
+            } else {
+                text
+            };
+            format!("{text}\n")
         }
         RenderFormat::Markdown => {
-            let markdown = report.to_markdown();
-            println!(
-                "{}",
-                if args.plain {
-                    report::plainify(&markdown)
-                } else {
-                    markdown
-                }
-            );
+            let markdown = report.to_markdown_with_min_severity(args.min_severity.as_severity());
+            let markdown = if args.plain {
+                report::plainify(&markdown)
+            } else {
+                markdown
+            };
+            format!("{markdown}\n")
         }
+        RenderFormat::GithubActions => {
+            // Disable color: annotations must not contain ANSI escape codes.
+            colored::control::set_override(false);
+            // The trailing newline matches what the live comparison prints,
+            // so a re-rendered report is byte-identical to the original run.
+            format!(
+                "{}\n",
+                report.to_github_actions_with_min_severity(args.min_severity.as_severity())
+            )
+        }
+    };
+
+    match &args.output {
+        Some(path) => write_atomically(path, rendered.as_bytes())
+            .with_context(|| format!("Failed to write rendered report to '{}'", path.display()))?,
+        None => print!("{rendered}"),
     }
 
     if !report.is_safe {
@@ -1774,7 +3027,7 @@ fn run_init(args: &InitArgs) -> Result<()> {
     use std::fs;
     use std::io::Write;
 
-    let config_path = Path::new(DEFAULT_CONFIG_FILE);
+    let config_path = &args.output;
 
     // Check if config already exists
     if config_path.exists() && !args.force {
@@ -1795,7 +3048,7 @@ fn run_init(args: &InitArgs) -> Result<()> {
             (
                 loader::fetch_wasm_from_rpc_with_config(
                     contract_id,
-                    &rpc_config(rpc_url, &args.rpc_headers)?,
+                    &rpc_config(rpc_url, &args.rpc_headers, false)?,
                 ),
                 loader::load_wasm(new),
             )
@@ -1922,8 +3175,91 @@ fn run_init(args: &InitArgs) -> Result<()> {
     Ok(())
 }
 
+/// Minimize a failing fuzz input and optionally promote it to a fixture.
+fn run_fuzz_minimize(args: &FuzzMinimizeArgs) -> Result<()> {
+    use soroban_upgrade_safeguard::fuzz_minimize::{minimize, promote, InputKind, MinimizeConfig};
+
+    let kind = match args.kind.as_str() {
+        "parser" => InputKind::Parser,
+        "decoder" => InputKind::Decoder,
+        "mapper" => InputKind::Mapper,
+        "report" => InputKind::Report,
+        other => anyhow::bail!(
+            "Unknown input kind '{}'. Supported: parser, decoder, mapper, report.",
+            other
+        ),
+    };
+
+    let input = std::fs::read(&args.input)
+        .with_context(|| format!("Failed to read input file '{}'", args.input.display()))?;
+
+    let config = MinimizeConfig {
+        input_kind: kind,
+        max_iterations: args.max_iterations,
+        verbose_history: args.verbose_history,
+        ..MinimizeConfig::default()
+    };
+
+    eprintln!(
+        "Minimizing {} byte {} input (max {} iterations)…",
+        input.len(),
+        kind,
+        args.max_iterations
+    );
+
+    let result = minimize(&input, &config).with_context(|| {
+        format!(
+            "Minimization failed for '{}'. The input may not trigger a failure.",
+            args.input.display()
+        )
+    })?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
+
+    eprintln!(
+        "✅ Minimized {} → {} bytes in {} steps ({} accepted).",
+        result.original_len, result.minimized_len, result.steps_attempted, result.steps_accepted
+    );
+    eprintln!("   Failure class : {}", result.failure_class);
+    eprintln!("   SHA-256 digest: {}", result.digest);
+
+    if args.no_promote {
+        use std::io::Write;
+        std::io::stdout()
+            .write_all(&result.minimized_bytes)
+            .context("Failed to write minimized bytes to stdout")?;
+        return Ok(());
+    }
+
+    let fixture = promote(result, &args.output_dir).with_context(|| {
+        format!(
+            "Failed to promote fixture to '{}'",
+            args.output_dir.display()
+        )
+    })?;
+
+    eprintln!("📦 Promoted fixture: {}", fixture.name);
+    for note in &fixture.validation_notes {
+        eprintln!("   {note}");
+    }
+    eprintln!("   {}/{}.bin", args.output_dir.display(), fixture.name);
+    eprintln!(
+        "   {}/{}.meta.json",
+        args.output_dir.display(),
+        fixture.name
+    );
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
+    let metrics = soroban_upgrade_safeguard::metrics::MetricsRegistry::new();
+    let run_start = std::time::Instant::now();
     let args = Args::parse();
+    let log = DiagnosticLog::new(&args, false);
 
     if args.clear_remote_cache {
         let dir = args
@@ -1932,9 +3268,10 @@ fn main() -> Result<()> {
             .unwrap_or_else(remote::default_cache_dir);
         remote::clear_cache(&dir)
             .with_context(|| format!("Failed to clear remote cache at '{}'", dir.display()))?;
-        if !args.quiet {
-            println!("Cleared remote artifact cache at '{}'", dir.display());
-        }
+        log.progress(format_args!(
+            "Cleared remote artifact cache at '{}'",
+            dir.display()
+        ));
         return Ok(());
     }
 
@@ -1945,13 +3282,47 @@ fn main() -> Result<()> {
             .unwrap_or_else(oci::default_cache_dir);
         oci::clear_cache(&dir)
             .with_context(|| format!("Failed to clear OCI cache at '{}'", dir.display()))?;
-        if !args.quiet {
-            println!("Cleared OCI artifact cache at '{}'", dir.display());
-        }
+        log.progress(format_args!(
+            "Cleared OCI artifact cache at '{}'",
+            dir.display()
+        ));
+        return Ok(());
+    }
+
+    if args.clear_metadata_cache {
+        let dir = args
+            .metadata_cache_dir
+            .clone()
+            .unwrap_or_else(soroban_upgrade_safeguard::metadata_cache::default_cache_dir);
+        soroban_upgrade_safeguard::metadata_cache::clear_cache(&dir)
+            .with_context(|| format!("Failed to clear metadata cache at '{}'", dir.display()))?;
+        log.progress(format_args!(
+            "Cleared parsed-metadata cache at '{}'",
+            dir.display()
+        ));
+        return Ok(());
+    }
+
+    if args.inspect_metadata_cache {
+        let dir = args
+            .metadata_cache_dir
+            .clone()
+            .unwrap_or_else(soroban_upgrade_safeguard::metadata_cache::default_cache_dir);
+        soroban_upgrade_safeguard::metadata_cache::print_cache_inspect(&dir);
         return Ok(());
     }
 
     match &args.command {
+        Some(Command::Completions { shell }) => {
+            let mut command = Args::command();
+            clap_complete::generate(
+                *shell,
+                &mut command,
+                "soroban-upgrade-safeguard",
+                &mut std::io::stdout(),
+            );
+            return Ok(());
+        }
         Some(Command::Extract(extract_args)) => return run_extract(extract_args),
         Some(Command::Lockfile(lockfile_args)) => return run_lockfile(lockfile_args),
         Some(Command::Render(render_args)) => return run_render(render_args),
@@ -1964,6 +3335,12 @@ fn main() -> Result<()> {
         Some(Command::Stream(stream_args)) => return run_stream(stream_args),
         Some(Command::Lint(lint_args)) => return run_lint(lint_args),
         Some(Command::Preflight(preflight_args)) => return run_preflight(preflight_args),
+        Some(Command::FuzzMinimize(fuzz_args)) => return run_fuzz_minimize(fuzz_args),
+        Some(Command::PrintSchema(print_schema_args)) => {
+            return run_print_schema(print_schema_args)
+        }
+        Some(Command::Categories(categories_args)) => return run_categories(categories_args),
+        Some(Command::Doctor(doctor_args)) => return run_doctor(doctor_args),
         None => {}
     }
 
@@ -2030,6 +3407,17 @@ fn main() -> Result<()> {
         anyhow::bail!("Cannot use empirical validation with --interface-lockfile");
     }
 
+    // --exclude narrows a directory sweep. Outside directory mode there is no
+    // sweep to narrow, and silently ignoring the flag would leave a user
+    // believing vendored artifacts had been skipped when they were compared.
+    if !args.exclude.is_empty() && !is_directory_mode(&args) {
+        anyhow::bail!(
+            "Cannot use --exclude outside directory mode. It excludes artifacts from a \
+             --old-dir/--new-dir scan; a --manifest already names both sides of every pair, \
+             and a single-pair comparison takes its two WASM paths positionally."
+        );
+    }
+
     // Manifest-resolution mode: show how the composition resolved and exit,
     // before any WASM is required. Makes a manifest reviewable on its own.
     if args.explain_manifest {
@@ -2093,16 +3481,8 @@ fn main() -> Result<()> {
             )
     });
     let clean_stdout = stdout_is_clean || has_non_stdout;
-    let progress = |line: String| {
-        if args.quiet {
-            return;
-        }
-        if clean_stdout {
-            eprintln!("{line}");
-        } else {
-            println!("{line}");
-        }
-    };
+    let log = DiagnosticLog::new(&args, clean_stdout);
+    let progress = |line: String| log.progress(line);
 
     let (suppressions, config_source) = load_suppressions(
         args.no_config,
@@ -2119,19 +3499,54 @@ fn main() -> Result<()> {
     if is_batch {
         // Batch mode resolves its suppression config per pair; the eager load
         // above still runs so an unreadable --config fails before any analysis.
-        return run_batch(&args, &outputs, &progress);
+        let result = run_batch(&args, &outputs, &progress);
+        metrics.duration_total_seconds.record(run_start.elapsed());
+        if let Some(ref path) = args.metrics_file {
+            if let Err(e) = soroban_upgrade_safeguard::metrics::write_metrics_file(&metrics, path) {
+                eprintln!("Warning: failed to write metrics file: {e}");
+            }
+        }
+        return exit_if_unsafe(result);
     }
 
-    run_single(&args, &outputs, &suppressions, &progress)
+    let result = run_single(&args, &outputs, &suppressions, &progress);
+    metrics.record_verdict(match &result {
+        Ok(true) => soroban_upgrade_safeguard::metrics::VerdictLabel::Safe,
+        Ok(false) => soroban_upgrade_safeguard::metrics::VerdictLabel::Unsafe,
+        Err(_) => soroban_upgrade_safeguard::metrics::VerdictLabel::Error,
+    });
+    metrics.duration_total_seconds.record(run_start.elapsed());
+    if let Some(ref path) = args.metrics_file {
+        if let Err(e) = soroban_upgrade_safeguard::metrics::write_metrics_file(&metrics, path) {
+            eprintln!("Warning: failed to write metrics file: {e}");
+        }
+    }
+    exit_if_unsafe(result)
+}
+
+/// Turn an unsafe verdict into exit code 1.
+///
+/// Kept out of `run_single`/`run_batch` so that anything that must survive an
+/// unsafe run (the `--metrics-file` snapshot, which is most useful on exactly
+/// those runs) is written before the process exits.
+fn exit_if_unsafe(result: Result<bool>) -> Result<()> {
+    if !result? {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 /// The result of resolving a batch mode run out of its inputs: the composed
-/// manifest (if any), the pairs, and the directory-mode gap/new-only lists.
+/// manifest (if any), the pairs, and the directory-mode gap/new-only/skipped
+/// lists.
 struct BuiltBatch {
     resolved_manifest: Option<manifest::ResolvedManifest>,
     pairs: Vec<BatchPair>,
     gaps: Vec<GapContract>,
     new_only: Vec<NewOnlyContract>,
+    /// Directory-mode artifacts held back by `--exclude`. Empty in manifest
+    /// mode, which names both sides of every pair and has nothing to exclude.
+    skipped: Vec<SkippedFile>,
 }
 
 /// Resolve a batch run into its ready-to-execute form, shared by the single-pass
@@ -2140,10 +3555,11 @@ struct BuiltBatch {
 /// Manifest mode resolves includes, defaults and per-pair overrides up front —
 /// including duplicate-identity detection, so a collision fails before any pair
 /// runs rather than mid-loop with earlier reports already on disk. Directory
-/// mode sweeps both directories for shared-name `.wasm` artifacts.
+/// mode sweeps both trees for shared relative-path `.wasm` artifacts, leaving out
+/// anything an `--exclude` pattern matches.
 fn build_batch(args: &Args) -> Result<BuiltBatch> {
     let cli = cli_settings(args)?;
-    let (resolved_manifest, pairs, gaps, new_only) = if let Some(manifest_path) = &args.manifest {
+    let (resolved_manifest, scanned) = if let Some(manifest_path) = &args.manifest {
         let resolved = manifest::resolve(manifest_path, &cli)?;
         let pairs: Vec<BatchPair> = resolved
             .pairs
@@ -2153,48 +3569,67 @@ fn build_batch(args: &Args) -> Result<BuiltBatch> {
             .collect();
         // A manifest names both sides of every pair explicitly, so there is no
         // directory to sweep and no such thing as an unmatched artifact.
-        (Some(resolved), pairs, Vec::new(), Vec::new())
+        (
+            Some(resolved),
+            ScannedArtifacts {
+                pairs,
+                gaps: Vec::new(),
+                new_only: Vec::new(),
+                skipped: Vec::new(),
+            },
+        )
     } else {
         let settings = manifest::cli_only_settings(&cli);
-        let (pairs, gaps, new_only) = scan_directories(
+        let scanned = scan_directories(
             args.old_dir.as_ref().unwrap(),
             args.new_dir.as_ref().unwrap(),
             &settings,
+            &args.exclude,
         )?;
-        (None, pairs, gaps, new_only)
+        (None, scanned)
     };
     Ok(BuiltBatch {
         resolved_manifest,
-        pairs,
-        gaps,
-        new_only,
+        pairs: scanned.pairs,
+        gaps: scanned.gaps,
+        new_only: scanned.new_only,
+        skipped: scanned.skipped,
     })
 }
 
-fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> Result<()> {
+/// Run a batch comparison. Returns `Ok(true)` when every pair is safe, and
+/// `Ok(false)` for an unsafe verdict, which the caller turns into exit code 1
+/// *after* it has written `--metrics-file`; exiting here would skip that write.
+fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> Result<bool> {
+    if args.watch && args.policy_bundle.is_some() {
+        anyhow::bail!("--policy-bundle cannot be combined with --watch in batch mode");
+    }
     // Watch mode for a whole batch re-runs only the pairs whose inputs
     // changed, rather than recomputing every pair on every file event.
     if args.watch {
         #[cfg(feature = "watch")]
         {
-            return crate::watch::run_batch_watch(args, outputs, progress);
+            return crate::watch::run_batch_watch(args, outputs, progress).map(|()| true);
         }
         #[cfg(not(feature = "watch"))]
         {
             eprintln!("Warning: --watch is not available in this build. Rebuild with the 'watch' feature enabled.");
-            return Ok(());
+            return Ok(true);
         }
     }
 
     // Manifest mode resolves includes, defaults and per-pair overrides up front —
     // including duplicate-identity detection, so a collision fails before any
     // pair runs rather than mid-loop with earlier reports already on disk.
+    // Reject an unverified bundle before any batch WASM is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
     let built = build_batch(args)?;
-    let (resolved_manifest, pairs, mut gaps, new_only) = (
+    let (resolved_manifest, pairs, mut gaps, new_only, skipped) = (
         built.resolved_manifest,
         built.pairs,
         built.gaps,
         built.new_only,
+        built.skipped,
     );
 
     if args.per_contract_output_dir.is_some() {
@@ -2253,6 +3688,35 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
         pairs.len(),
         gaps.len()
     ));
+
+    // Artifacts an --exclude pattern held back are named here. They are
+    // reported rather than dropped because a file the user chose to skip and a
+    // file the scan never saw are otherwise indistinguishable: one is a
+    // decision someone made, the other is a hole in what was checked. The line
+    // goes through `progress` rather than straight to stderr, unlike the
+    // new-only warning below, because unlike that warning nobody is being
+    // told off — the user asked for exactly this, and the run still accounts
+    // for every artifact it found.
+    if !skipped.is_empty() {
+        progress(format!(
+            "⏭️  Skipped {} .wasm artifact(s) matching --exclude:",
+            skipped.len()
+        ));
+        for file in &skipped {
+            progress(format!(
+                "  - {} [{} dir] matched '{}' ({})",
+                file.relative_path,
+                file.side.label(),
+                file.pattern,
+                file.path.display()
+            ));
+        }
+        progress(
+            "  These were not compared and did not affect the verdict. Narrow or drop \
+             --exclude to include them."
+                .to_string(),
+        );
+    }
 
     // New-only artifacts are reported here and nowhere else. They are not
     // comparison pairs: they never enter `results`, never claim a slot in the
@@ -2316,6 +3780,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
                 args.plain,
                 width,
                 args.redact_paths,
+                args.min_severity.as_severity(),
             )?;
             write_report_file(
                 output_dir,
@@ -2354,6 +3819,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             args,
             &remote_config,
             &oci_config,
+            verified_bundle.as_ref(),
             &mut config_cache,
             progress,
         );
@@ -2380,13 +3846,10 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
         },
         outputs,
         progress,
+        args.min_severity.as_severity(),
     )?;
 
-    if !overall_safe {
-        std::process::exit(1);
-    }
-
-    Ok(())
+    Ok(overall_safe)
 }
 
 fn synthesize_error_report(
@@ -2482,12 +3945,18 @@ fn synthesize_error_report(
         migration_diagnostics: Vec::new(),
         empirical: false,
         empirical_findings: Vec::new(),
+        snapshot_integrity: None,
+        impact_graph: None,
+        lineage_versions_checked: None,
+        policy_bundle: None,
         budget_violations: Vec::new(),
         settings: report::ReportSettings::default(),
         complexity_old: None,
         complexity_new: None,
         complexity_delta: None,
         complexity_violations: Vec::new(),
+        manifest_verification: None,
+        manifest_gates_safety: false,
     }
 }
 
@@ -2597,16 +4066,19 @@ fn compare_batch_pair(
     args: &Args,
     remote_config: &RemoteFetchConfig,
     oci_config: &OciFetchConfig,
+    verified_bundle: Option<&VerifiedPolicyBundle>,
     config_cache: &mut HashMap<PathBuf, SuppressionConfig>,
     progress: &dyn Fn(String),
 ) -> BatchResult {
+    let log = DiagnosticLog::new(args, true);
+    let pair_start = std::time::Instant::now();
     let contract_name = pair.name.clone();
     let contract_id = pair.id.clone();
     let contract_labels = pair.labels.clone();
     let settings = &pair.settings;
     let explain = settings.explain.value;
 
-    let pair_suppressions = match suppressions_for_pair(settings, config_cache) {
+    let mut pair_suppressions = match suppressions_for_pair(settings, config_cache) {
         Ok(suppressions) => suppressions,
         Err(e) => {
             let enriched_error = format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
@@ -2635,6 +4107,13 @@ fn compare_batch_pair(
         }
     };
 
+    if let Some(verified) = verified_bundle {
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut pair_suppressions,
+            &verified.policy,
+        );
+    }
+
     let mut pair_error = None;
     let report = match (
         load_wasm_input(
@@ -2653,8 +4132,20 @@ fn compare_batch_pair(
         ),
     ) {
         (Ok(old_wasm), Ok(new_wasm)) => {
-            match load_pair_storage_schemas(pair).and_then(|storage_schemas| {
+            log.timing("Loading batch pair inputs", pair_start);
+            let compare_start = std::time::Instant::now();
+            let policy = settings.resource_policy();
+            let limited_inputs = parser::enforce_limits(&old_wasm.bytes, &policy)
+                .context("Old WASM exceeded the manifest resource limits")
+                .and_then(|_| {
+                    parser::enforce_limits(&new_wasm.bytes, &policy)
+                        .context("New WASM exceeded the manifest resource limits")
+                });
+            let comparison = limited_inputs.and_then(|_| load_pair_storage_schemas(pair));
+            match comparison.and_then(|storage_schemas| {
                 if let Some(storage_schemas) = storage_schemas.as_ref() {
+                    log.sections("Old", &old_wasm.bytes);
+                    log.sections("New", &new_wasm.bytes);
                     let mut report = soroban_upgrade_safeguard::compare_wasm_bytes_with_options(
                         &old_wasm.bytes,
                         &new_wasm.bytes,
@@ -2683,24 +4174,33 @@ fn compare_batch_pair(
                             no_timestamp: settings.no_timestamp.value,
                             empirical: args.empirical || args.empirical_file.is_some(),
                             empirical_file: args.empirical_file.as_deref(),
+                            impact_graph: args.impact_graph,
                             contract_id: None,
                             rpc_url: None,
                             rpc_headers: &args.rpc_headers,
                             rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
+                            allow_http_local: args.allow_http_local,
+                            policy_bundle: None,
                             lineage_store: None,
                             contract: Some(contract_name.as_str()),
                             complexity_budget: None,
                         },
                         progress,
+                        &log,
                     )
                 }
             }) {
                 Ok(report) => {
-                    report.with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
+                    log.timing("Batch pair comparison", compare_start);
+                    report
+                        .with_policy_bundle(
+                            verified_bundle.map(|verified| verified.provenance.clone()),
+                        )
+                        .with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
                 }
                 Err(e) => {
                     let enriched_error =
-                        format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
+                        format!("pair '{}' (id: {}): {e:#}", contract_name, contract_id);
                     pair_error = Some(enriched_error.clone());
                     progress(format!(
                         "  ⚠️  Comparison failed for '{}': {}",
@@ -2791,6 +4291,7 @@ fn render_pair_outputs(
         args.redact_paths,
         Some(&pair.name),
         progress,
+        args.min_severity.as_severity(),
     )?;
 
     if let Some(output_dir) = args.per_contract_output_dir.as_deref() {
@@ -2802,6 +4303,7 @@ fn render_pair_outputs(
             plain,
             width,
             args.redact_paths,
+            args.min_severity.as_severity(),
         )?;
         write_report_file(
             output_dir,
@@ -2914,12 +4416,18 @@ fn gap_to_result(gap: &GapContract, args: &Args) -> BatchResult {
         migration_diagnostics: Vec::new(),
         empirical: false,
         empirical_findings: Vec::new(),
+        snapshot_integrity: None,
+        impact_graph: None,
+        lineage_versions_checked: None,
+        policy_bundle: None,
         budget_violations: Vec::new(),
         settings: report::ReportSettings::default(),
         complexity_old: None,
         complexity_new: None,
         complexity_delta: None,
         complexity_violations: Vec::new(),
+        manifest_verification: None,
+        manifest_gates_safety: false,
     };
     BatchResult::Error {
         id: name.clone(),
@@ -2960,6 +4468,7 @@ fn render_gap_outputs(
         args.redact_paths,
         Some(gap_name),
         progress,
+        args.min_severity.as_severity(),
     )?;
 
     if let Some(output_dir) = args.per_contract_output_dir.as_deref() {
@@ -2971,6 +4480,7 @@ fn render_gap_outputs(
             args.plain,
             width,
             args.redact_paths,
+            args.min_severity.as_severity(),
         )?;
         write_report_file(
             output_dir,
@@ -3095,6 +4605,7 @@ fn render_batch_summary(
     summary: &BatchSummary<'_>,
     outputs: &[OutputSpec],
     progress: &dyn Fn(String),
+    min_severity: &diff::Severity,
 ) -> Result<()> {
     let BatchSummary {
         results,
@@ -3250,7 +4761,9 @@ fn render_batch_summary(
                     if let BatchResult::Error { error, .. } = result {
                         markdown.push_str(&format!("**Pair error**: `{}`\n\n", error));
                     }
-                    let report_md = report.generate_summary_markdown();
+                    let report_md = report
+                        .to_renderable()
+                        .to_markdown_with_min_severity(min_severity);
                     let stripped_md = report_md.replace("# Soroban Upgrade Safety Report\n\n", "");
                     markdown.push_str(&stripped_md);
                     markdown.push_str("\n---\n\n");
@@ -3292,17 +4805,30 @@ fn render_batch_summary(
                     } else {
                         format!(" {{{}}}", format_labels(result.labels(), ""))
                     };
+
+                    let critical_count = report.critical_count();
+                    let warning_count = report.warning_count();
+                    let info_count = report.info_count();
+                    let migrated_count = report.migrated_count();
+                    let suppressed_count = report.suppressed_count();
+                    let warning_word = if warning_count == 1 {
+                        "warning"
+                    } else {
+                        "warnings"
+                    };
+
                     text.push_str(&format!(
-                        "  - {}: {} [{}; {}] ({} critical, {} warnings, {} info, {} migrated, {} suppressed){}\n",
+                        "  - {}: {} [{}; {}] ({} critical, {} {}, {} info, {} migrated, {} suppressed){}\n",
                         result.name().bold(),
                         status_str,
                         report.scope().summary_line(),
                         result.coverage(),
-                        report.critical_count(),
-                        report.warning_count(),
-                        report.info_count(),
-                        report.migrated_count(),
-                        report.suppressed_count(),
+                        critical_count,
+                        warning_count,
+                        warning_word,
+                        info_count,
+                        migrated_count,
+                        suppressed_count,
                         labels_suffix
                     ));
                 }
@@ -3321,7 +4847,8 @@ fn render_batch_summary(
                     if let BatchResult::Error { error, .. } = result {
                         text.push_str(&format!("Pair error: {}\n", error));
                     }
-                    let detail = report.generate_summary_text_with_width(false, width);
+                    let detail =
+                        report.generate_summary_text_with_min_severity(false, width, min_severity);
                     text.push_str(&destyle_text(detail, ascii, plain));
                     text.push_str("========================================\n\n");
                 }
@@ -3332,7 +4859,11 @@ fn render_batch_summary(
                 for result in results {
                     output.push_str(&format!("::group::{}\n", result.name()));
                     let report = result.report();
-                    output.push_str(&render_github_actions(report));
+                    output.push_str(
+                        &report
+                            .to_renderable()
+                            .to_github_actions_with_min_severity(min_severity),
+                    );
                     output.push_str("::endgroup::\n");
                 }
                 output.push_str(&format!(
@@ -3361,12 +4892,81 @@ fn render_batch_summary(
     Ok(())
 }
 
+/// Load a `--policy-bundle` source's raw bytes: a local file path, or an
+/// `https://...#sha256=<hex>` reference, fetched the same way `https://`
+/// WASM inputs are — reusing `remote::fetch_verified`, including its
+/// digest verification and content-addressed offline cache. Returns the
+/// bytes and a label for provenance (the path as given, or the redacted
+/// final URL after following any redirect).
+fn load_policy_bundle_bytes(source: &str, args: &Args) -> Result<(Vec<u8>, String)> {
+    match RemoteRef::parse(source).map_err(|e| anyhow::anyhow!(e))? {
+        Some(remote_ref) => {
+            let config = remote_fetch_config(args);
+            let fetched = remote::fetch_verified(&remote_ref, &config)
+                .map_err(|e| anyhow::anyhow!(e))
+                .with_context(|| format!("Failed to fetch policy bundle '{source}'."))?;
+            Ok((fetched.bytes, fetched.final_url))
+        }
+        None => {
+            let bytes = std::fs::read(source)
+                .with_context(|| format!("Failed to read policy bundle '{source}'."))?;
+            Ok((bytes, source.to_string()))
+        }
+    }
+}
+
+struct VerifiedPolicyBundle {
+    policy: soroban_upgrade_safeguard::policy_bundle::PolicyBundle,
+    provenance: soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
+}
+
+fn verify_policy_bundle(
+    args: &Args,
+    progress: &dyn Fn(String),
+) -> Result<Option<VerifiedPolicyBundle>> {
+    let Some(source) = args.policy_bundle.as_deref() else {
+        return Ok(None);
+    };
+    let (bytes, source_label) = load_policy_bundle_bytes(source, args)?;
+    let mut trusted = std::collections::BTreeMap::new();
+    for item in &args.trusted_bundle_key {
+        let (id, path) = item.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
+        })?;
+        trusted.insert(
+            id.to_string(),
+            std::fs::read(path)
+                .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
+        );
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (policy, provenance) = soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
+        &bytes,
+        &trusted,
+        now,
+        &source_label,
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+    progress(format!(
+        "Policy bundle '{}' verified (signer(s): {})",
+        provenance.bundle_id,
+        provenance.signer_identities.join(", ")
+    ));
+    Ok(Some(VerifiedPolicyBundle { policy, provenance }))
+}
+
+/// Run a single-pair comparison. Returns `Ok(true)` for a safe verdict and
+/// `Ok(false)` for an unsafe one, which the caller turns into exit code 1
+/// *after* it has written `--metrics-file`; exiting here would skip that write.
 fn run_single(
     args: &Args,
     outputs: &[OutputSpec],
     suppressions: &SuppressionConfig,
     progress: &dyn Fn(String),
-) -> Result<()> {
+) -> Result<bool> {
     if args.interface_lockfile.is_some() && args.wasm_paths.len() != 1 {
         anyhow::bail!("--interface-lockfile requires exactly one candidate WASM path");
     }
@@ -3440,7 +5040,23 @@ fn run_single(
         .and_then(|stem| stem.to_str())
         .map(String::from);
 
+    // Verify the bundle before either WASM input is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
+    let owned_suppressions = verified_bundle.as_ref().map(|verified| {
+        let mut merged = suppressions.clone();
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut merged,
+            &verified.policy,
+        );
+        merged
+    });
+    let suppressions: &SuppressionConfig = owned_suppressions.as_ref().unwrap_or(suppressions);
+    let policy_bundle_provenance = verified_bundle.as_ref().map(|verified| &verified.provenance);
+
     let run_comparison = |progress: &dyn Fn(String)| -> Result<bool> {
+        let log = DiagnosticLog::new(args, true);
+        let cycle_start = std::time::Instant::now();
+        let load_start = std::time::Instant::now();
         progress("🔍 Soroban Upgrade Safeguard".to_string());
         progress("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".to_string());
 
@@ -3458,6 +5074,16 @@ fn run_single(
 
         let remote_config = remote_fetch_config(args);
         let oci_config = oci_fetch_config(args);
+        let mc_config = metadata_cache_config(args);
+        // Log cache mode for diagnostic visibility when stats are requested.
+        if mc_config.print_stats && mc_config.no_cache {
+            eprintln!("metadata-cache: bypassed (--no-metadata-cache)");
+        } else if mc_config.print_stats {
+            let mc_dir = mc_config.resolved_cache_dir();
+            eprintln!("metadata-cache: active, dir='{}'", mc_dir.display());
+        }
+
+        let mut mc_stats = soroban_upgrade_safeguard::metadata_cache::CacheStats::default();
 
         let new = load_wasm_input(
             new_wasm_path,
@@ -3466,6 +5092,7 @@ fn run_single(
             args.no_symlinks,
             progress,
         )?;
+        use_metadata_cache(&new, &mc_config, &mut mc_stats);
 
         let mut store_opt = if let Some(ref path) = args.lineage_store {
             let mut store = if path.exists() {
@@ -3480,7 +5107,25 @@ fn run_single(
                 store.policy.max_live_versions = Some(max_v);
             }
             if let Some(ref ret_v) = args.retire_version {
-                store.retire_version(ret_v)?;
+                if !store.retire_version(ret_v)? {
+                    let known = if store.records.is_empty() {
+                        "(the store has no recorded versions)".to_string()
+                    } else {
+                        store
+                            .records
+                            .iter()
+                            .map(|r| r.version_id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    anyhow::bail!(
+                        "--retire-version '{}' does not match any version in lineage store '{}'. \
+                         Known version(s): {}",
+                        ret_v,
+                        path.display(),
+                        known
+                    );
+                }
             }
             Some(store)
         } else {
@@ -3498,7 +5143,10 @@ fn run_single(
                 "\n🔒 Checking exported interface against {}...",
                 lockfile_path.display()
             ));
-            soroban_upgrade_safeguard::compare_wasm_against_interface_lockfile(
+            log.timing("Loading inputs", load_start);
+            log.sections("New", &new.bytes);
+            let compare_start = std::time::Instant::now();
+            let report = soroban_upgrade_safeguard::compare_wasm_against_interface_lockfile(
                 &lockfile_json,
                 &new.bytes,
                 &soroban_upgrade_safeguard::CompareOptions {
@@ -3511,23 +5159,27 @@ fn run_single(
                     complexity_budget: None,
                 },
             )?
-            .with_symlinks(None, new.symlink.clone())
+            .with_symlinks(None, new.symlink.clone());
+            log.timing("Interface lockfile comparison", compare_start);
+            report
         } else {
             let old = if let Some(contract_id) = old_source {
                 let rpc_url = args.rpc_url.as_ref().unwrap();
                 loader::fetch_wasm_from_rpc_with_config(
                     contract_id,
-                    &rpc_config(rpc_url, &args.rpc_headers)?
+                    &rpc_config(rpc_url, &args.rpc_headers, args.allow_http_local)?
                         .with_id_mismatch_allowed(args.rpc_allow_id_mismatch),
                 )?
             } else {
-                load_wasm_input(
+                let old = load_wasm_input(
                     &args.wasm_paths[0],
                     &remote_config,
                     &oci_config,
                     args.no_symlinks,
                     progress,
-                )?
+                )?;
+                use_metadata_cache(&old, &mc_config, &mut mc_stats);
+                old
             };
 
             // `--expected-wasm-hash` pins the baseline's exact bytes. Checked
@@ -3541,6 +5193,7 @@ fn run_single(
                 verify_expected_wasm_hash(expected, &old.sha256, &old.path)?;
             }
 
+            log.timing("Loading inputs", load_start);
             compare_contracts(
                 &ContractComparison {
                     old_bytes: &old.bytes,
@@ -3553,18 +5206,26 @@ fn run_single(
                     no_timestamp: args.no_timestamp,
                     empirical: args.empirical || args.empirical_file.is_some(),
                     empirical_file: args.empirical_file.as_deref(),
+                    impact_graph: args.impact_graph,
                     contract_id: old_source,
                     rpc_url: args.rpc_url.as_deref(),
                     rpc_headers: &args.rpc_headers,
                     rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
+                    allow_http_local: args.allow_http_local,
+                    policy_bundle: policy_bundle_provenance,
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,
                 },
                 progress,
+                &log,
             )?
             .with_symlinks(old.symlink.clone(), new.symlink.clone())
         };
+
+        if mc_config.print_stats && !mc_config.no_cache {
+            mc_stats.print_summary();
+        }
 
         if let (Some(ref mut store), Some(ref version_id), Some(ref path)) =
             (&mut store_opt, &args.record_version, &args.lineage_store)
@@ -3579,7 +5240,7 @@ fn run_single(
             let record = soroban_upgrade_safeguard::lineage::LineageRecord {
                 version_id: version_id.clone(),
                 order: 0,
-                created_at: "2026-08-25T00:00:00Z".to_string(),
+                created_at: timestamp::now_rfc3339(),
                 status: soroban_upgrade_safeguard::lineage::LiveStatus::Live,
                 wasm_hash: loader::sha256_hex(&new.bytes),
                 interface_hash: soroban_upgrade_safeguard::interface_hash::InterfaceHash::of_spec(
@@ -3598,6 +5259,7 @@ fn run_single(
             ));
         }
 
+        let render_start = std::time::Instant::now();
         render_to_outputs(
             &safety_report,
             outputs,
@@ -3608,13 +5270,13 @@ fn run_single(
             args.redact_paths,
             None,
             progress,
+            args.min_severity.as_severity(),
         )?;
+        log.timing("Rendering report", render_start);
+        log.timing("Comparison cycle", cycle_start);
 
         let is_safe = safety_report.is_safe();
-        if !is_safe {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(is_safe)
     };
 
     let cycle_counter = std::cell::Cell::new(0u64);
@@ -3649,6 +5311,18 @@ fn run_single(
 
     let is_safe = run_comparison_tracked(&progress)?;
 
+    // Print metadata-cache stats if requested (after the run so the final
+    // hit/miss counts are available in a future extension; for now this
+    // prints the directory summary since the cache session object lives
+    // inside the analysis pipeline). Skip if the cache was bypassed.
+    if args.metadata_cache_stats && !args.no_metadata_cache {
+        let mc_dir = args
+            .metadata_cache_dir
+            .clone()
+            .unwrap_or_else(soroban_upgrade_safeguard::metadata_cache::default_cache_dir);
+        soroban_upgrade_safeguard::metadata_cache::print_cache_inspect(&mc_dir);
+    }
+
     if args.watch && !watch_paths.is_empty() {
         run_watch_mode(
             &watch_paths,
@@ -3665,11 +5339,7 @@ fn run_single(
         );
     }
 
-    if !is_safe {
-        std::process::exit(1);
-    }
-
-    Ok(())
+    Ok(is_safe)
 }
 
 /// Lower bound for `--watch-debounce-ms`. Below this, the burst of events a
@@ -3717,7 +5387,14 @@ fn handle_status_write(
 }
 
 fn is_batch_mode(args: &Args) -> bool {
-    args.manifest.is_some() || (args.old_dir.is_some() && args.new_dir.is_some())
+    args.manifest.is_some() || is_directory_mode(args)
+}
+
+/// Whether this run sweeps `--old-dir`/`--new-dir`, as opposed to naming pairs
+/// through a manifest. The distinction matters for `--exclude`, which only has
+/// a directory sweep to apply to.
+fn is_directory_mode(args: &Args) -> bool {
+    args.old_dir.is_some() && args.new_dir.is_some()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3731,9 +5408,19 @@ fn render_to_outputs(
     redact: bool,
     contract_name: Option<&str>,
     progress: &dyn Fn(String),
+    min_severity: &diff::Severity,
 ) -> Result<()> {
     for output in outputs {
-        let content = render_single(report, output.format, explain, ascii, plain, width, redact)?;
+        let content = render_single(
+            report,
+            output.format,
+            explain,
+            ascii,
+            plain,
+            width,
+            redact,
+            min_severity,
+        )?;
         emit_output(output, &content)?;
 
         if let Some(ref path) = output.path {
@@ -3815,6 +5502,7 @@ fn destyle_text(text: String, ascii: bool, plain: bool) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_single(
     report: &report::SafetyReport,
     format: OutputFormat,
@@ -3823,11 +5511,12 @@ fn render_single(
     plain: bool,
     width: Option<usize>,
     redact: bool,
+    min_severity: &diff::Severity,
 ) -> Result<String> {
     // JSON carries the severity as a field rather than as a marker glyph, and
     // the GitHub Actions workflow-command syntax is already plain ASCII, so
     // `--ascii`/`--plain` only affect the human-readable formats. `width` is
-    // narrower still: it only ever reaches `to_text_with_width`
+    // narrower still: it only ever reaches `to_text_with_min_severity`
     // below, so JSON and Markdown output are structurally incapable of being
     // affected by it.
     let mut renderable = report.to_renderable();
@@ -3837,44 +5526,17 @@ fn render_single(
     match format {
         OutputFormat::Json => Ok(serde_json::to_string_pretty(&renderable)?),
         OutputFormat::Markdown => {
-            let markdown = renderable.to_markdown();
+            let markdown = renderable.to_markdown_with_min_severity(min_severity);
             Ok(destyle_text(markdown, ascii, plain))
         }
         OutputFormat::Text => {
-            let text = renderable.to_text_with_width(explain, width);
+            let text = renderable.to_text_with_min_severity(explain, width, min_severity);
             Ok(destyle_text(text, ascii, plain))
         }
-        OutputFormat::GithubActions => Ok(render_github_actions(report)),
-    }
-}
-
-fn render_github_actions(report: &report::SafetyReport) -> String {
-    let mut output = String::new();
-    let mut categories: Vec<_> = report.findings_by_category().keys().collect();
-    categories.sort();
-    for category in categories {
-        if let Some(findings) = report.findings_by_category().get(category) {
-            for reported in findings {
-                let finding = reported.finding();
-                let level = if reported.suppressed() {
-                    "notice"
-                } else {
-                    match finding.severity() {
-                        diff::Severity::Critical => "error",
-                        diff::Severity::Warning => "warning",
-                        diff::Severity::Info => "notice",
-                    }
-                };
-                let message = finding.message().replace(['\r', '\n'], " ");
-                output.push_str(&format!("::{level}::[{category}] {message}\n"));
-            }
+        OutputFormat::GithubActions => {
+            Ok(renderable.to_github_actions_with_min_severity(min_severity))
         }
     }
-    output.push_str(&format!(
-        "Soroban Upgrade Safeguard: {}\n",
-        if report.is_safe() { "PASSED" } else { "FAILED" }
-    ));
-    output
 }
 
 /// Reject an output destination that already exists as a directory. Without
@@ -4025,14 +5687,15 @@ fn run_watch_mode(
             });
     }
 
-    eprintln!(
+    let log = DiagnosticLog::new(args, true);
+    log.progress(format_args!(
         "\n👀 Watch mode active (debounce: {debounce_ms}ms). Waiting for file changes... (Ctrl+C or SIGTERM to stop)\n"
-    );
+    ));
 
     let loop_result = (|| -> Result<()> {
         loop {
             if watch_shutdown_requested() {
-                eprintln!("\n🛑 SIGTERM received, shutting down watch mode...\n");
+                log.progress("\n🛑 SIGTERM received, shutting down watch mode...\n");
                 return Ok(());
             }
 
@@ -4053,7 +5716,7 @@ fn run_watch_mode(
                     }
 
                     if watch_shutdown_requested() {
-                        eprintln!("\n🛑 SIGTERM received, shutting down watch mode...\n");
+                        log.progress("\n🛑 SIGTERM received, shutting down watch mode...\n");
                         return Ok(());
                     }
 
@@ -4069,7 +5732,9 @@ fn run_watch_mode(
                                 break;
                             }
                             if watch_shutdown_requested() {
-                                eprintln!("\n🛑 SIGTERM received, shutting down watch mode...\n");
+                                log.progress(
+                                    "\n🛑 SIGTERM received, shutting down watch mode...\n",
+                                );
                                 return Ok(());
                             }
                             if start.elapsed() > timeout {
@@ -4081,20 +5746,20 @@ fn run_watch_mode(
                     }
 
                     // Clear terminal
-                    print!("\x1B[2J\x1B[H");
+                    if !args.quiet {
+                        print!("\x1B[2J\x1B[H");
+                    }
 
-                    let progress = |line: String| {
-                        eprintln!("{line}");
-                    };
+                    let progress = |line: String| log.progress(line);
 
-                    eprintln!("🔄 Change detected, re-running comparison...\n");
+                    log.progress("🔄 Change detected, re-running comparison...\n");
 
                     match run_comparison(&progress) {
                         Ok(safe) => {
                             if safe {
-                                eprintln!("\n✅ Comparison passed");
+                                log.progress("\n✅ Comparison passed");
                             } else {
-                                eprintln!("\n❌ Comparison failed (breaking changes detected)");
+                                log.progress("\n❌ Comparison failed (breaking changes detected)");
                             }
                         }
                         Err(e) => {
@@ -4102,9 +5767,9 @@ fn run_watch_mode(
                         }
                     }
 
-                    eprintln!(
+                    log.progress(format_args!(
                     "\n👀 Watch mode active (debounce: {debounce_ms}ms). Waiting for file changes... (Ctrl+C or SIGTERM to stop)\n"
-                );
+                    ));
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     // No event - if this is the first run, just continue
@@ -4247,6 +5912,26 @@ fn load_wasm_input(
     Ok(module)
 }
 
+/// Look up a loaded WASM in the metadata cache and, on a miss, decode
+/// it and store the result.
+///
+/// Every input kind takes part, including `https://` inputs, which are keyed by
+/// the content hash of the verified download. The cache is advisory, so a
+/// decode failure here is ignored; the analysis itself reports it with full
+/// context.
+fn use_metadata_cache(
+    module: &loader::WasmModule,
+    config: &soroban_upgrade_safeguard::metadata_cache::MetadataCacheConfig,
+    stats: &mut soroban_upgrade_safeguard::metadata_cache::CacheStats,
+) {
+    let _ = soroban_upgrade_safeguard::metadata_cache::extract_with_cache(
+        config,
+        &module.sha256,
+        &module.bytes,
+        stats,
+    );
+}
+
 /// One pair the batch loop is about to run, with the settings it runs under.
 ///
 /// Manifest mode resolves these through [`manifest::resolve`]; directory-scan
@@ -4296,10 +5981,13 @@ struct ContractComparison<'a> {
     no_timestamp: bool,
     empirical: bool,
     empirical_file: Option<&'a Path>,
+    impact_graph: bool,
     contract_id: Option<&'a str>,
     rpc_url: Option<&'a str>,
     rpc_headers: &'a [String],
     rpc_allow_id_mismatch: bool,
+    allow_http_local: bool,
+    policy_bundle: Option<&'a soroban_upgrade_safeguard::policy_bundle::BundleProvenance>,
     lineage_store: Option<&'a soroban_upgrade_safeguard::lineage::LineageStore>,
     /// The contract's name, used to scope migrations declared with
     /// `contracts = [..]` in a config shared across several contracts.
@@ -4347,6 +6035,7 @@ fn load_storage_schema(path: &Path) -> Result<soroban_upgrade_safeguard::Storage
 fn compare_contracts(
     comparison: &ContractComparison<'_>,
     progress: &dyn Fn(String),
+    log: &DiagnosticLog,
 ) -> Result<report::SafetyReport> {
     let ContractComparison {
         old_bytes,
@@ -4359,16 +6048,31 @@ fn compare_contracts(
         no_timestamp,
         empirical,
         empirical_file,
+        impact_graph,
         contract_id,
         rpc_url,
         rpc_headers,
         rpc_allow_id_mismatch,
+        allow_http_local,
+        policy_bundle,
         lineage_store,
         contract,
         complexity_budget,
     } = comparison;
+    log.sections("Old", old_bytes);
+    log.sections("New", new_bytes);
+    let parse_start = std::time::Instant::now();
     let old_meta = parser::extract_metadata(old_bytes)?;
     let old_spec = spec::ContractSpec::from_entries(&old_meta.spec);
+    log.diagnostic(
+        1,
+        format_args!(
+            "Old: {} spec entries, {} host imports",
+            old_meta.spec.len(),
+            old_meta.host_imports.len()
+        ),
+    );
+    log.timing("Parsing old contract", parse_start);
     progress(format!(
         "  {} {} ({} bytes)",
         "✅ Old:".green().bold(),
@@ -4381,8 +6085,18 @@ fn compare_contracts(
         format!("sha256: {}", loader::sha256_hex(old_bytes)).dimmed()
     ));
 
+    let parse_start = std::time::Instant::now();
     let new_meta = parser::extract_metadata(new_bytes)?;
     let new_spec = spec::ContractSpec::from_entries(&new_meta.spec);
+    log.diagnostic(
+        1,
+        format_args!(
+            "New: {} spec entries, {} host imports",
+            new_meta.spec.len(),
+            new_meta.host_imports.len()
+        ),
+    );
+    log.timing("Parsing new contract", parse_start);
     progress(format!(
         "  {} {} ({} bytes)",
         "✅ New:".green().bold(),
@@ -4399,6 +6113,7 @@ fn compare_contracts(
         "\n{}",
         "🔬 Analyzing structural compatibility...".cyan().bold()
     ));
+    let compare_start = std::time::Instant::now();
     let mut diff_report = diff::compare(&old_spec, &new_spec);
     diff::compare_env_metadata(
         old_meta.env_meta.as_ref(),
@@ -4417,7 +6132,16 @@ fn compare_contracts(
         &new_meta.runtime_surface,
         &mut diff_report,
     );
+    log.diagnostic(
+        1,
+        format_args!(
+            "Structural comparison: {} findings",
+            diff_report.findings.len()
+        ),
+    );
+    log.timing("Structural comparison", compare_start);
 
+    let report_start = std::time::Instant::now();
     let mut report = report::SafetyReport::with_suppressions_with_specs(
         &diff_report,
         suppressions,
@@ -4431,6 +6155,26 @@ fn compare_contracts(
 
     report.no_timestamp = *no_timestamp;
 
+    if *impact_graph {
+        let old_build = soroban_upgrade_safeguard::impact_graph::BuildIdentity::new(
+            Some(loader::sha256_hex(old_bytes)),
+            Some(old_spec.interface_hash().to_hex()),
+        );
+        let new_build = soroban_upgrade_safeguard::impact_graph::BuildIdentity::new(
+            Some(loader::sha256_hex(new_bytes)),
+            Some(new_spec.interface_hash().to_hex()),
+        );
+        report.impact_graph = Some(soroban_upgrade_safeguard::impact_graph::build_impact_graph(
+            &old_spec,
+            &new_spec,
+            &diff_report.findings,
+            suppressions,
+            None,
+            (old_build, new_build),
+            &soroban_upgrade_safeguard::impact_graph::GraphLimits::default(),
+        ));
+    }
+
     // WASM complexity profiling — runs when a budget is configured.
     if let Some(budget) = complexity_budget {
         report.apply_complexity(old_bytes, new_bytes, budget);
@@ -4438,6 +6182,9 @@ fn compare_contracts(
 
     let mut empirical_findings = Vec::new();
     let mut is_empirical = false;
+    let mut snapshot_integrity: Option<
+        soroban_upgrade_safeguard::snapshot_manifest::SnapshotIntegrityReport,
+    > = None;
 
     if *empirical {
         is_empirical = true;
@@ -4448,12 +6195,51 @@ fn compare_contracts(
                 "📖 Loading empirical storage entries from: {}",
                 file_path.display()
             ));
-            match soroban_upgrade_safeguard::empirical::load_empirical_entries(file_path) {
-                Ok(loaded) => {
+            match soroban_upgrade_safeguard::empirical::load_empirical_snapshot(file_path) {
+                Ok((loaded, manifest)) => {
                     progress(format!(
                         "✅ Loaded {} storage entries from file",
                         loaded.len()
                     ));
+
+                    let expected = soroban_upgrade_safeguard::snapshot_manifest::ExpectedContext {
+                        contract_id: contract_id.map(|s| s.to_string()),
+                        code_hash: report.rpc_provenance.as_ref().map(|p| p.code_hash.clone()),
+                        network: report.rpc_provenance.as_ref().map(|p| p.network.clone()),
+                        ledger_sequence: report.rpc_provenance.as_ref().map(|p| p.ledger_sequence),
+                    };
+                    let integrity_report =
+                        soroban_upgrade_safeguard::snapshot_manifest::verify_snapshot(
+                            manifest.as_ref(),
+                            &loaded,
+                            &expected,
+                        )
+                        .map_err(|e| anyhow::anyhow!("Empirical validation error: {}", e))?;
+
+                    if integrity_report.integrity
+                        == soroban_upgrade_safeguard::snapshot_manifest::SnapshotIntegrity::Failed
+                    {
+                        progress("❌ Snapshot integrity manifest failed verification:".to_string());
+                        for issue in &integrity_report.issues {
+                            progress(format!("   - {issue}"));
+                        }
+                        return Err(anyhow::anyhow!(
+                            "Empirical validation error: snapshot integrity manifest rejected ({} issue(s)): {}",
+                            integrity_report.issues.len(),
+                            integrity_report.issues.join("; ")
+                        ));
+                    }
+
+                    if manifest.is_some() {
+                        progress("✅ Snapshot integrity manifest verified".to_string());
+                    } else {
+                        progress(
+                            "⚠️  Snapshot has no integrity manifest; coverage is unverified"
+                                .to_string(),
+                        );
+                    }
+
+                    snapshot_integrity = Some(integrity_report);
                     entries = loaded;
                 }
                 Err(e) => {
@@ -4463,7 +6249,7 @@ fn compare_contracts(
             }
         } else if let (Some(cid), Some(rpc)) = (contract_id, rpc_url) {
             progress("🌐 Fetching contract instance storage from RPC...".to_string());
-            match rpc_config(rpc, rpc_headers).and_then(|config| {
+            match rpc_config(rpc, rpc_headers, *allow_http_local).and_then(|config| {
                 let config = config.with_id_mismatch_allowed(*rpc_allow_id_mismatch);
                 loader::fetch_instance_storage_from_rpc_with_provenance(cid, &config)
                     .map_err(|e| anyhow::anyhow!(e))
@@ -4523,6 +6309,8 @@ fn compare_contracts(
 
     report.empirical = is_empirical;
     report.empirical_findings = empirical_findings;
+    report.snapshot_integrity = snapshot_integrity;
+    report.policy_bundle = policy_bundle.cloned();
 
     if report.empirical_findings.iter().any(|ef| !ef.is_success) {
         report.is_safe = false;
@@ -4540,6 +6328,7 @@ fn compare_contracts(
         report.apply_lineage_report(&lineage_report, suppressions, *explain, *strict);
     }
 
+    log.timing("Building safety report", report_start);
     Ok(report)
 }
 
@@ -4563,14 +6352,28 @@ fn error_chain(err: &dyn std::error::Error) -> String {
 fn validate_suppression_config(path: &Path) -> Result<()> {
     println!("Validating suppression config: {}", path.display());
 
+    let schema_check = soroban_upgrade_safeguard::config_schema::validate_config_file(path);
+
     // Parsing (and file-read) problems surface here as a clear, specific error.
     let config = match SuppressionConfig::load_from_path(path) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("{}", format!("❌ {}", error_chain(&e)).red().bold());
+            if let Err(diags) = schema_check {
+                for d in diags {
+                    eprintln!("{}", format!("  {d}").red());
+                }
+            }
             std::process::exit(1);
         }
     };
+
+    if let Err(diags) = schema_check {
+        for d in diags {
+            eprintln!("{}", format!("❌ {d}").red());
+        }
+        std::process::exit(1);
+    }
 
     println!("  Parsed {} rule(s).", config.rules.len());
 
@@ -5133,7 +6936,6 @@ fn suppressions_for_pair(
     Ok(settings.apply_policy(base))
 }
 
-#[allow(dead_code)]
 struct GapContract {
     name: String,
     old_path: PathBuf,
@@ -5154,11 +6956,380 @@ struct NewOnlyContract {
     new_path: PathBuf,
 }
 
+/// Which scanned directory an artifact was found in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ScanSide {
+    Old,
+    New,
+}
+
+impl ScanSide {
+    /// Lowercase name for report lines, matching the `--old-dir`/`--new-dir`
+    /// flag names rather than a phrase a reader has to translate.
+    fn label(self) -> &'static str {
+        match self {
+            ScanSide::Old => "old",
+            ScanSide::New => "new",
+        }
+    }
+}
+
+/// A `.wasm` artifact that an `--exclude` pattern kept out of a directory scan.
+///
+/// Recorded rather than dropped so the run can account for every artifact it
+/// found: a file the user asked to skip and a file the scan never saw look
+/// identical in a report that only lists what was compared, and the first is a
+/// decision someone made while the second is a gap in what was checked.
+///
+/// One entry per side. The two directories are swept independently and either
+/// sweep could have dropped the artifact on its own, so an artifact present in
+/// both is two entries — naming the side is what tells a reader whether a
+/// pattern was meant to cover both.
+struct SkippedFile {
+    side: ScanSide,
+    /// The artifact's path relative to the scanned directory — the exact string
+    /// the matching pattern was tested against, so the report shows the pattern
+    /// failing to match precisely what the user sees in their own tree.
+    relative_path: String,
+    /// The first `--exclude` pattern that matched, so a pattern that
+    /// over-matched is traceable to its own flag rather than to "an exclude".
+    pattern: String,
+    /// Absolute path, for the same reason new-only artifacts print one: the
+    /// report is read after the fact, away from the working directory.
+    path: PathBuf,
+}
+
+/// Is this directory entry a `.wasm` artifact a scan should consider?
+///
+/// Both sweeps test this identically, so the two can never disagree about
+/// which files are candidates. `--exclude` is applied *after* this test, so
+/// candidacy and exclusion stay separate decisions and an excluded file is
+/// still known to have been a `.wasm` file — which is what makes reporting it
+/// as skipped honest rather than speculative.
+fn is_wasm_artifact(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("wasm"))
+}
+
+/// Does `pattern` match `text` under the `--exclude` glob dialect?
+///
+/// `*` stands for any run of characters except `/`, `**` for any run including
+/// `/`, and `?` for exactly one character other than `/`. Every other character
+/// matches only itself, so a pattern containing regex or shell syntax is
+/// literal rather than silently reinterpreted. Matching is case-sensitive over
+/// the path as the filesystem spelled it.
+///
+/// Written out rather than pulled from a crate: patterns match the paths of
+/// scanned artifacts relative to their root, and the dialect above is complete.
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    glob_match_from(&pattern, &text, &mut std::collections::HashSet::new())
+}
+
+/// Whether the pattern suffix matches the whole remaining text.
+///
+/// Recursing past a wildcard means the same suffix is retried at every offset
+/// it can consume, which is exponential for a pattern like `*a*a*a*a*b` against
+/// a long non-matching string. `seen` memoizes the (suffix, remainder) pairs
+/// already reached, which is sound because this is a pure function of those
+/// two: a pair that matched would have returned `true` out of every frame on the
+/// way, so a repeated pair is always one already known not to match.
+fn glob_match_from(
+    pattern: &[char],
+    text: &[char],
+    seen: &mut std::collections::HashSet<(usize, usize)>,
+) -> bool {
+    if !seen.insert((pattern.len(), text.len())) {
+        return false;
+    }
+
+    let Some(&first) = pattern.first() else {
+        return text.is_empty();
+    };
+
+    match first {
+        '*' => {
+            if pattern.get(1) == Some(&'*') {
+                if pattern.get(2) == Some(&'/') {
+                    // `**/` is "zero or more directory levels", which has to
+                    // include the zero case or `**/token.wasm` would only ever
+                    // match a file nested at least one level down — the
+                    // opposite of what a user writing it against a flat scan
+                    // means. So try the remainder against the text as it
+                    // stands, then again past each separator in turn: a deep
+                    // path has to be reachable by skipping more than one
+                    // level, so the positions are walked rather than the single
+                    // next component being handed back to the matcher.
+                    let rest = &pattern[3..];
+                    if glob_match_from(rest, text, seen) {
+                        return true;
+                    }
+                    let mut end = 0;
+                    while let Some(slash) = text[end..].iter().position(|&c| c == '/') {
+                        end += slash + 1;
+                        if glob_match_from(rest, &text[end..], seen) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                // A bare `**` spans separators and may stand for nothing at all,
+                // so the remainder after it has to be offered every suffix of
+                // the text rather than only the text one character in.
+                let rest = &pattern[2..];
+                let mut end = 0;
+                loop {
+                    if glob_match_from(rest, &text[end..], seen) {
+                        return true;
+                    }
+                    match text.get(end) {
+                        Some(_) => end += 1,
+                        None => return false,
+                    }
+                }
+            }
+            // A lone `*` stops at a separator, so `*/token.wasm` selects one
+            // level rather than swallowing a whole subtree. It still consumes a
+            // variable number of characters, so each shorter remainder is tried
+            // in turn until a separator or the end of the text ends the run.
+            let rest = &pattern[1..];
+            let mut end = 0;
+            loop {
+                if glob_match_from(rest, &text[end..], seen) {
+                    return true;
+                }
+                match text.get(end) {
+                    Some(&c) if c != '/' => end += 1,
+                    _ => return false,
+                }
+            }
+        }
+        '?' => match text.split_first() {
+            Some((head, tail)) => *head != '/' && glob_match_from(&pattern[1..], tail, seen),
+            None => false,
+        },
+        literal => match text.split_first() {
+            Some((head, tail)) => *head == literal && glob_match_from(&pattern[1..], tail, seen),
+            None => false,
+        },
+    }
+}
+
+/// The first `--exclude` pattern that excludes `path`, or `None` if it is kept.
+///
+/// Tested against the path relative to the directory being scanned so a pattern
+/// reads the way the tree is laid out instead of depending on where the run was
+/// launched from. A path that does not sit under `root` falls back to its own
+/// final component rather than being reported as matching everything, so a
+/// surprising path can never exclude an artifact by accident.
+fn excluded_by<'a>(path: &Path, root: &Path, patterns: &'a [String]) -> Option<&'a str> {
+    if patterns.is_empty() {
+        return None;
+    }
+    let relative = relative_scan_path(path, root);
+    patterns
+        .iter()
+        .find(|pattern| glob_matches(pattern, &relative))
+        .map(String::as_str)
+}
+
+/// `path` relative to the directory being scanned, with `/` separators
+/// whatever the platform, so a pattern means the same thing everywhere. Falls
+/// back to the file name whenever stripping leaves nothing usable — an empty
+/// string or a still-absolute one — which keeps the value safe to hand a
+/// pattern that matches everything.
+fn relative_scan_path(path: &Path, root: &Path) -> String {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let text = relative.to_string_lossy().replace('\\', "/");
+    if text.is_empty() || text.starts_with('/') {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or(text)
+    } else {
+        text
+    }
+}
+
+/// A trailing sentence naming the `--exclude` patterns in force, or nothing at
+/// all when there are none.
+///
+/// Appended to the "found nothing to compare" diagnostics. A pattern that
+/// matches everything leaves the scan legitimately empty, and the error would
+/// otherwise send the reader looking for missing build artifacts that are
+/// sitting right there on disk.
+fn exclude_hint(exclude: &[String]) -> String {
+    if exclude.is_empty() {
+        return String::new();
+    }
+    let patterns = exclude
+        .iter()
+        .map(|pattern| format!("'{pattern}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("\n  Every .wasm artifact present was excluded by: {patterns}")
+}
+
+#[cfg(test)]
+mod exclude_glob_tests {
+    use super::*;
+
+    #[test]
+    fn a_star_spans_any_run_except_a_separator() {
+        assert!(glob_matches("*.wasm", "token.wasm"));
+        assert!(glob_matches("tok*asm", "token.wasm"));
+        assert!(glob_matches("*.wasm", "a-rather-long-contract-name.wasm"));
+        // The separator is what a lone `*` refuses to cross, so this must not
+        // match: a pattern that quietly ignored it would exclude whole
+        // subtrees the user never named.
+        assert!(!glob_matches("*.wasm", "nested/token.wasm"));
+    }
+
+    #[test]
+    fn a_double_star_spans_separators_and_may_stand_for_nothing() {
+        assert!(glob_matches("**/*.wasm", "token.wasm"));
+        assert!(glob_matches("**/*.wasm", "nested/token.wasm"));
+        assert!(glob_matches("**/*.wasm", "deeply/nested/token.wasm"));
+        assert!(glob_matches("nested/**", "nested/token.wasm"));
+        assert!(glob_matches("nested/**", "nested/"));
+        // Only the pattern side is allowed to be empty; the path still has to
+        // have something in it.
+        assert!(!glob_matches("**/*.wasm", "nested/token.wasm.bak"));
+    }
+
+    #[test]
+    fn a_question_mark_matches_exactly_one_non_separator_character() {
+        assert!(glob_matches("token?.wasm", "token1.wasm"));
+        assert!(!glob_matches("token?.wasm", "token.wasm"));
+        assert!(!glob_matches("token?.wasm", "token12.wasm"));
+        assert!(!glob_matches("token?.wasm", "nested/token1.wasm"));
+    }
+
+    #[test]
+    fn a_pattern_with_no_wildcards_is_an_exact_comparison() {
+        assert!(glob_matches("token.wasm", "token.wasm"));
+        assert!(!glob_matches("token.wasm", "Token.wasm"));
+        assert!(!glob_matches("token.wasm", "token.wasm.bak"));
+    }
+
+    #[test]
+    fn an_empty_pattern_matches_only_an_empty_path() {
+        // A stray `--exclude ""` must not behave like a match-everything
+        // wildcard and silently drop the whole scan.
+        assert!(glob_matches("", ""));
+        assert!(!glob_matches("", "token.wasm"));
+    }
+
+    #[test]
+    fn excluded_by_reports_the_first_pattern_that_matched() {
+        let root = Path::new("/builds/old");
+        let patterns = vec![
+            "vendor/**".to_string(),
+            "*.wasm".to_string(),
+            "never-matches".to_string(),
+        ];
+        assert_eq!(
+            excluded_by(Path::new("/builds/old/token.wasm"), root, &patterns),
+            Some("*.wasm")
+        );
+        // The leading `vendor/**` is tried first, so it is the one reported.
+        assert_eq!(
+            excluded_by(Path::new("/builds/old/vendor/token.wasm"), root, &patterns),
+            Some("vendor/**")
+        );
+        assert_eq!(
+            excluded_by(Path::new("/builds/old/notes.txt"), root, &patterns),
+            None
+        );
+    }
+
+    #[test]
+    fn no_patterns_means_nothing_is_excluded() {
+        assert_eq!(
+            excluded_by(Path::new("/builds/a.wasm"), Path::new("/builds"), &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn a_path_outside_the_scan_root_is_matched_on_its_own_name() {
+        // A path that is somehow not under `root` must be reduced to a bare
+        // name rather than handed to the matcher still absolute: an absolute
+        // path would let a pattern with a leading separator exclude a file the
+        // user never named, and an empty one would let `--exclude ""` swallow
+        // it. A plain catch-all still matches, which is what a user writing
+        // `**` asked for.
+        let root = Path::new("/builds/old");
+        let strayed = Path::new("/somewhere/else/token.wasm");
+        assert_eq!(relative_scan_path(strayed, root), "token.wasm");
+        assert_eq!(excluded_by(strayed, root, &["**".to_string()]), Some("**"));
+        assert_eq!(excluded_by(strayed, root, &["/**".to_string()]), None);
+        assert_eq!(excluded_by(strayed, root, &["**/".to_string()]), None);
+    }
+
+    #[test]
+    fn exclude_hint_names_every_pattern_in_force() {
+        assert_eq!(exclude_hint(&[]), "");
+        let hint = exclude_hint(&["*.wasm".to_string(), "vendor/**".to_string()]);
+        assert!(hint.contains("'*.wasm'"), "{hint}");
+        assert!(hint.contains("'vendor/**'"), "{hint}");
+    }
+}
+
+/// Everything one `--old-dir`/`--new-dir` sweep found.
+///
+/// A struct rather than a four-tuple: the four lists are four different
+/// verdicts about a file — compared, vanished, added, or deliberately left out —
+/// and naming them at the call site is worth more than the brevity. Each list
+/// is disjoint, so the counts add up to the number of `.wasm` artifacts
+/// discovered, and a file appears in at most one of `gaps` and `new_only`.
+struct ScannedArtifacts {
+    /// Artifacts whose name matched on both sides.
+    pairs: Vec<BatchPair>,
+    /// Present in the old directory only — a Critical finding, not a skip.
+    gaps: Vec<GapContract>,
+    /// Present in the new directory only — a warning, never a pair.
+    new_only: Vec<NewOnlyContract>,
+    /// Present but matched by an `--exclude` pattern.
+    skipped: Vec<SkippedFile>,
+}
+
+fn collect_wasm_artifacts(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut artifacts = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            // Do not descend through directory symlinks.
+            if entry.file_type()?.is_dir() {
+                pending.push(path);
+            } else if is_wasm_artifact(&path) {
+                artifacts.push(path);
+            }
+        }
+    }
+    artifacts.sort();
+    Ok(artifacts)
+}
+
+fn scan_contract_name(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .with_extension("")
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn scan_directories(
     old_dir: &Path,
     new_dir: &Path,
     settings: &manifest::ResolvedSettings,
-) -> Result<(Vec<BatchPair>, Vec<GapContract>, Vec<NewOnlyContract>)> {
+    exclude: &[String],
+) -> Result<ScannedArtifacts> {
     if !old_dir.is_dir() {
         anyhow::bail!("Old directory '{}' is not a directory", old_dir.display());
     }
@@ -5168,19 +7339,22 @@ fn scan_directories(
 
     let mut pairs = Vec::new();
     let mut gaps = Vec::new();
-    for entry in std::fs::read_dir(old_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file()
-            && path
-                .extension()
-                .and_then(|s| s.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("wasm"))
+    let mut skipped = Vec::new();
+    for path in collect_wasm_artifacts(old_dir)? {
+        if let Some(pattern) = excluded_by(&path, old_dir, exclude) {
+            skipped.push(SkippedFile {
+                side: ScanSide::Old,
+                relative_path: relative_scan_path(&path, old_dir),
+                pattern: pattern.to_string(),
+                path,
+            });
+            continue;
+        }
         {
-            let filename = path.file_name().unwrap();
-            let new_path = new_dir.join(filename);
-            let name = path.file_stem().and_then(|s| s.to_str()).map(String::from);
-            if new_path.exists() {
+            let relative = path.strip_prefix(old_dir)?;
+            let new_path = new_dir.join(relative);
+            let name = scan_contract_name(&path, old_dir);
+            if new_path.is_file() {
                 // Reject self-comparison in directory scan mode too
                 use crate::manifest::canonical_identity;
                 if canonical_identity(&path) == canonical_identity(&new_path) {
@@ -5193,12 +7367,9 @@ fn scan_directories(
                         new_dir.display()
                     );
                 }
-                let derived = name
-                    .clone()
-                    .unwrap_or_else(|| filename.to_string_lossy().to_string());
                 pairs.push(BatchPair {
-                    name: derived.clone(),
-                    id: derived,
+                    name: name.clone(),
+                    id: name,
                     labels: Vec::new(),
                     old: path,
                     new: new_path,
@@ -5207,9 +7378,8 @@ fn scan_directories(
                     settings: settings.clone(),
                 });
             } else {
-                let gap_name = name.unwrap_or_else(|| filename.to_string_lossy().to_string());
                 gaps.push(GapContract {
-                    name: gap_name,
+                    name,
                     old_path: path,
                 });
             }
@@ -5218,29 +7388,27 @@ fn scan_directories(
 
     // The reverse sweep: new-side artifacts the old-side loop never looked at.
     // The match test mirrors that loop exactly — a pair is formed when the same
-    // file name exists as a file on both sides — so the two views can never
-    // disagree about what counts as matched.
+    // relative path exists as a file on both sides — so the two views can never
+    // disagree about what counts as matched. `--exclude` is applied here on the
+    // same terms, and before the match test, so an excluded artifact is
+    // accounted for as skipped rather than escaping through either the matched
+    // branch or the new-only list.
     let mut new_only = Vec::new();
-    for entry in std::fs::read_dir(new_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file()
-            || !path
-                .extension()
-                .and_then(|s| s.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("wasm"))
-        {
+    for path in collect_wasm_artifacts(new_dir)? {
+        if let Some(pattern) = excluded_by(&path, new_dir, exclude) {
+            skipped.push(SkippedFile {
+                side: ScanSide::New,
+                relative_path: relative_scan_path(&path, new_dir),
+                pattern: pattern.to_string(),
+                path,
+            });
             continue;
         }
-        let filename = path.file_name().unwrap();
-        if old_dir.join(filename).is_file() {
+        let relative = path.strip_prefix(new_dir)?;
+        if old_dir.join(relative).is_file() {
             continue;
         }
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| filename.to_string_lossy().to_string());
+        let name = scan_contract_name(&path, new_dir);
         new_only.push(NewOnlyContract {
             name,
             new_path: path,
@@ -5250,35 +7418,40 @@ fn scan_directories(
     // `read_dir` yields entries in unspecified order; sort so the warning reads
     // the same way on every run and in every CI log.
     new_only.sort_by(|a, b| a.name.cmp(&b.name));
+    // Same reason, and this list is read as a record of what was left out: an
+    // unordered one would make two runs over the same tree disagree.
+    skipped.sort_by(|a, b| {
+        (a.relative_path.as_str(), a.side).cmp(&(b.relative_path.as_str(), b.side))
+    });
 
+    let hint = exclude_hint(exclude);
     if pairs.is_empty() && gaps.is_empty() {
         if new_only.is_empty() {
             // Both directories contain no WASM files. Check if directories are truly empty
             // or just contain no WASM artifacts, for a better diagnostic.
-            let old_has_files = std::fs::read_dir(old_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
-            let new_has_files = std::fs::read_dir(new_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
+            let old_has_files = std::fs::read_dir(old_dir)?.next().is_some();
+            let new_has_files = std::fs::read_dir(new_dir)?.next().is_some();
 
             if !old_has_files && !new_has_files {
                 anyhow::bail!(
                     "Both batch directories are empty.\n  \
                      old-dir: {}\n  \
                      new-dir: {}\n\
-                     Directory scan requires at least one .wasm artifact in the old directory.",
+                     No .wasm files found in batch directories.\n\
+                     Directory scan requires .wasm artifacts. Check that the directories contain built contract files.{}",
                     old_dir.display(),
-                    new_dir.display()
+                    new_dir.display(),
+                    hint
                 );
             } else {
                 anyhow::bail!(
                     "No .wasm files found in batch directories.\n  \
                      old-dir: {}\n  \
                      new-dir: {}\n\
-                     Directory scan requires .wasm artifacts. Check that the directories contain built contract files.",
+                     Directory scan requires .wasm artifacts. Check that the directories contain built contract files.{}",
                     old_dir.display(),
-                    new_dir.display()
+                    new_dir.display(),
+                    hint
                 );
             }
         }
@@ -5288,28 +7461,20 @@ fn scan_directories(
         anyhow::bail!(
             "No .wasm files found in '{}', but '{}' contains {} .wasm file(s). \
              Directory mode only compares files that share a name in both \
-             directories — check that --old-dir and --new-dir are not reversed.",
+             directories — check that --old-dir and --new-dir are not reversed.{}",
             old_dir.display(),
             new_dir.display(),
             new_only.len(),
+            hint,
         );
     }
 
-    Ok((pairs, gaps, new_only))
-}
-
-#[allow(dead_code)]
-fn render_report(
-    report: &report::SafetyReport,
-    format: OutputFormat,
-    explain: bool,
-) -> Result<String> {
-    match format {
-        OutputFormat::Json => Ok(serde_json::to_string_pretty(&report.to_json())?),
-        OutputFormat::Markdown => Ok(report.generate_summary_markdown()),
-        OutputFormat::Text => Ok(report.generate_summary_text(explain)),
-        OutputFormat::GithubActions => Ok(render_github_actions(report)),
-    }
+    Ok(ScannedArtifacts {
+        pairs,
+        gaps,
+        new_only,
+        skipped,
+    })
 }
 
 fn write_report_file(
@@ -5753,6 +7918,56 @@ mod tests {
         let spec: OutputSpec = "text".parse().unwrap();
         assert_eq!(spec.format, OutputFormat::Text);
         assert!(spec.path.is_none());
+    }
+
+    #[test]
+    fn output_name_template_without_output_dir_is_a_clap_error_naming_the_dir_flag() {
+        let err = Args::try_parse_from(["prog", "--per-contract-output-name-template", "{name}_x.{ext}"])
+            .expect_err("the template must require --per-contract-output-dir");
+        assert_eq!(err.exit_code(), 2);
+        assert!(
+            err.to_string().contains("--per-contract-output-dir"),
+            "error must name the missing flag: {err}"
+        );
+    }
+
+    #[test]
+    fn output_name_template_with_output_dir_is_accepted() {
+        let args = Args::try_parse_from([
+            "prog",
+            "--per-contract-output-dir",
+            "out",
+            "--per-contract-output-name-template",
+            "{name}_x.{ext}",
+        ])
+        .expect("template with an output dir must parse");
+        assert_eq!(args.per_contract_output_name_template, "{name}_x.{ext}");
+    }
+
+    #[test]
+    fn output_dir_alone_uses_default_template() {
+        let args = Args::try_parse_from(["prog", "--per-contract-output-dir", "out"])
+            .expect("output dir alone must parse");
+        assert_eq!(args.per_contract_output_name_template, "{name}.{ext}");
+    }
+
+    #[test]
+    fn watch_debounce_without_watch_is_a_clap_error_naming_watch() {
+        let err = Args::try_parse_from(["prog", "--watch-debounce-ms", "500"])
+            .expect_err("--watch-debounce-ms must require --watch");
+        assert_eq!(err.exit_code(), 2);
+        assert!(
+            err.to_string().contains("--watch"),
+            "error must name --watch: {err}"
+        );
+    }
+
+    #[test]
+    fn watch_debounce_with_watch_is_accepted() {
+        let args = Args::try_parse_from(["prog", "--watch", "--watch-debounce-ms", "500"])
+            .expect("--watch with --watch-debounce-ms must parse");
+        assert!(args.watch);
+        assert_eq!(args.watch_debounce_ms, 500);
     }
 
     #[test]

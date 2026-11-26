@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! A stable, order-independent hash of a contract's exported interface.
 //!
 //! A [`crate::spec::ContractSpec`] is built from `HashMap`s, so it has no

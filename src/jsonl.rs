@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! JSON Lines (JSONL) streaming batch protocol.
 //!
 //! Reads one versioned JSON job per line from standard input and writes one
@@ -62,7 +64,12 @@ pub const SCHEMA_VERSION: u32 = 1;
 // ── Job schema ───────────────────────────────────────────────────────────────
 
 /// A single streaming job read from one line of stdin.
+///
+/// Unknown top-level fields are rejected (the job is reported as `malformed`,
+/// naming the field) so a misspelled field such as `overide` cannot be
+/// silently dropped and run with different settings than intended.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StreamingJob {
     /// Schema version; currently always `1`.
     pub schema_version: u32,
@@ -78,6 +85,7 @@ pub struct StreamingJob {
 }
 
 /// Allowed analysis overrides for a single job.
+#[serde(deny_unknown_fields)]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct JobOverrides {
     /// Treat warnings as errors (mirrors `--strict`).
@@ -243,7 +251,7 @@ pub fn run_streaming<R: Read, W: Write>(
 
     // Spawn worker threads.
     let mut worker_handles = Vec::with_capacity(num_workers);
-    for worker_id in 0..num_workers {
+    for _ in 0..num_workers {
         let rx = Arc::clone(&shared_rx);
         let tx = result_tx.clone();
         let suppressions = config.suppressions.clone();
@@ -285,7 +293,6 @@ pub fn run_streaming<R: Read, W: Write>(
                 }
             }
             drop(tx);
-            eprintln!("[stream] worker {worker_id} exiting");
         });
         worker_handles.push(handle);
     }
@@ -827,6 +834,28 @@ mod tests {
     }
 
     #[test]
+    fn overrides_reject_unknown_keys_and_accept_strict() {
+        let unknown_key = r#"{"schema_version":1,"id":"typo","old":{"local":"x"},"new":{"local":"y"},"overrides":{"strictt":true}}"#;
+        let mut output = Vec::new();
+        run_streaming(unknown_key.as_bytes(), &mut output, &StreamConfig::default()).unwrap();
+
+        let result: serde_json::Value =
+            serde_json::from_slice(&output).expect("result should be JSON");
+        assert_eq!(result["status"], "malformed");
+        assert!(
+            result["error"]
+                .as_str()
+                .expect("malformed result should have an error")
+                .contains("strictt"),
+            "unknown key should be named in the error: {result}"
+        );
+
+        let valid = r#"{"schema_version":1,"id":"valid","old":{"local":"x"},"new":{"local":"y"},"overrides":{"strict":true}}"#;
+        let job: StreamingJob = serde_json::from_str(valid).expect("strict override is valid");
+        assert!(job.overrides.strict);
+    }
+
+    #[test]
     fn malformed_json_yields_malformed_result() {
         let mut input = b"not json\n".as_slice();
         let mut output = Vec::new();
@@ -888,6 +917,38 @@ mod tests {
             has_duplicate,
             "expected a duplicate result for the repeated id"
         );
+    }
+
+    #[test]
+    fn unknown_top_level_field_yields_malformed_result_naming_the_field() {
+        let json = r#"{"schema_version":1,"id":"a","old":{"local":"x"},"new":{"local":"y"},"bogus":1}"#;
+        let mut output = Vec::new();
+        let config = StreamConfig::default();
+        run_streaming(json.as_bytes(), &mut output, &config).unwrap();
+
+        let out_str = String::from_utf8(output).unwrap();
+        let result: serde_json::Value = serde_json::from_str(out_str.trim()).unwrap();
+        assert_eq!(result["status"], "malformed");
+        let error = result["error"].as_str().unwrap();
+        assert!(
+            error.contains("bogus"),
+            "error must name the unknown field, got: {error}"
+        );
+    }
+
+    #[test]
+    fn fully_valid_job_is_not_malformed() {
+        let json = r#"{"schema_version":1,"id":"a","old":{"local":"x"},"new":{"local":"y"},"overrides":{"strict":true}}"#;
+        let mut output = Vec::new();
+        let config = StreamConfig::default();
+        run_streaming(json.as_bytes(), &mut output, &config).unwrap();
+
+        let out_str = String::from_utf8(output).unwrap();
+        let result: serde_json::Value = serde_json::from_str(out_str.trim()).unwrap();
+        // The inputs do not exist, so the job fails — but it must have been
+        // accepted and dispatched, not rejected as malformed.
+        assert_ne!(result["status"], "malformed", "got: {result}");
+        assert_eq!(result["id"], "a");
     }
 
     #[test]

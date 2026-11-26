@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /// Return whether colored output should be disabled for this invocation.
 ///
 /// The caller supplies the flag, environment, and terminal state so the

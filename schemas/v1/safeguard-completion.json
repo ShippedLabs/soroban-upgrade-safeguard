@@ -1,0 +1,536 @@
+{
+  "schema_version": 1,
+  "completions": [
+    {
+      "key": "format",
+      "field_path": "format",
+      "value_type": "string (enum)",
+      "description": "Output format for safety report: 'text', 'json', 'markdown', or 'github-actions'.",
+      "enum_values": [
+        "text",
+        "json",
+        "markdown",
+        "github-actions"
+      ],
+      "snippet": "format = \"${1|text,json,markdown,github-actions|}\"",
+      "default": "text"
+    },
+    {
+      "key": "strict",
+      "field_path": "strict",
+      "value_type": "boolean",
+      "description": "Exit with non-zero exit code if any Warning or Critical findings are present.",
+      "enum_values": [],
+      "snippet": "strict = ${1|true,false|}",
+      "default": "false"
+    },
+    {
+      "key": "explain",
+      "field_path": "explain",
+      "value_type": "boolean",
+      "description": "Print remediation guidance explanations alongside findings.",
+      "enum_values": [],
+      "snippet": "explain = ${1|true,false|}",
+      "default": "false"
+    },
+    {
+      "key": "no_color",
+      "field_path": "no_color",
+      "value_type": "boolean",
+      "description": "Disable colored terminal output.",
+      "enum_values": [],
+      "snippet": "no_color = ${1|true,false|}",
+      "default": "false"
+    },
+    {
+      "key": "default_profile",
+      "field_path": "default_profile",
+      "value_type": "string",
+      "description": "Default named policy profile to activate when --profile is omitted.",
+      "enum_values": [],
+      "snippet": "default_profile = \"${1:dev}\"",
+      "default": null
+    },
+    {
+      "key": "max_suppressions",
+      "field_path": "max_suppressions",
+      "value_type": "integer (>= 0)",
+      "description": "Ceiling on active suppressions before the run fails.",
+      "enum_values": [],
+      "snippet": "max_suppressions = ${1:10}",
+      "default": "10"
+    },
+    {
+      "key": "allow_targetless",
+      "field_path": "allow_targetless",
+      "value_type": "boolean",
+      "description": "Allow targetless suppression rules (matching findings without a target entity).",
+      "enum_values": [],
+      "snippet": "allow_targetless = ${1|true,false|}",
+      "default": "false"
+    },
+    {
+      "key": "limits",
+      "field_path": "limits",
+      "value_type": "table",
+      "description": "Resource bounds bounding XDR decode depth, byte length, and traversal complexity.",
+      "enum_values": [],
+      "snippet": "[limits]\nmax_xdr_depth = ${1:64}\nmax_xdr_len = ${2:33554432}\n",
+      "default": null
+    },
+    {
+      "key": "max_xdr_depth",
+      "field_path": "limits.max_xdr_depth",
+      "value_type": "integer (>= 1)",
+      "description": "Maximum XDR recursion depth per entry. Must be >= 1. Default: 64.",
+      "enum_values": [],
+      "snippet": "max_xdr_depth = ${1:64}",
+      "default": "64"
+    },
+    {
+      "key": "max_xdr_len",
+      "field_path": "limits.max_xdr_len",
+      "value_type": "integer (>= 1)",
+      "description": "Maximum bytes decoded per custom section. Must be >= 1. Default: 33,554,432 (32 MiB).",
+      "enum_values": [],
+      "snippet": "max_xdr_len = ${1:33554432}",
+      "default": "33554432"
+    },
+    {
+      "key": "max_entries",
+      "field_path": "limits.max_entries",
+      "value_type": "integer (>= 1)",
+      "description": "Maximum decoded spec entries across sections. Must be >= 1. Default: 100,000.",
+      "enum_values": [],
+      "snippet": "max_entries = ${1:100000}",
+      "default": "100000"
+    },
+    {
+      "key": "max_walk_depth",
+      "field_path": "limits.max_walk_depth",
+      "value_type": "integer (>= 1)",
+      "description": "Maximum recursion depth for type traversal. Must be >= 1. Default: 128.",
+      "enum_values": [],
+      "snippet": "max_walk_depth = ${1:128}",
+      "default": "128"
+    },
+    {
+      "key": "gating",
+      "field_path": "gating",
+      "value_type": "table",
+      "description": "Gating policy configuration for compatibility axes.",
+      "enum_values": [],
+      "snippet": "[gating]\ngate_storage_layout = ${1:true}\ngate_call_abi = ${2:true}\n",
+      "default": null
+    },
+    {
+      "key": "gate_storage_layout",
+      "field_path": "gating.gate_storage_layout",
+      "value_type": "boolean",
+      "description": "Whether storage layout changes fail the run. Default: true.",
+      "enum_values": [],
+      "snippet": "gate_storage_layout = ${1|true,false|}",
+      "default": "true"
+    },
+    {
+      "key": "gate_call_abi",
+      "field_path": "gating.gate_call_abi",
+      "value_type": "boolean",
+      "description": "Whether call ABI signature/type changes fail the run. Default: true.",
+      "enum_values": [],
+      "snippet": "gate_call_abi = ${1|true,false|}",
+      "default": "true"
+    },
+    {
+      "key": "gate_event_indexer",
+      "field_path": "gating.gate_event_indexer",
+      "value_type": "boolean",
+      "description": "Whether event schema changes fail the run. Default: false.",
+      "enum_values": [],
+      "snippet": "gate_event_indexer = ${1|true,false|}",
+      "default": "false"
+    },
+    {
+      "key": "gate_source_level",
+      "field_path": "gating.gate_source_level",
+      "value_type": "boolean",
+      "description": "Whether source-level SDK breaking changes fail the run. Default: false.",
+      "enum_values": [],
+      "snippet": "gate_source_level = ${1|true,false|}",
+      "default": "false"
+    },
+    {
+      "key": "gate_runtime_surface",
+      "field_path": "gating.gate_runtime_surface",
+      "value_type": "boolean",
+      "description": "Whether protocol capabilities or host import changes fail the run. Default: true.",
+      "enum_values": [],
+      "snippet": "gate_runtime_surface = ${1|true,false|}",
+      "default": "true"
+    },
+    {
+      "key": "classification",
+      "field_path": "classification",
+      "value_type": "table",
+      "description": "Explicit classification of user-defined types as events vs storage types.",
+      "enum_values": [],
+      "snippet": "[classification]\nevents = [\"${1:TransferEvent}\"]\nstorage = [\"${2:ConfigData}\"]\n",
+      "default": null
+    },
+    {
+      "key": "events",
+      "field_path": "classification.events",
+      "value_type": "array of strings",
+      "description": "Exact type names to treat as events.",
+      "enum_values": [],
+      "snippet": "events = [\"${1:EventName}\"]",
+      "default": null
+    },
+    {
+      "key": "storage",
+      "field_path": "classification.storage",
+      "value_type": "array of strings",
+      "description": "Exact type names to treat as ordinary storage, overriding event classification.",
+      "enum_values": [],
+      "snippet": "storage = [\"${1:StorageName}\"]",
+      "default": null
+    },
+    {
+      "key": "name_heuristic",
+      "field_path": "classification.name_heuristic",
+      "value_type": "boolean",
+      "description": "Opt-in: treat any type whose name contains 'event' as an event.",
+      "enum_values": [],
+      "snippet": "name_heuristic = ${1|true,false|}",
+      "default": "false"
+    },
+    {
+      "key": "require_reason",
+      "field_path": "require_reason",
+      "value_type": "table",
+      "description": "Enforces non-blank justifications for specified rule IDs and compatibility axes.",
+      "enum_values": [],
+      "snippet": "[require_reason]\nrule_ids = [\"${1:struct_field_removed}\"]\naxes = [\"${2:storage_layout}\"]\n",
+      "default": null
+    },
+    {
+      "key": "profiles",
+      "field_path": "profiles.<name>",
+      "value_type": "table",
+      "description": "Named policy profile variant.",
+      "enum_values": [],
+      "snippet": "[profiles.${1:pr}]\ninherits = \"${2:dev}\"\nstrict = true\n",
+      "default": null
+    },
+    {
+      "key": "suppress",
+      "field_path": "suppress",
+      "value_type": "array of tables",
+      "description": "Acknowledges reviewed breaking changes so they no longer fail the run.",
+      "enum_values": [
+        "Environment",
+        "Function Removed",
+        "Function Documentation Changed",
+        "Function Added",
+        "Function Signature Changed",
+        "Parameter Renamed",
+        "Parameter Reordered",
+        "Parameter Type Changed",
+        "Return Type Changed",
+        "BytesN Size Changed",
+        "Event Definition Removed",
+        "Struct Removed",
+        "Struct Documentation Changed",
+        "Struct Added",
+        "Struct Field Removed",
+        "Struct Field Inserted",
+        "Struct Field Reordered",
+        "Struct Field Type Changed",
+        "Struct Field Added",
+        "Event Schema Removed",
+        "Event Schema Reordered",
+        "Event Schema Type Changed",
+        "Event Enum Removed",
+        "Enum Removed",
+        "Enum Documentation Changed",
+        "Enum Added",
+        "Enum Case Removed",
+        "Enum Case Value Changed",
+        "Enum Case Added",
+        "Event Enum Case Removed",
+        "Event Enum Case Value Changed",
+        "Event Enum Case Added",
+        "Union Removed",
+        "Union Added",
+        "Union Case Removed",
+        "Union Case Reordered",
+        "Union Case Type Changed",
+        "Union Case Added",
+        "Error Enum Removed",
+        "Error Enum Added",
+        "Error Enum Case Removed",
+        "Error Enum Case Value Changed",
+        "Error Enum Case Added",
+        "Type Kind Changed",
+        "Cascading Layout Break",
+        "Host Import Added",
+        "Host Import Removed",
+        "Host Import Signature Changed",
+        "Unknown Host Import",
+        "Protocol Requirement Raised",
+        "Protocol Environment Mismatch",
+        "Memory Added",
+        "Memory Removed",
+        "Memory Limits Changed",
+        "Table Added",
+        "Table Removed",
+        "Table Limits Changed",
+        "Table Element Type Changed",
+        "Global Added",
+        "Global Removed",
+        "Global Mutability Changed",
+        "Global Type Changed",
+        "Start Function Added",
+        "Start Function Removed",
+        "Start Function Changed",
+        "Element Segment Changed",
+        "Data Segment Changed",
+        "WASM Proposal Added",
+        "WASM Proposal Removed",
+        "Storage Durability Changed",
+        "Storage Namespace Changed",
+        "Map Key Type Changed",
+        "Map Value Type Changed"
+      ],
+      "snippet": "[[suppress]]\ncategory = \"${1:Struct Field Removed}\"\ntarget = \"${2:Type.field}\"\nreason = \"${3:Justification}\"\n",
+      "default": null
+    }
+  ],
+  "hovers": [
+    {
+      "field_path": "format",
+      "title": "format (string (enum))",
+      "type_info": "string (enum)",
+      "description": "Output format for safety report: 'text', 'json', 'markdown', or 'github-actions'.",
+      "examples": [
+        "format = \"json\""
+      ]
+    },
+    {
+      "field_path": "strict",
+      "title": "strict (boolean)",
+      "type_info": "boolean",
+      "description": "Exit with non-zero exit code if any Warning or Critical findings are present.",
+      "examples": [
+        "strict = true"
+      ]
+    },
+    {
+      "field_path": "explain",
+      "title": "explain (boolean)",
+      "type_info": "boolean",
+      "description": "Print remediation guidance explanations alongside findings.",
+      "examples": [
+        "explain = true"
+      ]
+    },
+    {
+      "field_path": "no_color",
+      "title": "no_color (boolean)",
+      "type_info": "boolean",
+      "description": "Disable colored terminal output.",
+      "examples": [
+        "no_color = true"
+      ]
+    },
+    {
+      "field_path": "default_profile",
+      "title": "default_profile (string)",
+      "type_info": "string",
+      "description": "Default named policy profile to activate when --profile is omitted.",
+      "examples": [
+        "default_profile = \"dev\""
+      ]
+    },
+    {
+      "field_path": "max_suppressions",
+      "title": "max_suppressions (integer (>= 0))",
+      "type_info": "integer (>= 0)",
+      "description": "Ceiling on active suppressions before the run fails.",
+      "examples": [
+        "max_suppressions = 10"
+      ]
+    },
+    {
+      "field_path": "allow_targetless",
+      "title": "allow_targetless (boolean)",
+      "type_info": "boolean",
+      "description": "Allow targetless suppression rules (matching findings without a target entity).",
+      "examples": [
+        "allow_targetless = true"
+      ]
+    },
+    {
+      "field_path": "limits",
+      "title": "limits (table)",
+      "type_info": "table",
+      "description": "Resource bounds bounding XDR decode depth, byte length, and traversal complexity.",
+      "examples": [
+        "[limits]\nmax_xdr_depth = 64"
+      ]
+    },
+    {
+      "field_path": "limits.max_xdr_depth",
+      "title": "max_xdr_depth (integer (>= 1))",
+      "type_info": "integer (>= 1)",
+      "description": "Maximum XDR recursion depth per entry. Must be >= 1. Default: 64.",
+      "examples": [
+        "max_xdr_depth = 64"
+      ]
+    },
+    {
+      "field_path": "limits.max_xdr_len",
+      "title": "max_xdr_len (integer (>= 1))",
+      "type_info": "integer (>= 1)",
+      "description": "Maximum bytes decoded per custom section. Must be >= 1. Default: 33,554,432 (32 MiB).",
+      "examples": [
+        "max_xdr_len = 33554432"
+      ]
+    },
+    {
+      "field_path": "limits.max_entries",
+      "title": "max_entries (integer (>= 1))",
+      "type_info": "integer (>= 1)",
+      "description": "Maximum decoded spec entries across sections. Must be >= 1. Default: 100,000.",
+      "examples": [
+        "max_entries = 100000"
+      ]
+    },
+    {
+      "field_path": "limits.max_walk_depth",
+      "title": "max_walk_depth (integer (>= 1))",
+      "type_info": "integer (>= 1)",
+      "description": "Maximum recursion depth for type traversal. Must be >= 1. Default: 128.",
+      "examples": [
+        "max_walk_depth = 128"
+      ]
+    },
+    {
+      "field_path": "gating",
+      "title": "gating (table)",
+      "type_info": "table",
+      "description": "Gating policy configuration for compatibility axes.",
+      "examples": [
+        "[gating]\ngate_storage_layout = true"
+      ]
+    },
+    {
+      "field_path": "gating.gate_storage_layout",
+      "title": "gate_storage_layout (boolean)",
+      "type_info": "boolean",
+      "description": "Whether storage layout changes fail the run. Default: true.",
+      "examples": [
+        "gate_storage_layout = true"
+      ]
+    },
+    {
+      "field_path": "gating.gate_call_abi",
+      "title": "gate_call_abi (boolean)",
+      "type_info": "boolean",
+      "description": "Whether call ABI signature/type changes fail the run. Default: true.",
+      "examples": [
+        "gate_call_abi = true"
+      ]
+    },
+    {
+      "field_path": "gating.gate_event_indexer",
+      "title": "gate_event_indexer (boolean)",
+      "type_info": "boolean",
+      "description": "Whether event schema changes fail the run. Default: false.",
+      "examples": [
+        "gate_event_indexer = true"
+      ]
+    },
+    {
+      "field_path": "gating.gate_source_level",
+      "title": "gate_source_level (boolean)",
+      "type_info": "boolean",
+      "description": "Whether source-level SDK breaking changes fail the run. Default: false.",
+      "examples": [
+        "gate_source_level = false"
+      ]
+    },
+    {
+      "field_path": "gating.gate_runtime_surface",
+      "title": "gate_runtime_surface (boolean)",
+      "type_info": "boolean",
+      "description": "Whether protocol capabilities or host import changes fail the run. Default: true.",
+      "examples": [
+        "gate_runtime_surface = true"
+      ]
+    },
+    {
+      "field_path": "classification",
+      "title": "classification (table)",
+      "type_info": "table",
+      "description": "Explicit classification of user-defined types as events vs storage types.",
+      "examples": [
+        "[classification]\nevents = [\"Transfer\"]"
+      ]
+    },
+    {
+      "field_path": "classification.events",
+      "title": "events (array of strings)",
+      "type_info": "array of strings",
+      "description": "Exact type names to treat as events.",
+      "examples": [
+        "events = [\"Transfer\", \"Approval\"]"
+      ]
+    },
+    {
+      "field_path": "classification.storage",
+      "title": "storage (array of strings)",
+      "type_info": "array of strings",
+      "description": "Exact type names to treat as ordinary storage, overriding event classification.",
+      "examples": [
+        "storage = [\"PreventList\"]"
+      ]
+    },
+    {
+      "field_path": "classification.name_heuristic",
+      "title": "name_heuristic (boolean)",
+      "type_info": "boolean",
+      "description": "Opt-in: treat any type whose name contains 'event' as an event.",
+      "examples": [
+        "name_heuristic = true"
+      ]
+    },
+    {
+      "field_path": "require_reason",
+      "title": "require_reason (table)",
+      "type_info": "table",
+      "description": "Enforces non-blank justifications for specified rule IDs and compatibility axes.",
+      "examples": [
+        "[require_reason]\naxes = [\"storage_layout\"]"
+      ]
+    },
+    {
+      "field_path": "profiles.<name>",
+      "title": "profiles (table)",
+      "type_info": "table",
+      "description": "Named policy profile variant.",
+      "examples": [
+        "[profiles.pr]\ninherits = \"dev\"\nstrict = true"
+      ]
+    },
+    {
+      "field_path": "suppress",
+      "title": "suppress (array of tables)",
+      "type_info": "array of tables",
+      "description": "Acknowledges reviewed breaking changes so they no longer fail the run.",
+      "examples": [
+        "[[suppress]]\ncategory = \"Struct Field Removed\"\ntarget = \"Data.amount\"\nreason = \"Planned migration.\""
+      ]
+    }
+  ]
+}

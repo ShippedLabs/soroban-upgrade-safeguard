@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Versioned registry mapping recognized Soroban host imports to protocol
 //! capability metadata.
 //!

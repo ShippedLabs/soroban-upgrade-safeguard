@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Explicit, configurable classification of user-defined types as *events* or
 //! ordinary *storage/interface* types.
 //!

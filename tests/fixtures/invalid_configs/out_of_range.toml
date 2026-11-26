@@ -1,0 +1,3 @@
+# Range violation: limits must be positive integers (>= 1)
+[limits]
+max_xdr_depth = 0

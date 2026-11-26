@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Per-axis and per-rule compatibility budgets.
 //!
 //! Axis gating ([`crate::suppression::PolicyConfig`]) and `--strict` decide
@@ -65,7 +67,7 @@ use crate::diff::{CompatibilityAxis, Severity};
 use crate::report::ReportedFinding;
 
 /// Which finding count a budget entry evaluates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum BudgetMetric {
@@ -301,7 +303,7 @@ fn is_known_rule_id(rule_id: &str) -> bool {
 }
 
 /// A single budget entry exceeded by the findings it claimed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BudgetViolation {
     /// Stable label for the entry's scope, e.g. `"rule:enum_case_added"`.
     pub scope: String,
@@ -450,7 +452,7 @@ mod tests {
 
     #[test]
     fn global_budget_counts_unclaimed_findings() {
-        let findings = vec![
+        let findings = [
             reported(
                 "Enum Case Added",
                 vec![CompatibilityAxis::SourceLevel],
@@ -474,7 +476,7 @@ mod tests {
 
     #[test]
     fn axis_budget_claims_matching_findings_and_excludes_them_from_global() {
-        let findings = vec![
+        let findings = [
             reported(
                 "Event Enum Case Added",
                 vec![CompatibilityAxis::EventIndexer],
@@ -511,7 +513,7 @@ mod tests {
 
     #[test]
     fn rule_budget_overrides_axis_and_global_for_its_own_findings() {
-        let findings = vec![
+        let findings = [
             reported(
                 "Event Enum Case Added",
                 vec![CompatibilityAxis::EventIndexer],
@@ -546,7 +548,7 @@ mod tests {
 
     #[test]
     fn unsuppressed_metric_ignores_suppressed_findings() {
-        let findings = vec![
+        let findings = [
             reported("Function Added", vec![CompatibilityAxis::SourceLevel], true),
             reported(
                 "Function Added",
@@ -563,7 +565,7 @@ mod tests {
 
     #[test]
     fn raw_metric_counts_suppressed_findings_too() {
-        let findings = vec![
+        let findings = [
             reported("Function Added", vec![CompatibilityAxis::SourceLevel], true),
             reported(
                 "Function Added",
@@ -581,7 +583,7 @@ mod tests {
 
     #[test]
     fn severity_filter_narrows_the_scoped_pool() {
-        let findings = vec![
+        let findings = [
             reported(
                 "Struct Field Type Changed",
                 vec![CompatibilityAxis::StorageLayout],

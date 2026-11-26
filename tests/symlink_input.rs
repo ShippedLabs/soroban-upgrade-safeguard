@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the symlink input policy: detection + provenance by
 //! default, and `--no-symlinks` to reject them outright.
 //!

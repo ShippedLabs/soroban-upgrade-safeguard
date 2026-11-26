@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Static WASM instruction and complexity delta reporting.
 //!
 //! This module profiles the *code section* of a WebAssembly module and
@@ -357,7 +359,7 @@ fn family_of(op: &Operator<'_>) -> InstructionFamily {
 // ── Per-function summary ──────────────────────────────────────────────────────
 
 /// Instruction-family counts for one function body.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FunctionComplexity {
     /// Index in the module's function index space (imports are not counted here).
     pub index: u32,
@@ -397,7 +399,7 @@ impl FunctionComplexity {
 /// All counts are bounded by the resource limit applied during profiling.
 /// The profile is deterministic: the same byte sequence always produces the
 /// same profile, regardless of platform or tool version.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WasmComplexityProfile {
     /// Number of locally-defined function bodies (Code section entries).
     /// Imported functions are not included; see [`crate::runtime_surface`].
@@ -504,7 +506,7 @@ fn profile_function_body(body: FunctionBody<'_>, out: &mut FunctionComplexity) {
 
 /// The numeric difference between two metric values, with both absolute and
 /// percentage representations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MetricDelta {
     /// Value in the old build.
     pub old: i64,
@@ -540,7 +542,7 @@ impl MetricDelta {
 /// Deltas are computed deterministically: same old/new byte sequences always
 /// produce the same delta. Fields use signed integers so decreases appear as
 /// negative values.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WasmComplexityDelta {
     /// Delta in defined function count.
     pub defined_functions: MetricDelta,
@@ -746,7 +748,7 @@ impl ComplexityBudgetConfig {
 // ── Violations ────────────────────────────────────────────────────────────────
 
 /// A single complexity budget entry that was exceeded.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ComplexityViolation {
     /// Metric that was exceeded.
     pub metric: String,

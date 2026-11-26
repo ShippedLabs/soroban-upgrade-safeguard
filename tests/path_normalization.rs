@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for path display normalization: reports (JSON and
 //! human-readable) show forward-slash-separated paths regardless of the
 //! platform that produced them, while relative paths stay relative rather

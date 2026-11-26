@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -76,8 +78,10 @@ pub struct Args {
     #[arg(long, value_name = "NEW_DIR", requires = "old_dir")]
     pub new_dir: Option<PathBuf>,
 
-    /// Allow HTTP connections for RPC when the host is localhost/127.0.0.1.
-    /// Without this flag only HTTPS URLs are accepted.
+    /// Allow HTTP connections for RPC when the host is a loopback address
+    /// (`localhost`, `127.0.0.1`, or `::1`). Without this flag, and for
+    /// any non-loopback host regardless of this flag, only HTTPS URLs
+    /// are accepted.
     #[arg(long)]
     pub allow_http_local: bool,
 
@@ -141,6 +145,14 @@ pub struct Args {
     /// schema, precedence, and inheritance rules.
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
+
+    /// Path to a reproducible-build manifest (TOML or JSON) recording the
+    /// expected source revision, toolchain, target, features, profile, and
+    /// artifact digests. When provided, embedded contract metadata and the
+    /// actual artifact hash are compared against the manifest and any
+    /// mismatches are reported as provenance findings.
+    #[arg(long, value_name = "PATH")]
+    pub build_manifest: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -191,6 +203,25 @@ pub struct FileConfig {
     /// See [`crate::wasm_complexity`] for metric names and semantics.
     #[serde(default, rename = "complexity_budget")]
     pub complexity_budget: Vec<crate::wasm_complexity::ComplexityBudgetEntryFile>,
+
+    #[serde(default, rename = "$schema")]
+    pub schema: Option<String>,
+    #[serde(default)]
+    pub policy: Option<crate::suppression::PolicyConfig>,
+    #[serde(default)]
+    pub require_reason: Option<crate::suppression::RequireReasonPolicy>,
+    #[serde(default)]
+    pub classification: Option<crate::classification::ClassificationConfig>,
+    #[serde(default, rename = "migration")]
+    pub migrations: Vec<crate::contract_migration::MigrationDeclaration>,
+    #[serde(default, rename = "budget")]
+    pub raw_budget: Vec<crate::budget::BudgetEntryFile>,
+
+    /// Optional reproducible-build manifest path, relative to this config
+    /// file. See [`crate::manifest`] for the schema and validation
+    /// rules.
+    #[serde(default)]
+    pub build_manifest: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -223,6 +254,11 @@ pub struct ResolvedConfig {
     /// in the config file. Empty when no config file was loaded or no tables
     /// were declared.
     pub complexity_budget: crate::wasm_complexity::ComplexityBudgetConfig,
+    /// Resolved path to the reproducible-build manifest, if any. Validation
+    /// and comparison against embedded metadata happen in
+    /// [`crate::build_manifest`], independent of interface compatibility
+    /// gating unless policy explicitly enables it.
+    pub build_manifest: Option<PathBuf>,
 }
 
 impl ResolvedConfig {
@@ -252,6 +288,18 @@ impl ResolvedConfig {
             // which TOML has no syntax for; strip it before parsing so it
             // doesn't surface as a confusing "unexpected character" error.
             let content = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+            if let Err(diags) = crate::config_schema::validate_safeguard_config(content, path) {
+                let formatted = diags
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                anyhow::bail!(
+                    "Invalid configuration file '{}':\n{}",
+                    path.display(),
+                    formatted
+                );
+            }
             let parsed: FileConfig = toml::from_str(content)
                 .with_context(|| format!("Invalid suppression config file '{}'", path.display()))?;
             Some(parsed)
@@ -418,6 +466,21 @@ impl ResolvedConfig {
         if let Some(fc) = &file_config {
             suppressions.allow_targetless = fc.allow_targetless;
             suppressions.rules = fc.suppress.clone();
+            if let Some(policy) = &fc.policy {
+                suppressions.policy = policy.clone();
+            }
+            if let Some(req_reason) = &fc.require_reason {
+                suppressions.require_reason = req_reason.clone();
+            }
+            suppressions.migrations = fc.migrations.clone();
+            if !fc.raw_budget.is_empty() {
+                suppressions.budgets = crate::budget::BudgetConfig::from_file_entries(
+                    fc.raw_budget.clone(),
+                )
+                .map_err(|errors| {
+                    anyhow::anyhow!("Invalid [[budget]] configuration: {}", errors.join("; "))
+                })?;
+            }
         }
         suppressions.max_suppressions = resolved_profile.max_suppressions.value;
         if let Some(v) = env_bool("SAFEGUARD_ALLOW_TARGETLESS") {
@@ -480,6 +543,20 @@ impl ResolvedConfig {
                     crate::wasm_complexity::ComplexityBudgetConfig::default()
                 });
 
+        // Reproducible-build manifest path resolution. CLI > env > config file.
+        // Relative paths from the config file are anchored on the config's
+        // directory so a checked-in config keeps working from any cwd.
+        let build_manifest = args
+            .build_manifest
+            .clone()
+            .or_else(|| env_path("SAFEGUARD_BUILD_MANIFEST"))
+            .or_else(|| {
+                file_config
+                    .as_ref()
+                    .and_then(|fc| fc.build_manifest.clone())
+                    .map(|p| resolve_path(base_dir, p))
+            });
+
         Ok(Self {
             wasm_paths,
             contract_id,
@@ -502,6 +579,7 @@ impl ResolvedConfig {
             gating,
             profile: resolved_profile,
             complexity_budget,
+            build_manifest,
         })
     }
 

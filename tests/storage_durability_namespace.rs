@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for storage durability and namespace change detection.
 //!
 //! These tests exercise the cross-schema comparison introduced in issue #346.
@@ -413,7 +414,6 @@ fn namespace_change_is_in_json_output() {
 
 #[test]
 fn cross_schema_findings_apply_to_safety_report() {
-    use soroban_upgrade_safeguard::storage_schema::StorageSchema;
     use soroban_upgrade_safeguard::{compare_wasm_bytes_with_options, CompareOptions};
 
     let old_wasm =

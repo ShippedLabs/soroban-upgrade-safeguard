@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -11,6 +14,7 @@ use stellar_xdr::curr::{
 use wasmparser::Parser;
 
 use crate::error::Error;
+use crate::manifest::{BuildManifest, ManifestFormat, ManifestMismatch};
 use crate::oci::{self, OciArtifact, OciArtifactKind, OciFetchConfig, OciReference};
 use crate::remote::{self, FetchedArtifact, RemoteFetchConfig, RemoteRef};
 use crate::rpc::RpcClientConfig;
@@ -43,11 +47,319 @@ pub fn normalize_path_display(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Embedded contract environment metadata extracted from a WASM module's
+/// custom sections, used to compare against a reproducible-build manifest.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmbeddedContractMetadata {
+    /// Source revision (e.g. git commit SHA) recorded in the WASM, if any.
+    pub source_revision: Option<String>,
+    /// Rust compiler version recorded in the WASM, if any.
+    pub rust_version: Option<String>,
+    /// Soroban SDK version recorded in the WASM, if any.
+    pub sdk_version: Option<String>,
+    /// Target triple recorded in the WASM, if any.
+    pub target: Option<String>,
+    /// Feature flags recorded in the WASM, if any.
+    pub features: Option<Vec<String>>,
+    /// Build profile (e.g. `release`, `debug`) recorded in the WASM, if any.
+    pub profile: Option<String>,
+}
+
+/// Result of verifying a WASM module against a reproducible-build manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ManifestCheckResult {
+    /// Fields that matched between manifest and embedded metadata/artifact.
+    pub verified: BTreeMap<String, String>,
+    /// Fields that could not be verified (missing on one side or the other).
+    pub unverified: BTreeMap<String, String>,
+    /// Fields that were present on both sides but disagreed.
+    pub mismatches: Vec<ManifestMismatch>,
+}
+
+impl ManifestCheckResult {
+    /// Returns `true` when no field mismatched.
+    pub fn is_clean(&self) -> bool {
+        self.mismatches.is_empty()
+    }
+}
+
+/// A verified build manifest paired with the result of checking the module
+/// against it, for inclusion in reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestVerification {
+    /// The manifest that was verified against.
+    pub manifest: BuildManifest,
+    /// The outcome of the per-field comparison.
+    pub result: ManifestCheckResult,
+}
+
+/// Extract embedded contract environment metadata from a WASM module's
+/// custom sections. Recognized sections are `contractenvmetav0` (Soroban
+/// environment metadata) and `contractmetav0` (contract metadata). Unknown
+/// or absent sections yield `None` fields rather than an error — metadata
+/// is supplementary, not required.
+pub fn extract_embedded_metadata(bytes: &[u8]) -> EmbeddedContractMetadata {
+    let mut meta = EmbeddedContractMetadata::default();
+    let parser = Parser::new(0);
+    for payload in parser.parse_all(bytes) {
+        let Ok(payload) = payload else { continue };
+        if let wasmparser::Payload::CustomSection(section) = payload {
+            let name = section.name();
+            if name == "contractenvmetav0" || name == "contractmetav0" {
+                parse_metadata_section(section.data(), &mut meta);
+            }
+        }
+    }
+    meta
+}
+
+/// Parse a `contractenvmetav0`/`contractmetav0` custom section body into
+/// `meta`. The section is a sequence of length-prefixed key/value string
+/// pairs; malformed entries are skipped rather than failing the whole parse.
+fn parse_metadata_section(data: &[u8], meta: &mut EmbeddedContractMetadata) {
+    let mut cursor = 0usize;
+    while cursor < data.len() {
+        let Some((key, next)) = read_len_prefixed(data, cursor) else {
+            break;
+        };
+        cursor = next;
+        let Some((value, next)) = read_len_prefixed(data, cursor) else {
+            break;
+        };
+        cursor = next;
+        match key {
+            "source_revision" | "git_revision" | "revision" => {
+                meta.source_revision = Some(value.to_string())
+            }
+            "rust_version" | "rustc" => meta.rust_version = Some(value.to_string()),
+            "sdk_version" | "soroban_sdk" => meta.sdk_version = Some(value.to_string()),
+            "target" | "target_triple" => meta.target = Some(value.to_string()),
+            "features" => {
+                meta.features = Some(
+                    value
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                )
+            }
+            "profile" | "build_profile" => meta.profile = Some(value.to_string()),
+            _ => {}
+        }
+    }
+}
+
+/// Read a length-prefixed UTF-8 string from `data` starting at `offset`.
+/// Returns the decoded string and the offset just past it, or `None` if the
+/// data is truncated or not valid UTF-8.
+fn read_len_prefixed(data: &[u8], offset: usize) -> Option<(&str, usize)> {
+    if offset + 4 > data.len() {
+        return None;
+    }
+    let len = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?) as usize;
+    let start = offset + 4;
+    let end = start.checked_add(len)?;
+    if end > data.len() {
+        return None;
+    }
+    let s = std::str::from_utf8(&data[start..end]).ok()?;
+    Some((s, end))
+}
+
+/// Verify a WASM module against a reproducible-build manifest, comparing
+/// manifest values to embedded metadata and the actual artifact digest.
+///
+/// This is deliberately independent from interface-compatibility gating:
+/// callers decide whether a mismatch should block a release. The result
+/// records verified and unverified fields separately so a report can show
+/// exactly what provenance was confirmed versus merely claimed.
+pub fn verify_against_manifest(
+    module: &WasmModule,
+    manifest: &BuildManifest,
+) -> ManifestCheckResult {
+    let embedded = extract_embedded_metadata(&module.bytes);
+    let mut verified = BTreeMap::new();
+    let mut unverified = BTreeMap::new();
+    let mut mismatches = Vec::new();
+
+    // Artifact digest: the manifest's expected digest must match the actual
+    // SHA-256 of the bytes we loaded. This is the strongest check available
+    // and does not depend on embedded metadata at all.
+    match &manifest.artifact_sha256 {
+        Some(expected) => {
+            if expected.eq_ignore_ascii_case(&module.sha256) {
+                verified.insert("artifact_sha256".to_string(), module.sha256.clone());
+            } else {
+                mismatches.push(ManifestMismatch {
+                    field: "artifact_sha256".to_string(),
+                    expected: expected.clone(),
+                    actual: module.sha256.clone(),
+                });
+            }
+        }
+        None => {
+            unverified.insert("artifact_sha256".to_string(), module.sha256.clone());
+        }
+    }
+
+    compare_opt(
+        "source_revision",
+        manifest.source_revision.as_deref(),
+        embedded.source_revision.as_deref(),
+        &mut verified,
+        &mut unverified,
+        &mut mismatches,
+    );
+    compare_opt(
+        "rust_version",
+        manifest.rust_version.as_deref(),
+        embedded.rust_version.as_deref(),
+        &mut verified,
+        &mut unverified,
+        &mut mismatches,
+    );
+    compare_opt(
+        "sdk_version",
+        manifest.sdk_version.as_deref(),
+        embedded.sdk_version.as_deref(),
+        &mut verified,
+        &mut unverified,
+        &mut mismatches,
+    );
+    compare_opt(
+        "target",
+        manifest.target.as_deref(),
+        embedded.target.as_deref(),
+        &mut verified,
+        &mut unverified,
+        &mut mismatches,
+    );
+    compare_opt(
+        "profile",
+        manifest.profile.as_deref(),
+        embedded.profile.as_deref(),
+        &mut verified,
+        &mut unverified,
+        &mut mismatches,
+    );
+
+    let expected_features = if manifest.features.is_empty() {
+        None
+    } else {
+        Some(&manifest.features)
+    };
+    match (expected_features, &embedded.features) {
+        (Some(expected), Some(actual)) => {
+            let mut a = expected.clone();
+            let mut b = actual.clone();
+            a.sort();
+            b.sort();
+            if a == b {
+                verified.insert("features".to_string(), a.join(","));
+            } else {
+                mismatches.push(ManifestMismatch {
+                    field: "features".to_string(),
+                    expected: a.join(","),
+                    actual: b.join(","),
+                });
+            }
+        }
+        (Some(expected), None) => {
+            unverified.insert("features".to_string(), expected.join(","));
+        }
+        (None, Some(actual)) => {
+            unverified.insert("features".to_string(), actual.join(","));
+        }
+        (None, None) => {}
+    }
+
+    ManifestCheckResult {
+        verified,
+        unverified,
+        mismatches,
+    }
+}
+
+/// Compare an optional manifest value against an optional embedded value,
+/// recording the outcome in the appropriate bucket.
+fn compare_opt(
+    field: &str,
+    expected: Option<&str>,
+    actual: Option<&str>,
+    verified: &mut BTreeMap<String, String>,
+    unverified: &mut BTreeMap<String, String>,
+    mismatches: &mut Vec<ManifestMismatch>,
+) {
+    match (expected, actual) {
+        (Some(e), Some(a)) => {
+            if e == a {
+                verified.insert(field.to_string(), a.to_string());
+            } else {
+                mismatches.push(ManifestMismatch {
+                    field: field.to_string(),
+                    expected: e.to_string(),
+                    actual: a.to_string(),
+                });
+            }
+        }
+        (Some(e), None) => {
+            unverified.insert(field.to_string(), e.to_string());
+        }
+        (None, Some(a)) => {
+            unverified.insert(field.to_string(), a.to_string());
+        }
+        (None, None) => {}
+    }
+}
+
+/// Load a build manifest from a file path, auto-detecting TOML vs JSON by
+/// extension (`.json` → JSON, otherwise TOML). Validation is strict: unknown
+/// fields and missing required fields are errors.
+pub fn load_build_manifest(path: &Path) -> Result<BuildManifest, Error> {
+    let contents = std::fs::read_to_string(path).map_err(|e| Error::FileAccess {
+        path: path.to_path_buf(),
+        details: format!("Failed to read build manifest: {}", path.display()),
+        source: Some(Box::new(e)),
+    })?;
+    let format = match path.extension().and_then(|e| e.to_str()) {
+        Some("json") => ManifestFormat::Json,
+        _ => ManifestFormat::Toml,
+    };
+    BuildManifest::parse_with_format(&contents, format).map_err(|e| Error::InvalidInput {
+        details: e.to_string(),
+    })
+}
+
+/// Load a build manifest from raw bytes, using the given format.
+pub fn load_build_manifest_from_bytes(
+    bytes: &[u8],
+    format: ManifestFormat,
+) -> Result<BuildManifest, Error> {
+    let contents = std::str::from_utf8(bytes).map_err(|e| Error::InvalidInput {
+        details: format!("Build manifest is not valid UTF-8: {}", e),
+    })?;
+    BuildManifest::parse_with_format(contents, format).map_err(|e| Error::InvalidInput {
+        details: e.to_string(),
+    })
+}
+
+/// Verify a WASM module against a manifest and return both the check result
+/// and the manifest that was used, for inclusion in reports.
+pub fn verify_module_with_manifest(
+    module: &WasmModule,
+    manifest: &BuildManifest,
+) -> ManifestVerification {
+    ManifestVerification {
+        manifest: manifest.clone(),
+        result: verify_against_manifest(module, manifest),
+    }
+}
+
 /// Symlink resolution recorded for a local input: what was asked for, and
 /// what was actually read after following every hop of the chain. `None` on
 /// [`WasmModule::symlink`] means the input was a direct file (or came from a
 /// non-filesystem source), not that resolution was skipped.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SymlinkResolution {
     /// The path exactly as given, before resolution, with display
     /// normalization applied (see [`normalize_path_display`]).
@@ -661,6 +973,198 @@ fn fetch_wasm_from_rpc_inner(
             symlink: None,
         });
     }
+}
+
+/// Parse a hex-encoded SHA-256 WASM hash (as accepted on the `--wasm-hash`
+/// CLI surface) into its raw 32 bytes.
+fn parse_wasm_hash(hash_hex: &str) -> Result<[u8; 32], Error> {
+    let trimmed = hash_hex.trim();
+    if trimmed.len() != 64 || !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(Error::InvalidInput {
+            details: format!(
+                "Invalid WASM hash '{}': must be a 64-character hex SHA-256 digest",
+                hash_hex
+            ),
+        });
+    }
+    let bytes = hex::decode(trimmed).map_err(|e| Error::InvalidInput {
+        details: format!("Invalid WASM hash '{}': {}", hash_hex, e),
+    })?;
+    bytes.try_into().map_err(|_| Error::InvalidInput {
+        details: format!("Invalid WASM hash '{}': must decode to 32 bytes", hash_hex),
+    })
+}
+
+/// Fetches an immutable Soroban contract-code artifact directly by its
+/// on-chain WASM hash, without going through a deployed contract instance.
+///
+/// Unlike [`fetch_wasm_from_rpc`], which addresses a *deployed instance* and
+/// resolves its executable hash along the way, this addresses *code
+/// identity* directly: the same code hash may back many contract instances,
+/// or none. Only a single `getLedgerEntries` read is required (no instance
+/// lookup), so there is no snapshot-consistency retry loop here.
+pub fn fetch_wasm_from_code_hash(hash_hex: &str, rpc_url: &str) -> Result<WasmModule, Error> {
+    fetch_wasm_from_code_hash_inner(hash_hex, rpc_url, None)
+}
+
+pub fn fetch_wasm_from_code_hash_with_config(
+    hash_hex: &str,
+    config: &RpcClientConfig,
+) -> Result<WasmModule, Error> {
+    fetch_wasm_from_code_hash_inner(hash_hex, &config.url, Some(config))
+}
+
+fn fetch_wasm_from_code_hash_inner(
+    hash_hex: &str,
+    rpc_url: &str,
+    auth: Option<&RpcClientConfig>,
+) -> Result<WasmModule, Error> {
+    let rpc_url = crate::rpc::normalize_url(rpc_url)?;
+    let rpc_url = rpc_url.as_str();
+
+    let requested_hash = parse_wasm_hash(hash_hex)?;
+    let requested_hash_hex = hex::encode(requested_hash);
+
+    let code_ledger_key = LedgerKey::ContractCode(LedgerKeyContractCode {
+        hash: Hash(requested_hash),
+    });
+
+    let code_key_b64 =
+        code_ledger_key
+            .to_xdr_base64(Limits::none())
+            .map_err(|e| Error::XdrDecoding {
+                entry_index: None,
+                byte_offset: None,
+                details: format!(
+                    "Failed to serialize ContractCode LedgerKey to base64: {}",
+                    e
+                ),
+                source: Some(Box::new(e)),
+            })?;
+
+    let code_response = query_rpc(
+        rpc_url,
+        auth,
+        "getLedgerEntries",
+        serde_json::json!({ "keys": [code_key_b64] }),
+    )?;
+
+    let ledger_sequence = extract_latest_ledger(&code_response).unwrap_or(0);
+
+    let code_entries = code_response["result"]["entries"]
+        .as_array()
+        .ok_or_else(|| Error::RpcProtocol {
+            rpc_url: crate::rpc::redact_url(rpc_url),
+            code: 0,
+            message: "RPC response for contract code did not contain 'entries' array".to_string(),
+        })?;
+
+    if code_entries.is_empty() {
+        return Err(Error::RpcProtocol {
+            rpc_url: crate::rpc::redact_url(rpc_url),
+            code: 0,
+            message: format!(
+                "WASM code not found on-chain for hash {}",
+                requested_hash_hex
+            ),
+        });
+    }
+
+    let expiration = extract_entry_expiration(&code_entries[0]);
+
+    let code_entry_xdr_b64 = code_entries[0]["xdr"]
+        .as_str()
+        .ok_or_else(|| Error::RpcProtocol {
+            rpc_url: crate::rpc::redact_url(rpc_url),
+            code: 0,
+            message: "RPC response code entry missing 'xdr' field".to_string(),
+        })?;
+
+    let code_entry =
+        LedgerEntry::from_xdr_base64(code_entry_xdr_b64, Limits::none()).map_err(|e| {
+            Error::XdrDecoding {
+                entry_index: Some(0),
+                byte_offset: None,
+                details: format!("Failed to deserialize ContractCode LedgerEntry XDR: {}", e),
+                source: Some(Box::new(e)),
+            }
+        })?;
+
+    let contract_code = match code_entry.data {
+        LedgerEntryData::ContractCode(code) => code,
+        _ => {
+            return Err(Error::RpcProtocol {
+                rpc_url: crate::rpc::redact_url(rpc_url),
+                code: 0,
+                message: "Unexpected ledger entry type returned for contract code".to_string(),
+            })
+        }
+    };
+
+    // The entry's own `hash` field must match the key we asked for: a proxy
+    // or misbehaving endpoint could otherwise silently answer with code for
+    // a different hash than requested.
+    if contract_code.hash.0 != requested_hash {
+        return Err(Error::Integrity {
+            details: format!(
+                "RPC returned contract code for hash {} but {} was requested",
+                hex::encode(contract_code.hash.0),
+                requested_hash_hex
+            ),
+            source: None,
+        });
+    }
+
+    let wasm_bytes = contract_code.code.to_vec();
+
+    // The entry's `hash` field and its `code` bytes both come from the same
+    // untrusted response, so verify the actual bytecode digest independently
+    // rather than trusting the claimed `hash` field alone.
+    let actual_digest = sha256_hex(&wasm_bytes);
+    if actual_digest != requested_hash_hex {
+        return Err(Error::Integrity {
+            details: format!(
+                "Fetched WASM digest {} does not match requested hash {}",
+                actual_digest, requested_hash_hex
+            ),
+            source: None,
+        });
+    }
+
+    if wasm_bytes.len() < 4 || &wasm_bytes[0..4] != b"\0asm" {
+        return Err(Error::Integrity {
+            details: format!(
+                "Fetched WASM for hash '{}' has invalid magic bytes",
+                requested_hash_hex
+            ),
+            source: None,
+        });
+    }
+
+    validate_wasm_structure(&wasm_bytes).map_err(|e| Error::Integrity {
+        details: format!(
+            "WASM validation failed for fetched code hash '{}'",
+            requested_hash_hex
+        ),
+        source: Some(Box::new(e)),
+    })?;
+
+    let network = query_network_passphrase(rpc_url, auth);
+    let provenance = crate::rpc::RpcProvenance {
+        ledger_sequence,
+        network,
+        rpc_endpoint: crate::rpc::redact_url(rpc_url),
+        code_hash: requested_hash_hex.clone(),
+        live_until_ledger_seq: expiration,
+    };
+
+    Ok(WasmModule {
+        path: format!("stellar-hash://{}", requested_hash_hex),
+        sha256: actual_digest,
+        bytes: wasm_bytes,
+        rpc_provenance: Some(provenance),
+        symlink: None,
+    })
 }
 
 /// Deterministic (never random) JSON-RPC request ID sent with every request,

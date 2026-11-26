@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Redaction helpers for local filesystem paths embedded in reports.
 //!
 //! Absolute paths are useful for audits but can leak a username, workspace

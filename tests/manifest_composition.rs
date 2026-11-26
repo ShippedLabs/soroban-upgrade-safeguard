@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration tests for composable batch manifests: `include`, `[defaults]`,
 //! and per-pair overrides.
 //!
@@ -95,6 +97,38 @@ fn run_manifest(manifest: &Path, extra: &[&str]) -> Run {
     ];
     args.extend_from_slice(extra);
     run_in(None, &args)
+}
+
+#[test]
+fn manifest_xdr_limit_fails_the_pair_with_a_limit_error() {
+    let dir = temp_dir("mc-enforced-limits");
+    stage_wasm(&dir);
+    let manifest = write(
+        &dir,
+        "batch.toml",
+        r#"
+        [defaults.limits]
+        max_xdr_depth = 1
+
+        [[pairs]]
+        name = "limited"
+        old = "v1.wasm"
+        new = "v3.wasm"
+        "#,
+    );
+
+    let run = run_manifest(&manifest, &[]);
+    assert_eq!(run.code, 1);
+    let json = run.json();
+    assert_eq!(json["results"][0]["coverage"], "error");
+    assert!(
+        json["results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("max_xdr_depth"),
+        "expected a depth limit error: {}",
+        run.stdout
+    );
 }
 
 /// The `{value, origin}` pair for one setting of one named pair.
@@ -1724,7 +1758,7 @@ fn custom_max_pairs_rejects_an_oversized_manifest_before_loading_any_wasm() {
 
     let combined = format!("{}{}", run.stdout, run.stderr);
     assert!(combined.contains("3 pairs"), "got: {combined}");
-    assert!(combined.contains("maximum of 2"), "got: {combined}");
+    assert!(combined.contains("maximum of 2 pairs"), "got: {combined}");
     assert!(combined.contains("--max-pairs"), "got: {combined}");
 
     // Rejected ahead of any WASM loading: no per-contract report exists.
@@ -1780,7 +1814,7 @@ fn max_pairs_zero_rejects_any_manifest_with_pairs() {
     );
     assert_eq!(run.code, 1);
     let combined = format!("{}{}", run.stdout, run.stderr);
-    assert!(combined.contains("1 pairs"), "got: {combined}");
+    assert!(combined.contains("contains 1 pair,"), "got: {combined}");
     assert!(combined.contains("maximum of 0"), "got: {combined}");
 }
 
@@ -2201,6 +2235,116 @@ fn manifest_empty_pairs_toml_rejected_integration() {
     );
     assert!(combined.contains("[[pairs]]"), "got: {combined}");
     assert!(combined.contains("\"pairs\":"), "got: {combined}");
+}
+
+// ---------------------------------------------------------------------------
+// --per-contract-output-name-template placeholder validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unknown_placeholder_in_per_contract_output_name_template_is_rejected() {
+    let dir = temp_dir("mc-template-unknown-placeholder");
+    stage_wasm(&dir.join("wasm"));
+    let reports = dir.join("reports");
+    let root = write(
+        &dir,
+        "root.toml",
+        r#"
+        [defaults]
+        base_dir = "wasm"
+
+        [[pairs]]
+        old  = "v1.wasm"
+        new  = "v3.wasm"
+        name = "token-a"
+        id   = "a"
+        "#,
+    );
+
+    let run = run_in(
+        None,
+        &[
+            "--manifest",
+            root.to_str().unwrap(),
+            "--per-contract-output-dir",
+            reports.to_str().unwrap(),
+            "--per-contract-output-name-template",
+            "{bogus}.{ext}",
+        ],
+    );
+
+    assert_ne!(
+        run.code, 0,
+        "an unknown template placeholder must be rejected"
+    );
+    let combined = format!("{}{}", run.stdout, run.stderr);
+    assert!(
+        combined.contains("Unknown placeholder '{bogus}'"),
+        "error should name the offending placeholder, got: {combined}"
+    );
+    assert!(
+        combined.contains("{name}") && combined.contains("{id}") && combined.contains("{ext}"),
+        "error should list the supported placeholders, got: {combined}"
+    );
+
+    // Validated ahead of any pair processing, so nothing hits disk.
+    let wrote_reports = reports
+        .read_dir()
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
+    assert!(
+        !wrote_reports,
+        "no reports may be written when the template is rejected"
+    );
+}
+
+#[test]
+fn documented_placeholders_in_per_contract_output_name_template_still_expand() {
+    let dir = temp_dir("mc-template-documented-placeholders");
+    stage_wasm(&dir.join("wasm"));
+    let reports = dir.join("reports");
+    let root = write(
+        &dir,
+        "root.toml",
+        r#"
+        [defaults]
+        base_dir = "wasm"
+
+        [[pairs]]
+        old  = "v1.wasm"
+        new  = "v3.wasm"
+        name = "token-a"
+        id   = "a1"
+        "#,
+    );
+
+    let run = run_in(
+        None,
+        &[
+            "--manifest",
+            root.to_str().unwrap(),
+            "--per-contract-output-dir",
+            reports.to_str().unwrap(),
+            "--per-contract-output-name-template",
+            "{name}_{id}.{ext}",
+        ],
+    );
+
+    assert_eq!(
+        run.code, 0,
+        "v1 -> v3 is the checked-in safe pair; a valid template must not itself fail the run: {}{}",
+        run.stdout, run.stderr
+    );
+
+    let expected = reports.join("token-a_a1.txt");
+    assert!(
+        expected.exists(),
+        "expected per-contract report at {}, dir contains: {:?}",
+        expected.display(),
+        reports.read_dir().map(|entries| entries
+            .filter_map(|e| e.ok().map(|e| e.file_name()))
+            .collect::<Vec<_>>())
+    );
 }
 
 #[test]

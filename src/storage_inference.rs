@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Conservative static analysis of Soroban SDK storage host calls.
 //!
 //! The WASM ABI represents storage keys and values as generic `Val`s.  A

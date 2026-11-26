@@ -520,14 +520,8 @@ or the path of the manifest file that set the value. Directory-scan runs
 
 ## What is not wired up
 
-Three things resolve and appear in provenance but do not yet change behavior.
+Two things resolve and appear in provenance but do not yet change behavior.
 They are documented here so the gap is visible rather than surprising.
-
-**`[limits]` is not enforced.** The values resolve, fold, and report correctly,
-but `parser.rs` still decodes with `Limits::none()` — `ResourcePolicy` is not
-threaded into the decode path anywhere in the tool. Wiring it touches the
-untrusted-input boundary and introduces exit-code-2 behavior that batch mode does
-not currently handle, which deserves its own change.
 
 **`[[dependencies]]` is accepted but not propagated.** `src/dependency.rs` has
 documented a top-level `[[dependencies]]` block as manifest syntax since before

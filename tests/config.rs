@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #![allow(clippy::bool_assert_comparison)]
 
 use std::env;

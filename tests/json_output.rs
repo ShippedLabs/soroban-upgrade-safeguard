@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `--format json` machine-readable output.
 //!
 //! These run the compiled binary against the checked-in WASM fixtures and

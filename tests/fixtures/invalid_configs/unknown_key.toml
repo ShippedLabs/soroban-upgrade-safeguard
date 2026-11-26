@@ -1,0 +1,3 @@
+# Unknown top-level key should fail with unknown field diagnostic
+strict = true
+unknown_feature_flag = true

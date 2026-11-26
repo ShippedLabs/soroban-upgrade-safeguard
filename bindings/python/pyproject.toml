@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "soroban-upgrade-safeguard"
+version = "0.1.0"
+description = "Native Python bindings for the soroban-upgrade-safeguard contract-upgrade safety analyzer."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "License :: OSI Approved :: MIT License",
+]
+
+[tool.maturin]
+# Mixed layout: the compiled extension (`_native`) is loaded by the pure
+# Python package in `python/soroban_upgrade_safeguard/`, which is what
+# `import soroban_upgrade_safeguard` actually resolves to.
+python-source = "python"
+module-name = "soroban_upgrade_safeguard._native"
+manifest-path = "Cargo.toml"

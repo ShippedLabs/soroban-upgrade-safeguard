@@ -1,0 +1,36 @@
+# Auto-normalize line endings for all text files
+* text=auto
+
+# Source files
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+
+# Configuration and documentation
+Cargo.toml text eol=lf
+Cargo.lock text eol=lf -diff
+LICENSE text eol=lf
+README* text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+.editorconfig text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Binary files
+*.wasm binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary

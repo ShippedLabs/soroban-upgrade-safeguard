@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Directional Soroban call-ABI compatibility analysis.
 //!
 //! Call compatibility is a value-flow question. Arguments are encoded by a
@@ -13,7 +15,7 @@ use stellar_xdr::curr::{ScSpecTypeDef, ScSpecUdtUnionCaseV0};
 use crate::spec::ContractSpec;
 
 /// The consumer/provider pairing being evaluated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CallDirection {
     OldClientToNewContract,
@@ -21,7 +23,7 @@ pub enum CallDirection {
 }
 
 /// One concrete Soroban value-flow incompatibility.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CallAbiBreak {
     pub function: String,
     pub path: String,
@@ -29,7 +31,7 @@ pub struct CallAbiBreak {
 }
 
 /// Compatibility for one consumer-to-provider direction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DirectionalCallVerdict {
     pub direction: CallDirection,
     pub compatible: bool,
@@ -47,7 +49,7 @@ impl DirectionalCallVerdict {
 }
 
 /// Both directional call-ABI conclusions for an upgrade.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CallAbiCompatibility {
     pub old_client_to_new_contract: DirectionalCallVerdict,
     pub new_client_to_old_contract: DirectionalCallVerdict,
@@ -92,6 +94,13 @@ pub fn compare(old: &ContractSpec, new: &ContractSpec) -> CallAbiCompatibility {
     }
 }
 
+/// Format `count` with the singular noun for exactly one, the plural otherwise
+/// (so zero stays plural: "0 values").
+fn pluralize(count: usize, singular: &str, plural: &str) -> String {
+    let noun = if count == 1 { singular } else { plural };
+    format!("{count} {noun}")
+}
+
 fn compare_direction(
     direction: CallDirection,
     client: &ContractSpec,
@@ -115,8 +124,12 @@ fn compare_direction(
                 function: name.clone(),
                 path: format!("function.{name}.arguments"),
                 reason: format!(
-                    "the client sends {} positional arguments but the provider requires {}",
-                    client_fn.inputs.len(),
+                    "the client sends {} but the provider requires {}",
+                    pluralize(
+                        client_fn.inputs.len(),
+                        "positional argument",
+                        "positional arguments"
+                    ),
                     contract_fn.inputs.len()
                 ),
             });
@@ -147,8 +160,8 @@ fn compare_direction(
                 function: name.clone(),
                 path: format!("function.{name}.return"),
                 reason: format!(
-                    "the provider returns {} values but the client decodes {}",
-                    contract_fn.outputs.len(),
+                    "the provider returns {} but the client decodes {}",
+                    pluralize(contract_fn.outputs.len(), "value", "values"),
                     client_fn.outputs.len()
                 ),
             });

@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `render` subcommand — the round trip that lets a
 //! stored JSON report stand in for the original WASM files.
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-
-use soroban_upgrade_safeguard::render::RenderableReport;
 
 fn wasm(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -99,6 +98,33 @@ fn text_is_the_default_format() {
 }
 
 #[test]
+fn render_min_severity_hides_info_details_but_keeps_counts() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/real_world_corpus/wasm");
+    let output = bin()
+        .arg(corpus.join("blend_pool_v1.wasm"))
+        .arg(corpus.join("blend_pool_v2.wasm"))
+        .args(["--format", "json", "--no-timestamp"])
+        .output()
+        .unwrap();
+    let report = String::from_utf8(output.stdout).unwrap();
+
+    let (all, _) = render(&report, &["--plain"]);
+    let (warnings, _) = render(&report, &["--plain", "--min-severity", "warning"]);
+    assert!(all.contains("[INFO]"));
+    assert!(!warnings.contains("[INFO]"));
+    assert!(warnings.contains("Info:     2"));
+}
+
+#[test]
+fn render_help_lists_min_severity() {
+    let output = bin().args(["render", "--help"]).output().unwrap();
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("--min-severity"));
+    assert!(help.contains("warning"));
+}
+
+#[test]
 fn a_safe_report_round_trips_and_exits_zero() {
     // Comparing a build against itself yields a passing verdict, which the
     // re-render must preserve — verdict included.
@@ -178,6 +204,37 @@ fn rendering_from_a_file_works() {
     );
 
     std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn render_output_writes_each_format_and_preserves_the_verdict() {
+    let report = live("json");
+    let dir = std::env::temp_dir().join(format!("sus-render-output-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("report.txt");
+
+    for format in ["text", "markdown", "github-actions"] {
+        std::fs::write(&path, "previous report").unwrap();
+        let (expected, expected_code) = render(&report, &["--format", format]);
+        let (stdout, code) = render(
+            &report,
+            &["--format", format, "--output", path.to_str().unwrap()],
+        );
+        assert!(stdout.is_empty());
+        assert_eq!(code, expected_code);
+        assert_eq!(code, 1, "the failing verdict must be preserved");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+        assert!(!path.with_extension("txt.tmp").exists());
+    }
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn render_help_documents_output() {
+    let output = bin().args(["render", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--output <PATH>"));
 }
 
 #[test]
@@ -393,5 +450,106 @@ fn empty_report_rendering_regression_test() {
     assert!(
         !md_out.contains("- 🔴") && !md_out.contains("- 🟡"),
         "no placeholder finding rows in markdown output"
+    );
+}
+
+// --- --format github-actions -------------------------------------------------
+
+/// Helper: run a live comparison and return its stdout in the requested format,
+/// without color and without a timestamp so output is deterministic.
+fn live_gha() -> String {
+    let output = bin()
+        .arg(wasm("v1.wasm"))
+        .arg(wasm("v2.wasm"))
+        .args(["--format", "github-actions"])
+        .output()
+        .expect("failed to run binary");
+    String::from_utf8(output.stdout).expect("stdout was not valid UTF-8")
+}
+
+#[test]
+fn render_github_actions_appears_in_help() {
+    let output = bin()
+        .arg("render")
+        .arg("--help")
+        .output()
+        .expect("failed to run binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("github-actions"),
+        "`github-actions` must appear in `render --help`\n---stdout---\n{stdout}"
+    );
+}
+
+#[test]
+fn render_github_actions_matches_live_run() {
+    // Capture the live github-actions output and a JSON report from the same
+    // comparison, then verify that re-rendering the JSON reproduces it.
+    let live_annotations = live_gha();
+    let json_report = live("json");
+
+    let (rendered, _) = render(&json_report, &["--format", "github-actions"]);
+
+    assert_eq!(
+        rendered, live_annotations,
+        "render --format github-actions must reproduce the live annotation output"
+    );
+}
+
+#[test]
+fn render_github_actions_breaking_upgrade_exits_one() {
+    let json_report = live("json");
+    let (_, code) = render(&json_report, &["--format", "github-actions"]);
+    assert_eq!(
+        code, 1,
+        "a stored failing report must exit 1 under github-actions format"
+    );
+}
+
+#[test]
+fn render_github_actions_passing_report_exits_zero() {
+    let output = bin()
+        .arg(wasm("v1.wasm"))
+        .arg(wasm("v1.wasm"))
+        .args(["--format", "json"])
+        .output()
+        .expect("failed to run binary");
+    let json_report = String::from_utf8(output.stdout).unwrap();
+
+    let (rendered, code) = render(&json_report, &["--format", "github-actions"]);
+
+    assert_eq!(code, 0, "a passing report must exit 0");
+    assert!(
+        rendered.contains("Soroban Upgrade Safeguard: PASSED"),
+        "rendered output must contain PASSED summary\n---stdout---\n{rendered}"
+    );
+}
+
+#[test]
+fn render_github_actions_emits_error_annotations_for_critical_findings() {
+    let json_report = live("json");
+    let (rendered, _) = render(&json_report, &["--format", "github-actions"]);
+
+    assert!(
+        rendered.lines().any(|l| l.starts_with("::error::")),
+        "render github-actions must emit ::error:: for critical findings\n---stdout---\n{rendered}"
+    );
+    assert!(
+        !rendered.contains('\u{1b}'),
+        "github-actions output must not contain ANSI escape codes"
+    );
+}
+
+#[test]
+fn render_github_actions_reuses_existing_renderer_not_a_duplicate() {
+    // The live --format github-actions output and the re-rendered output must
+    // be identical byte-for-byte, confirming a single shared code path.
+    let json_report = live("json");
+    let (rendered, _) = render(&json_report, &["--format", "github-actions"]);
+    let live_direct = live_gha();
+
+    assert_eq!(
+        rendered, live_direct,
+        "render and live github-actions output must be byte-identical (shared renderer)"
     );
 }

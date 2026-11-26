@@ -17,10 +17,10 @@ Stable integration points are simple, hermetic, and hide internal parser details
 ### Core Entry Points
 
 The crate root exposes four main structs/enums:
-- [`SafetyReport`](crate::report::SafetyReport)
-- [`ReportedFinding`](crate::report::ReportedFinding)
-- [`Finding`](crate::diff::Finding)
-- [`Severity`](crate::diff::Severity)
+- [`SafetyReport`](../src/report.rs)
+- [`ReportedFinding`](../src/report.rs)
+- [`Finding`](../src/diff.rs)
+- [`Severity`](../src/diff.rs)
 
 And two main verification functions:
 - `compare_wasm_bytes(old: &[u8], new: &[u8]) -> Result<SafetyReport>`

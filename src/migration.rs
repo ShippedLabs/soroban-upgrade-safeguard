@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Migration framework for saved JSON reports.
 //!
 //! [`crate::render::RenderableReport`] is what `--format json` writes and what
@@ -45,7 +47,7 @@ pub const LEGACY_SCHEMA_VERSION: u32 = 0;
 
 /// One step's record in a document's migration history, as embedded in the
 /// upgraded artifact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MigrationStepRecord {
     pub from: u32,
     pub to: u32,
@@ -61,7 +63,7 @@ pub struct MigrationStepRecord {
 /// actually been through [`upgrade_to_latest`]. Re-running the upgrade on an
 /// already-upgraded document leaves an existing record untouched, since no
 /// new steps apply.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MigrationRecord {
     /// The schema version the document declared (or [`LEGACY_SCHEMA_VERSION`]
     /// if the field was absent) before any step ran.
@@ -78,6 +80,8 @@ pub struct MigrationRecord {
 /// Errors from upgrading a saved report to the latest schema.
 #[derive(Debug)]
 pub enum MigrationError {
+    /// The input was empty or contained only whitespace.
+    EmptyInput,
     /// The bytes were not valid JSON, or the (possibly migrated) document
     /// does not match any known report shape.
     Malformed(serde_json::Error),
@@ -99,6 +103,10 @@ pub enum MigrationError {
 impl std::fmt::Display for MigrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            MigrationError::EmptyInput => write!(
+                f,
+                "upgrade-report input is empty or whitespace-only. Expected a saved JSON report produced by `--format json`."
+            ),
             MigrationError::Malformed(err) => write!(
                 f,
                 "not a valid Soroban Upgrade Safeguard JSON report: {err}. \
@@ -218,6 +226,11 @@ fn declared_version(value: &Value) -> Result<u32, MigrationError> {
 pub fn upgrade_to_latest(
     json: &str,
 ) -> Result<(RenderableReport, MigrationRecord), MigrationError> {
+    // Check for empty or whitespace-only input first, before attempting to parse.
+    if json.trim().is_empty() {
+        return Err(MigrationError::EmptyInput);
+    }
+
     let mut value: Value = serde_json::from_str(json).map_err(MigrationError::Malformed)?;
 
     let original_version = declared_version(&value)?;

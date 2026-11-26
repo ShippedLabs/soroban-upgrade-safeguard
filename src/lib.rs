@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! # Soroban Upgrade Safeguard
 //!
 //! Library for analyzing and validating Soroban smart-contract upgrades on the
@@ -13,6 +15,11 @@
 pub mod attestation;
 #[cfg(not(feature = "unstable"))]
 mod attestation;
+
+#[cfg(feature = "unstable")]
+pub mod binding_api;
+#[cfg(not(feature = "unstable"))]
+mod binding_api;
 
 #[cfg(feature = "unstable")]
 pub mod budget;
@@ -38,6 +45,11 @@ pub mod category;
 mod category;
 
 #[cfg(feature = "unstable")]
+pub mod classification;
+#[cfg(not(feature = "unstable"))]
+pub(crate) mod classification;
+
+#[cfg(feature = "unstable")]
 pub mod color;
 #[cfg(not(feature = "unstable"))]
 mod color;
@@ -46,6 +58,16 @@ mod color;
 pub mod config;
 #[cfg(not(feature = "unstable"))]
 mod config;
+
+#[cfg(feature = "unstable")]
+pub mod config_schema;
+#[cfg(not(feature = "unstable"))]
+mod config_schema;
+
+#[cfg(feature = "unstable")]
+pub mod decoder_registry;
+#[cfg(not(feature = "unstable"))]
+mod decoder_registry;
 
 #[cfg(feature = "unstable")]
 pub mod dependency;
@@ -67,7 +89,18 @@ pub mod error;
 #[cfg(not(feature = "unstable"))]
 mod error;
 
+#[cfg(feature = "unstable")]
+pub mod fuzz_minimize;
+#[cfg(not(feature = "unstable"))]
+mod fuzz_minimize;
+
+#[cfg(feature = "unstable")]
+pub mod impact_graph;
+#[cfg(not(feature = "unstable"))]
+mod impact_graph;
+
 pub mod interface_hash;
+pub mod logging;
 
 #[cfg(feature = "unstable")]
 pub mod jsonl;
@@ -95,6 +128,14 @@ pub mod manifest;
 #[cfg(not(feature = "unstable"))]
 mod manifest;
 
+pub mod metrics;
+mod timestamp;
+
+#[cfg(feature = "unstable")]
+pub mod metadata_cache;
+#[cfg(not(feature = "unstable"))]
+mod metadata_cache;
+
 #[cfg(feature = "unstable")]
 pub mod mapper;
 #[cfg(not(feature = "unstable"))]
@@ -114,6 +155,10 @@ mod migration;
 pub mod oci;
 #[cfg(not(feature = "unstable"))]
 mod oci;
+#[cfg(feature = "unstable")]
+pub mod oracle;
+#[cfg(not(feature = "unstable"))]
+mod oracle;
 
 #[cfg(feature = "unstable")]
 pub mod parser;
@@ -124,6 +169,11 @@ mod parser;
 pub mod preflight;
 #[cfg(not(feature = "unstable"))]
 mod preflight;
+
+#[cfg(feature = "unstable")]
+pub mod policy_bundle;
+#[cfg(not(feature = "unstable"))]
+mod policy_bundle;
 
 #[cfg(feature = "unstable")]
 pub mod profile;
@@ -151,6 +201,11 @@ pub mod report;
 mod report;
 
 #[cfg(feature = "unstable")]
+pub mod report_schema;
+#[cfg(not(feature = "unstable"))]
+mod report_schema;
+
+#[cfg(feature = "unstable")]
 pub mod rpc;
 #[cfg(not(feature = "unstable"))]
 mod rpc;
@@ -169,6 +224,11 @@ mod rpc_record;
 pub mod runtime_surface;
 #[cfg(not(feature = "unstable"))]
 mod runtime_surface;
+
+#[cfg(feature = "unstable")]
+pub mod snapshot_manifest;
+#[cfg(not(feature = "unstable"))]
+mod snapshot_manifest;
 
 #[cfg(feature = "unstable")]
 pub mod spec;
@@ -219,6 +279,13 @@ pub use crate::attestation::{
 pub use crate::call_abi::{
     CallAbiBreak, CallAbiCompatibility, CallDirection, DirectionalCallVerdict,
 };
+pub use crate::config_schema::{
+    config_schema, config_schema_value, generate_config_completion, manifest_schema,
+    manifest_schema_value, validate_batch_manifest, validate_config_file,
+    validate_safeguard_config, BatchManifestDocument, ConfigDiagnostic, ConfigEditorCatalog,
+    ConfigValidationResult, EditorCompletionItem, EditorHoverMetadata, SafeguardConfigDocument,
+    CONFIG_SCHEMA_VERSION, MANIFEST_SCHEMA_VERSION,
+};
 pub use crate::diff::{Finding, Severity};
 pub use crate::lineage::{
     validate_candidate_against_lineage, HistoricalFinding, LineageRecord, LineageStore,
@@ -244,6 +311,12 @@ pub use crate::storage_schema::{
 use std::path::Path;
 
 use anyhow::{Context, Result};
+
+/// The engine's own version, as reported by its `Cargo.toml`. Native
+/// bindings (`bindings/python`, `bindings/node`) expose this so callers can
+/// check which engine build they're actually running against; see
+/// `docs/bindings.md` for the version-compatibility policy this backs.
+pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 use crate::spec::ContractSpec;
 use crate::suppression::SuppressionConfig;

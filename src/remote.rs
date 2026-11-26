@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! HTTPS input resolver for WASM binaries and JSON/TOML spec artifacts.
 //!
 //! Release pipelines frequently publish immutable build artifacts (a compiled
@@ -54,6 +56,7 @@
 //! deletes the whole cache directory outright (wired to the CLI's
 //! `--clear-remote-cache` flag).
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -136,6 +139,124 @@ impl RemoteRef {
             expected_sha256: hex_digest.to_ascii_lowercase(),
         }))
     }
+}
+
+/// A single reproducible-build manifest entry describing the expected
+/// provenance of one contract artifact.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildManifestEntry {
+    /// Source revision (e.g. git commit SHA) the artifact was built from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
+    /// Rust compiler version used for the build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_version: Option<String>,
+    /// Soroban SDK version used for the build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdk_version: Option<String>,
+    /// Target triple the artifact was compiled for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// Cargo feature flags enabled for the build.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
+    /// Build profile (e.g. `release`, `debug`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Expected lowercase hex SHA-256 of the built artifact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_sha256: Option<String>,
+}
+
+/// A reproducible-build manifest: a named collection of per-artifact entries.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildManifest {
+    /// Manifest schema version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    /// Per-artifact entries keyed by artifact name.
+    #[serde(default)]
+    pub artifacts: BTreeMap<String, BuildManifestEntry>,
+}
+
+/// Outcome of comparing a manifest entry against embedded metadata and the
+/// actual artifact digest.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildManifestVerification {
+    /// Fields that matched between manifest and embedded metadata.
+    pub verified: Vec<String>,
+    /// Fields that were present in both but disagreed.
+    pub mismatched: Vec<String>,
+    /// Fields the manifest declares but embedded metadata does not expose.
+    pub unverified: Vec<String>,
+}
+
+impl BuildManifest {
+    /// Parse a build manifest from TOML or JSON text, dispatching on the
+    /// first non-whitespace character. Strict: unknown top-level keys are
+    /// rejected.
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        let trimmed = text.trim_start();
+        let manifest: BuildManifest = if trimmed.starts_with('{') {
+            serde_json::from_str(text).map_err(|e| Error::InvalidInput {
+                details: format!("invalid JSON build manifest: {e}"),
+            })?
+        } else {
+            toml::from_str(text).map_err(|e| Error::InvalidInput {
+                details: format!("invalid TOML build manifest: {e}"),
+            })?
+        };
+        Ok(manifest)
+    }
+
+    /// Look up the entry for `name`, if present.
+    #[must_use]
+    pub fn entry(&self, name: &str) -> Option<&BuildManifestEntry> {
+        self.artifacts.get(name)
+    }
+}
+
+/// Compare a manifest entry against embedded metadata fields and the actual
+/// artifact digest. Fields absent from either side are recorded as
+/// `unverified` rather than treated as mismatches.
+#[must_use]
+pub fn verify_manifest_entry(
+    entry: &BuildManifestEntry,
+    embedded: &BTreeMap<String, String>,
+    actual_sha256: Option<&str>,
+) -> BuildManifestVerification {
+    let mut out = BuildManifestVerification::default();
+    let mut check = |field: &str, manifest_value: Option<&str>| {
+        let Some(mv) = manifest_value else { return };
+        match embedded.get(field) {
+            Some(ev) if ev == mv => out.verified.push(field.to_string()),
+            Some(_) => out.mismatched.push(field.to_string()),
+            None => out.unverified.push(field.to_string()),
+        }
+    };
+    check("source_revision", entry.source_revision.as_deref());
+    check("rust_version", entry.rust_version.as_deref());
+    check("sdk_version", entry.sdk_version.as_deref());
+    check("target", entry.target.as_deref());
+    check("profile", entry.profile.as_deref());
+    if !entry.features.is_empty() {
+        let joined = entry.features.join(",");
+        match embedded.get("features") {
+            Some(ev) if ev == &joined => out.verified.push("features".to_string()),
+            Some(_) => out.mismatched.push("features".to_string()),
+            None => out.unverified.push("features".to_string()),
+        }
+    }
+    if let (Some(expected), Some(actual)) = (entry.artifact_sha256.as_deref(), actual_sha256) {
+        if expected.eq_ignore_ascii_case(actual) {
+            out.verified.push("artifact_sha256".to_string());
+        } else {
+            out.mismatched.push("artifact_sha256".to_string());
+        }
+    } else if entry.artifact_sha256.is_some() {
+        out.unverified.push("artifact_sha256".to_string());
+    }
+    out
 }
 
 /// Policy controlling how [`fetch_verified`] downloads and caches a remote
@@ -294,6 +415,11 @@ pub fn fetch_verified(
         .redirects(config.max_redirects)
         .redirect_auth_headers(ureq::RedirectAuthHeaders::Never)
         .timeout(config.timeout)
+        // ureq's connect timeout takes precedence over the overall request
+        // timeout and defaults to 30 seconds, so without this a zero-second
+        // budget would still block for the OS default TCP SYN timeout: the
+        // request's own deadline has to bound the connect phase too.
+        .timeout_connect(config.timeout)
         .build();
 
     let response = agent
@@ -549,5 +675,76 @@ mod tests {
             PathBuf::from("/tmp/custom-safeguard-cache")
         );
         std::env::remove_var(CACHE_DIR_ENV_VAR);
+    }
+
+    #[test]
+    fn build_manifest_parses_toml_and_json() {
+        let toml_text = r#"
+version = 1
+
+[artifacts.contract]
+source_revision = "abc123"
+rust_version = "1.78.0"
+sdk_version = "21.0.0"
+target = "wasm32-unknown-unknown"
+features = ["a", "b"]
+profile = "release"
+artifact_sha256 = "3b1a2c9e4d5f6071829384756617283940516273849506172839405162738495"
+"#;
+        let m = BuildManifest::parse(toml_text).unwrap();
+        let entry = m.entry("contract").unwrap();
+        assert_eq!(entry.source_revision.as_deref(), Some("abc123"));
+        assert_eq!(entry.features, vec!["a".to_string(), "b".to_string()]);
+
+        let json_text = r#"{"version":1,"artifacts":{"contract":{"source_revision":"abc123"}}}"#;
+        let m2 = BuildManifest::parse(json_text).unwrap();
+        assert_eq!(
+            m2.entry("contract").unwrap().source_revision.as_deref(),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn build_manifest_rejects_malformed() {
+        assert!(BuildManifest::parse("not: [valid").is_err());
+        assert!(BuildManifest::parse("{").is_err());
+    }
+
+    #[test]
+    fn verify_manifest_entry_classifies_fields() {
+        let entry = BuildManifestEntry {
+            source_revision: Some("abc123".into()),
+            rust_version: Some("1.78.0".into()),
+            sdk_version: Some("21.0.0".into()),
+            target: Some("wasm32-unknown-unknown".into()),
+            features: vec!["a".into(), "b".into()],
+            profile: Some("release".into()),
+            artifact_sha256: Some(DIGEST.into()),
+        };
+        let mut embedded = BTreeMap::new();
+        embedded.insert("source_revision".to_string(), "abc123".to_string());
+        embedded.insert("rust_version".to_string(), "1.77.0".to_string());
+        embedded.insert("features".to_string(), "a,b".to_string());
+        embedded.insert("profile".to_string(), "release".to_string());
+
+        let v = verify_manifest_entry(&entry, &embedded, Some(DIGEST));
+        assert!(v.verified.contains(&"source_revision".to_string()));
+        assert!(v.verified.contains(&"features".to_string()));
+        assert!(v.verified.contains(&"profile".to_string()));
+        assert!(v.verified.contains(&"artifact_sha256".to_string()));
+        assert!(v.mismatched.contains(&"rust_version".to_string()));
+        assert!(v.unverified.contains(&"sdk_version".to_string()));
+        assert!(v.unverified.contains(&"target".to_string()));
+    }
+
+    #[test]
+    fn verify_manifest_entry_detects_stale_digest() {
+        let entry = BuildManifestEntry {
+            artifact_sha256: Some("0".repeat(64)),
+            ..Default::default()
+        };
+        let embedded = BTreeMap::new();
+        let v = verify_manifest_entry(&entry, &embedded, Some(DIGEST));
+        assert!(v.mismatched.contains(&"artifact_sha256".to_string()));
     }
 }

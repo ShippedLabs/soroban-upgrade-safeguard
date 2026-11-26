@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `extract` subcommand.
 //!
 //! These run the compiled binary against the checked-in WASM fixtures, which is
@@ -480,4 +481,191 @@ fn extract_output_trailing_newline_regression_test() {
         trimmed_hash.chars().all(|c| c.is_ascii_hexdigit()),
         "removing the final newline leaves a valid hash"
     );
+}
+
+// --- --compact flag ----------------------------------------------------------
+
+#[test]
+fn extract_compact_produces_single_line_json() {
+    let path = wasm("v1.wasm");
+    let (stdout, code) = extract(&[path.to_str().unwrap(), "--compact"]);
+
+    assert_eq!(code, 0, "extract --compact must succeed");
+
+    // Must end with exactly one newline, and the content before it must be a
+    // single JSON line (no embedded newlines).
+    assert!(stdout.ends_with('\n'), "output must end with a newline");
+    let line = stdout.trim_end_matches('\n');
+    assert!(
+        !line.contains('\n'),
+        "--compact output must be a single line, but got newlines inside it"
+    );
+
+    // Must still be valid JSON.
+    let parsed: Value = serde_json::from_str(line).expect("--compact output must be valid JSON");
+    assert_eq!(parsed["spec_schema_version"], 1);
+}
+
+#[test]
+fn extract_compact_content_matches_default() {
+    let path = wasm("v1.wasm");
+
+    let (compact_stdout, _) = extract(&[path.to_str().unwrap(), "--compact"]);
+    let (pretty_stdout, _) = extract(&[path.to_str().unwrap()]);
+
+    let compact: Value =
+        serde_json::from_str(compact_stdout.trim()).expect("compact output must be valid JSON");
+    let pretty: Value =
+        serde_json::from_str(pretty_stdout.trim()).expect("pretty output must be valid JSON");
+
+    assert_eq!(
+        compact, pretty,
+        "--compact and default output must deserialise to the same value"
+    );
+}
+
+#[test]
+fn extract_compact_appears_in_help() {
+    let output = bin()
+        .arg("extract")
+        .arg("--help")
+        .output()
+        .expect("failed to run binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--compact"),
+        "--compact must appear in `extract --help`\n---stdout---\n{stdout}"
+    );
+}
+
+#[test]
+fn extract_compact_with_output_file_writes_single_line() {
+    let wasm_path = wasm("v1.wasm");
+    let out_path = temp_lockfile("compact-output");
+    let _ = fs::remove_file(&out_path);
+
+    let (_, code) = extract(&[
+        wasm_path.to_str().unwrap(),
+        "--compact",
+        "--output",
+        out_path.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "extract --compact --output must succeed");
+
+    let contents = fs::read_to_string(&out_path).expect("output file must be written");
+    assert!(contents.ends_with('\n'), "file must end with a newline");
+    let line = contents.trim_end_matches('\n');
+    assert!(
+        !line.contains('\n'),
+        "--compact --output file must contain a single JSON line"
+    );
+    let parsed: Value = serde_json::from_str(line).expect("file contents must be valid JSON");
+    assert_eq!(parsed["spec_schema_version"], 1);
+
+    fs::remove_file(&out_path).unwrap();
+}
+
+// --- --hash-only conflict tests ---------------------------------------------
+
+#[test]
+fn extract_hash_only_conflicts_with_compact() {
+    let path = wasm("v1.wasm");
+    let output = bin()
+        .arg("extract")
+        .arg(path)
+        .arg("--hash-only")
+        .arg("--compact")
+        .output()
+        .expect("failed to run binary");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--hash-only with --compact must exit with code 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("conflict") || stderr.contains("cannot be used"),
+        "stderr must mention the conflict: {stderr}"
+    );
+}
+
+#[test]
+fn extract_hash_only_conflicts_with_no_env_meta() {
+    let path = wasm("v1.wasm");
+    let output = bin()
+        .arg("extract")
+        .arg(path)
+        .arg("--hash-only")
+        .arg("--no-env-meta")
+        .output()
+        .expect("failed to run binary");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--hash-only with --no-env-meta must exit with code 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("conflict") || stderr.contains("cannot be used"),
+        "stderr must mention the conflict: {stderr}"
+    );
+}
+
+#[test]
+fn extract_hash_only_conflicts_with_no_duplicates() {
+    let path = wasm("v1.wasm");
+    let output = bin()
+        .arg("extract")
+        .arg(path)
+        .arg("--hash-only")
+        .arg("--no-duplicates")
+        .output()
+        .expect("failed to run binary");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--hash-only with --no-duplicates must exit with code 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("conflict") || stderr.contains("cannot be used"),
+        "stderr must mention the conflict: {stderr}"
+    );
+}
+
+#[test]
+fn extract_hash_only_conflicts_with_no_scope() {
+    let path = wasm("v1.wasm");
+    let output = bin()
+        .arg("extract")
+        .arg(path)
+        .arg("--hash-only")
+        .arg("--no-scope")
+        .output()
+        .expect("failed to run binary");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--hash-only with --no-scope must exit with code 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("conflict") || stderr.contains("cannot be used"),
+        "stderr must mention the conflict: {stderr}"
+    );
+}
+
+#[test]
+fn extract_hash_only_alone_still_works() {
+    let path = wasm("v1.wasm");
+    let (stdout, code) = extract(&[path.to_str().unwrap(), "--hash-only"]);
+
+    assert_eq!(code, 0, "--hash-only on its own must still succeed");
+    let hash = stdout.trim();
+    assert_eq!(hash.len(), 64);
+    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
 }

@@ -1,0 +1,8 @@
+# Policy requires reason for struct_field_removed
+[require_reason]
+rule_ids = ["struct_field_removed"]
+
+[[suppress]]
+category = "Struct Field Removed"
+rule_id = "struct_field_removed"
+target = "Data.amount"

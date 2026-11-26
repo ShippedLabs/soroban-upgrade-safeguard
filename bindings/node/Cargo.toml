@@ -1,0 +1,23 @@
+[package]
+name = "soroban-upgrade-safeguard-node"
+version = "0.1.0"
+edition = "2021"
+description = "Node.js bindings for the soroban-upgrade-safeguard comparison engine."
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-upgrade-safeguard = { path = "../.." }
+# `serde-json` lets `#[napi]` functions return `serde_json::Value` directly,
+# converted into JS objects/arrays/strings/numbers by napi-rs itself —
+# never serialized to a JSON *string* that the JS side has to
+# `JSON.parse()` back.
+napi = { version = "2", default-features = false, features = ["napi4", "serde-json"] }
+napi-derive = "2"
+serde_json = "1.0"
+
+[build-dependencies]
+napi-build = "2"

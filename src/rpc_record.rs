@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Record and replay transport for hermetic RPC troubleshooting.
 //!
 //! # Recording

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! CLI-level wiring tests for `https://` input positions.
 //!
 //! These don't hit the network (the CLI's remote-fetch policy always sets
@@ -71,6 +72,46 @@ fn clear_remote_cache_removes_the_directory_and_exits_zero() {
     assert_eq!(code, 0, "clearing the cache should succeed");
     assert!(!dir.exists(), "cache directory should be removed");
     assert!(stdout.contains("Cleared remote artifact cache"));
+}
+
+#[test]
+fn clear_remote_cache_exits_without_a_comparison_or_any_wasm_inputs() {
+    let dir = std::env::temp_dir().join(format!(
+        "safeguard-remote-cli-clear-no-comparison-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("cafef00d")).expect("create fake cache entry dir");
+    std::fs::write(dir.join("cafef00d").join("artifact.bin"), b"cached")
+        .expect("write fake artifact");
+    assert!(dir.exists());
+
+    // No positional WASM paths are passed at all: --clear-remote-cache must
+    // succeed on its own, without the usual "provide OLD_WASM/NEW_WASM"
+    // validation that a comparison run would require.
+    let dir_str = dir.display().to_string();
+    let (code, stdout, stderr) = run(&["--clear-remote-cache", "--remote-cache-dir", &dir_str]);
+
+    assert_eq!(
+        code, 0,
+        "clearing the cache without any WASM inputs should succeed, stderr: {stderr}"
+    );
+    assert!(
+        stderr.is_empty(),
+        "no WASM-input or comparison error should be printed, got: {stderr}"
+    );
+
+    // The success message confirms a cache clear happened, not a comparison
+    // (which would report a verdict/compatibility result instead).
+    assert!(stdout.contains("Cleared remote artifact cache"));
+    assert!(
+        !stdout.to_lowercase().contains("compat"),
+        "no comparison verdict should be reported, got: {stdout}"
+    );
+
+    assert!(
+        !dir.exists(),
+        "cached artifacts present before the run should be gone afterward"
+    );
 }
 
 #[test]

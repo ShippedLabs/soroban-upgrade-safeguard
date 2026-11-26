@@ -1,0 +1,54 @@
+name: Oracle Differential Tests (Extended)
+
+# This workflow runs the network-gated differential oracle suite.
+# The hermetic subset runs automatically in ci.yml (cargo test); this job
+# adds the extended checks that require SAFEGUARD_ORACLE_NETWORK=1.
+#
+# Schedule: nightly on main so regressions are caught promptly without
+# blocking every PR.  Developers can also trigger it manually via
+# workflow_dispatch.
+
+on:
+  schedule:
+    # 02:00 UTC every day on the default branch
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or SHA to test'
+        required: false
+        default: 'main'
+
+jobs:
+  oracle-differential-extended:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-oracle-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-oracle-
+
+      - name: Run oracle differential tests (hermetic)
+        run: cargo test oracle_differential
+
+      - name: Run oracle differential tests (extended, network-gated)
+        env:
+          SAFEGUARD_ORACLE_NETWORK: "1"
+        run: cargo test oracle_differential -- --nocapture
+
+      - name: Run full test suite
+        run: cargo test

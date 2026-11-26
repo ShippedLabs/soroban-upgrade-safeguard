@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 use std::fmt;
 use std::path::PathBuf;
 
@@ -26,6 +28,7 @@ pub enum ErrorKind {
     RpcSnapshotConsistency,
     RpcIdMismatch,
     SymlinkRejected,
+    UnsupportedDecoderVersion,
 }
 
 /// The canonical error type for the soroban-upgrade-safeguard library.
@@ -54,6 +57,7 @@ pub enum ErrorKind {
 /// | [`OciFetch`](Error::OciFetch) | Resolving an `oci://` input artifact failed (manifest/blob transport, auth, or media-type selection) |
 /// | [`RpcIdMismatch`](Error::RpcIdMismatch) | A JSON-RPC response's `id` was missing or did not match the request's `id` |
 /// | [`SymlinkRejected`](Error::SymlinkRejected) | A local input path was a symlink while `--no-symlinks` was in effect |
+/// | [`UnsupportedDecoderVersion`](Error::UnsupportedDecoderVersion) | A custom section declared an interface version this build has no decoder for |
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -154,9 +158,41 @@ pub enum Error {
         /// The fully resolved target, when it could be determined.
         resolved: Option<PathBuf>,
     },
+    /// No registered decoder claimed the interface version a custom section
+    /// declared. The section was read, but this build cannot interpret it, so
+    /// the comparison would be a guess rather than a check.
+    UnsupportedDecoderVersion {
+        /// The version the section declared, when it could be rendered.
+        version_display: Option<String>,
+        /// Why no decoder matched.
+        message: String,
+    },
 }
 
 impl Error {
+    /// Build an [`InvalidInput`](Error::InvalidInput) error.
+    ///
+    /// `#[non_exhaustive]` blocks struct-literal construction of any
+    /// variant from outside this crate (regardless of field visibility),
+    /// so callers in other crates — native-language bindings
+    /// (`bindings/python`, `bindings/node`) in particular — go through
+    /// this constructor rather than `Error::InvalidInput { .. }`.
+    pub fn invalid_input(details: impl Into<String>) -> Self {
+        Error::InvalidInput {
+            details: details.into(),
+        }
+    }
+
+    /// Build an [`Integrity`](Error::Integrity) error with no further
+    /// source error attached. See [`Self::invalid_input`] for why this
+    /// constructor exists.
+    pub fn integrity(details: impl Into<String>) -> Self {
+        Error::Integrity {
+            details: details.into(),
+            source: None,
+        }
+    }
+
     /// Return a stable [`ErrorKind`] identifier for this error.
     ///
     /// Unlike matching on the enum variant directly, `kind()` is guaranteed to
@@ -182,6 +218,7 @@ impl Error {
             Error::RpcSnapshotConsistency { .. } => ErrorKind::RpcSnapshotConsistency,
             Error::RpcIdMismatch { .. } => ErrorKind::RpcIdMismatch,
             Error::SymlinkRejected { .. } => ErrorKind::SymlinkRejected,
+            Error::UnsupportedDecoderVersion { .. } => ErrorKind::UnsupportedDecoderVersion,
         }
     }
 
@@ -392,6 +429,16 @@ impl fmt::Display for Error {
                     path.display()
                 ),
             },
+            Error::UnsupportedDecoderVersion {
+                version_display,
+                message,
+            } => {
+                write!(f, "Unsupported interface version: {message}")?;
+                if let Some(version) = version_display {
+                    write!(f, " (section declared {version})")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -439,6 +486,7 @@ impl std::error::Error for Error {
             Error::RpcSnapshotConsistency { .. } => None,
             Error::RpcIdMismatch { .. } => None,
             Error::SymlinkRejected { .. } => None,
+            Error::UnsupportedDecoderVersion { .. } => None,
         }
     }
 }

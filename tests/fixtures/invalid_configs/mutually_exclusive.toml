@@ -1,0 +1,4 @@
+# Mutually exclusive fields: conflicting category and rule_id
+[[suppress]]
+category = "storage-type-changed"
+rule_id = "SUS-E001"

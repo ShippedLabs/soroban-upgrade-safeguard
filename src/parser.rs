@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: MIT
+
 use std::io::Cursor;
 use stellar_xdr::curr::{Limited, Limits, ReadXdr, ScEnvMetaEntry, ScSpecEntry};
 use wasmparser::{CompositeType, Parser, Payload, TypeRef, ValType};
 
+use crate::decoder_registry::{InterfaceVersion, SpecDecoderRegistry};
 use crate::error::Error;
-use crate::limits::ResourcePolicy;
+use crate::limits::{EntryKind, LimitError, ResourcePolicy};
 use crate::runtime_surface::{extract_runtime_surface, RuntimeSurface};
 use crate::storage_inference::{infer_storage, StorageInference};
 
@@ -81,6 +84,14 @@ pub struct SorobanMetadata {
     pub host_imports: Vec<ImportedFunction>,
     /// The normalized WebAssembly runtime surface.
     pub runtime_surface: RuntimeSurface,
+    /// Whether the `contractspecv0` section was decoded through the versioned
+    /// registry (`true`) or via the legacy direct-decode path (`false`).
+    /// Consumers can use this to distinguish a complete, version-verified
+    /// decode from a best-effort one.
+    pub spec_version_verified: bool,
+    /// The interface version that was used to select the spec decoder, if
+    /// available from the env-meta section.
+    pub spec_interface_version: Option<InterfaceVersion>,
 }
 
 /// Decodes concatenated ScSpecEntry XDR objects from raw bytes.
@@ -92,6 +103,9 @@ pub struct SorobanMetadata {
 /// An empty `data` slice (a present but empty contractspecv0 section) returns
 /// an empty vector with a warning printed to stderr. This is distinct from a
 /// missing section (which never calls this function at all).
+#[cfg(test)]
+/// It is referenced by this module's own tests; production decoding goes
+/// through the version-aware [`crate::decoder_registry`] path.
 fn decode_spec_entries(data: &[u8]) -> Result<Vec<ScSpecEntry>, Error> {
     if data.is_empty() {
         // A present but empty contractspecv0 section is unusual but valid:
@@ -146,18 +160,107 @@ pub fn decode_env_meta(data: &[u8]) -> Result<ContractEnvMeta, Error> {
     Ok(ContractEnvMeta { entries })
 }
 
+/// Check a manifest pair's resource budget before the normal comparison path.
+pub fn enforce_limits(bytes: &[u8], policy: &ResourcePolicy) -> anyhow::Result<()> {
+    let mut spec_entries = Vec::new();
+    let mut env_entries = 0usize;
+
+    for payload in Parser::new(0).parse_all(bytes) {
+        let payload = payload?;
+        let Payload::CustomSection(section) = payload else {
+            continue;
+        };
+        let data = section.data();
+        match section.name() {
+            "contractspecv0" => {
+                let mut reader = Limited::new(Cursor::new(data), policy.xdr_limits());
+                while (reader.inner.position() as usize) < data.len() {
+                    let entry = ScSpecEntry::read_xdr(&mut reader).map_err(|error| {
+                        LimitError::from_xdr_error(&error, policy)
+                            .map(anyhow::Error::new)
+                            .unwrap_or_else(|| anyhow::Error::new(error))
+                    })?;
+                    spec_entries.push(entry);
+                    if spec_entries.len() > policy.max_entries {
+                        return Err(LimitError::EntryCountExceeded {
+                            limit: policy.max_entries,
+                            kind: EntryKind::Spec,
+                        }
+                        .into());
+                    }
+                }
+            }
+            "contractenvmetav0" => {
+                let mut reader = Limited::new(Cursor::new(data), policy.xdr_limits());
+                while (reader.inner.position() as usize) < data.len() {
+                    ScEnvMetaEntry::read_xdr(&mut reader).map_err(|error| {
+                        LimitError::from_xdr_error(&error, policy)
+                            .map(anyhow::Error::new)
+                            .unwrap_or_else(|| anyhow::Error::new(error))
+                    })?;
+                    env_entries += 1;
+                    if env_entries > policy.max_entries {
+                        return Err(LimitError::EntryCountExceeded {
+                            limit: policy.max_entries,
+                            kind: EntryKind::EnvMeta,
+                        }
+                        .into());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let lint = crate::lint::lint(
+        &spec_entries,
+        &crate::lint::LintOptions {
+            policy: *policy,
+            ..Default::default()
+        },
+    );
+    if lint.findings.iter().any(|finding| {
+        finding.rule_id == crate::lint::LintRuleId::UnanalyzableRecursiveShape.as_str()
+    }) {
+        return Err(LimitError::WalkDepthExceeded {
+            limit: policy.max_walk_depth,
+        }
+        .into());
+    }
+    Ok(())
+}
+
 /// Parses the WASM bytes to extract Soroban-specific custom sections and decodes them.
+///
+/// The `contractspecv0` section is decoded through [`SpecDecoderRegistry`] so
+/// that the interface version from `contractenvmetav0` is used to select the
+/// correct decoder.  If the interface version is unsupported the function
+/// returns [`Error::UnsupportedDecoderVersion`] rather than attempting a
+/// best-effort parse that could silently reinterpret data under the wrong
+/// schema.
 pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata, Error> {
+    extract_metadata_with_registry(bytes, &SpecDecoderRegistry::default())
+}
+
+/// Like [`extract_metadata`] but takes an explicit registry, enabling tests
+/// and advanced callers to inject custom decoders.
+pub fn extract_metadata_with_registry(
+    bytes: &[u8],
+    registry: &SpecDecoderRegistry,
+) -> Result<SorobanMetadata, Error> {
     let mut metadata = SorobanMetadata::default();
     let parser = Parser::new(0);
 
-    let mut spec_section_index = 0usize;
     let mut env_section_index = 0usize;
     // Function types declared by the module's type section, in declaration
     // order across all rec groups; `None` for a non-func composite type
     // (structs/arrays from the GC proposal, which Soroban contracts do not
     // use, but which still occupy a slot in the shared type index space).
     let mut func_types: Vec<Option<wasmparser::FuncType>> = Vec::new();
+
+    // Buffer raw spec section bytes and their byte-offsets so we can dispatch
+    // them through the registry after we have the env-meta version.
+    let mut raw_spec_sections: Vec<(Vec<u8>, u64)> = Vec::new();
 
     for payload in parser.parse_all(bytes) {
         let payload = payload.map_err(|e| Error::WasmValidation {
@@ -212,19 +315,8 @@ pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata, Error> {
             }
             Payload::CustomSection(section) => match section.name() {
                 "contractspecv0" => {
-                    let section_index = spec_section_index;
-                    spec_section_index += 1;
-
-                    let entries = decode_spec_entries(section.data()).map_err(|e| {
-                        Error::SectionExtraction {
-                            section_name: "contractspecv0".to_string(),
-                            section_index,
-                            byte_offset: section.data_offset() as u64,
-                            details: String::new(),
-                            source: Some(Box::new(e)),
-                        }
-                    })?;
-                    metadata.spec.extend(entries);
+                    // Buffer for versioned dispatch after env-meta is known.
+                    raw_spec_sections.push((section.data().to_vec(), section.data_offset() as u64));
                 }
                 "contractenvmetav0" => {
                     let section_index = env_section_index;
@@ -243,6 +335,75 @@ pub fn extract_metadata(bytes: &[u8]) -> Result<SorobanMetadata, Error> {
                 _ => {}
             },
             _ => {}
+        }
+    }
+
+    // Now that we have the env-meta (and therefore the interface version),
+    // decode all buffered contractspecv0 sections through the registry.
+    let iface_version = metadata
+        .env_meta
+        .as_ref()
+        .and_then(|m| m.interface_version())
+        .map(InterfaceVersion::from_raw);
+
+    for (section_index, (data, byte_offset)) in raw_spec_sections.iter().enumerate() {
+        let outcome = registry.decode(data, iface_version);
+        match outcome {
+            crate::decoder_registry::DecodeOutcome::Decoded {
+                entries,
+                version,
+                complete,
+                section_meta: _,
+            } => {
+                metadata.spec.extend(entries);
+                metadata.spec_version_verified = true;
+                metadata.spec_interface_version = version;
+                if !complete {
+                    eprintln!(
+                        "warning: contractspecv0 section {} decoded partially \
+                         (unknown fields skipped for {})",
+                        section_index,
+                        version
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "unknown version".to_string())
+                    );
+                }
+            }
+            crate::decoder_registry::DecodeOutcome::PartialDecode {
+                entries,
+                version,
+                skipped_bytes,
+                section_meta: _,
+            } => {
+                metadata.spec.extend(entries);
+                metadata.spec_version_verified = true;
+                metadata.spec_interface_version = version;
+                eprintln!(
+                    "warning: contractspecv0 section {} partially decoded for {} \
+                     ({} bytes skipped — unknown future fields)",
+                    section_index,
+                    version
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown version".to_string()),
+                    skipped_bytes,
+                );
+            }
+            crate::decoder_registry::DecodeOutcome::UnsupportedVersion { version, message } => {
+                // `message` distinguishes a genuine version mismatch from a
+                // matched decoder that failed mid-decode. `SectionExtraction`'s
+                // `Display` does not print `details`, so forward the real cause
+                // through the source error to keep it in the message chain.
+                return Err(Error::SectionExtraction {
+                    section_name: "contractspecv0".to_string(),
+                    section_index,
+                    byte_offset: *byte_offset,
+                    details: message.clone(),
+                    source: Some(Box::new(Error::UnsupportedDecoderVersion {
+                        version_display: version.map(|v| v.to_string()),
+                        message: message.clone(),
+                    })),
+                });
+            }
         }
     }
 
@@ -547,7 +708,25 @@ mod tests {
 
     #[test]
     fn extract_metadata_reports_contractspec_section_offset_for_decode_errors() {
-        let wasm = wasm_with_custom_section("contractspecv0", &[0x00]);
+        // Declare a supported `contractenvmetav0` version so the registry accepts
+        // the contract and decoding reaches the per-entry spec decode, which is
+        // what reports the failing entry index.
+        let env_data = encode_interface_version(20, 0);
+        let mut wasm = Vec::from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+        let env_body = {
+            let mut b = wasm_string("contractenvmetav0");
+            b.extend_from_slice(&env_data);
+            b
+        };
+        wasm.extend(wasm_section(0, env_body));
+        // A `contractspecv0` section whose only entry is not valid XDR.
+        let spec_body = {
+            let mut b = wasm_string("contractspecv0");
+            b.extend_from_slice(&[0x00]);
+            b
+        };
+        wasm.extend(wasm_section(0, spec_body));
+
         let error = extract_metadata(&wasm).expect_err("invalid spec section must fail");
         let mut messages = vec![error.to_string()];
         use std::error::Error as StdError;
@@ -623,7 +802,6 @@ mod tests {
             "an empty contractspecv0 section must decode to an empty spec vec"
         );
     }
-}
 
     #[test]
     fn extract_metadata_ignores_unrelated_custom_sections() {
@@ -636,19 +814,19 @@ mod tests {
 
         // Build a WASM module with Soroban sections plus an unrelated section
         let mut wasm = Vec::from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-        
+
         // Add contractspecv0 section
         let spec_body = wasm_string("contractspecv0");
         let mut spec_with_data = spec_body;
         spec_with_data.extend_from_slice(&spec_data);
         wasm.extend(wasm_section(0, spec_with_data));
-        
+
         // Add contractenvmetav0 section
         let env_body = wasm_string("contractenvmetav0");
         let mut env_with_data = env_body;
         env_with_data.extend_from_slice(&env_data);
         wasm.extend(wasm_section(0, env_with_data));
-        
+
         // Add unrelated custom section
         let unrelated_body = wasm_string("unrelated_section");
         let mut unrelated_with_data = unrelated_body;
@@ -656,11 +834,133 @@ mod tests {
         wasm.extend(wasm_section(0, unrelated_with_data));
 
         let metadata = extract_metadata(&wasm).expect("WASM with unrelated section must parse");
-        assert_eq!(metadata.spec.len(), 1, "spec must be extracted from Soroban section");
-        assert!(metadata.env_meta.is_some(), "env meta must be extracted from Soroban section");
+        assert_eq!(
+            metadata.spec.len(),
+            1,
+            "spec must be extracted from Soroban section"
+        );
+        assert!(
+            metadata.env_meta.is_some(),
+            "env meta must be extracted from Soroban section"
+        );
         assert_eq!(
             metadata.env_meta.as_ref().unwrap().protocol_version(),
             Some(20),
             "env meta protocol version must be correct"
         );
     }
+
+    // ------------------------------------------------------------------
+    // Decoder registry integration tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn extract_metadata_sets_spec_version_verified_for_known_protocol() {
+        // Build a WASM with a protocol-20 env-meta and an empty spec section.
+        let env_data = encode_interface_version(20, 0);
+        let mut wasm = Vec::from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+        let env_body = {
+            let mut b = wasm_string("contractenvmetav0");
+            b.extend_from_slice(&env_data);
+            b
+        };
+        wasm.extend(wasm_section(0, env_body));
+        // Empty contractspecv0 section.
+        let spec_body = wasm_string("contractspecv0");
+        wasm.extend(wasm_section(0, spec_body));
+
+        let metadata = extract_metadata(&wasm).expect("protocol 20 should be accepted");
+        assert!(
+            metadata.spec_version_verified,
+            "spec_version_verified must be true for a supported protocol"
+        );
+        assert_eq!(
+            metadata.spec_interface_version.map(|v| v.protocol),
+            Some(20)
+        );
+    }
+
+    #[test]
+    fn extract_metadata_legacy_no_envmeta_accepted() {
+        // A WASM with no contractenvmetav0 section (legacy) should still parse.
+        let spec_data = encode_spec_entries(&[spec_function("hello", "")]);
+        let wasm = wasm_with_custom_section("contractspecv0", &spec_data);
+        let metadata = extract_metadata(&wasm).expect("legacy WASM should be accepted");
+        assert!(metadata.env_meta.is_none());
+        assert_eq!(metadata.spec.len(), 1);
+    }
+
+    #[test]
+    fn extract_metadata_rejects_unsupported_future_protocol() {
+        // Build a WASM with protocol 255 (no decoder registered for it in an
+        // empty registry).
+        let env_data = encode_interface_version(255, 0);
+        let spec_data = encode_spec_entries(&[spec_function("hello", "")]);
+        let mut wasm = Vec::from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+        let env_body = {
+            let mut b = wasm_string("contractenvmetav0");
+            b.extend_from_slice(&env_data);
+            b
+        };
+        wasm.extend(wasm_section(0, env_body));
+        let spec_body = {
+            let mut b = wasm_string("contractspecv0");
+            b.extend_from_slice(&spec_data);
+            b
+        };
+        wasm.extend(wasm_section(0, spec_body));
+
+        // Use an empty registry (no decoders) to force unsupported.
+        let empty_registry = crate::decoder_registry::SpecDecoderRegistry {
+            entries: Vec::new(),
+        };
+        let err = extract_metadata_with_registry(&wasm, &empty_registry)
+            .expect_err("unsupported version should produce an error");
+        assert_eq!(
+            err.kind(),
+            crate::error::ErrorKind::SectionExtraction,
+            "outer error should be SectionExtraction"
+        );
+    }
+
+    #[test]
+    fn extract_metadata_with_registry_custom_decoder_accepted() {
+        use crate::decoder_registry::{
+            decode_spec_v0, DecoderEntry, SpecDecoderRegistry, VersionPredicate,
+        };
+
+        // Register only a protocol-99 decoder and feed a protocol-99 WASM.
+        let mut reg = SpecDecoderRegistry {
+            entries: Vec::new(),
+        };
+        reg.register(DecoderEntry {
+            name: "test-p99",
+            predicate: VersionPredicate::ExactProtocol(99),
+            decode: decode_spec_v0,
+        });
+
+        let env_data = encode_interface_version(99, 0);
+        let spec_data = encode_spec_entries(&[spec_function("fn99", "")]);
+        let mut wasm = Vec::from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+        let env_body = {
+            let mut b = wasm_string("contractenvmetav0");
+            b.extend_from_slice(&env_data);
+            b
+        };
+        wasm.extend(wasm_section(0, env_body));
+        let spec_body = {
+            let mut b = wasm_string("contractspecv0");
+            b.extend_from_slice(&spec_data);
+            b
+        };
+        wasm.extend(wasm_section(0, spec_body));
+
+        let metadata =
+            extract_metadata_with_registry(&wasm, &reg).expect("custom p99 decoder should work");
+        assert_eq!(metadata.spec.len(), 1);
+        assert_eq!(
+            metadata.spec_interface_version.map(|v| v.protocol),
+            Some(99)
+        );
+    }
+}

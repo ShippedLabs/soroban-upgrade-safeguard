@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! The report model, and the renderers that operate on it.
 //!
 //! The three output formats used to be produced only from a live
@@ -29,7 +31,7 @@ use crate::report::{AxisStatus, ReportedFinding};
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 
 /// Provenance metadata embedded in every report for auditability.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Provenance {
     /// Tool version from crate metadata (CARGO_PKG_VERSION).
     pub tool_version: String,
@@ -71,7 +73,7 @@ pub struct Provenance {
 }
 
 /// Severity counts, serialized as a nested `counts` object.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SeverityCounts {
     pub critical: usize,
     pub warning: usize,
@@ -137,7 +139,7 @@ impl std::error::Error for RenderError {
 /// This is what `--format json` writes and what the `render` subcommand reads
 /// back. It carries everything the text and Markdown renderers need, which is
 /// what makes a stored report a complete artifact rather than a summary.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RenderableReport {
     /// Shape version of this document. See [`REPORT_SCHEMA_VERSION`].
     #[serde(default = "default_schema_version")]
@@ -181,6 +183,30 @@ pub struct RenderableReport {
     pub empirical: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub empirical_findings: Vec<crate::empirical::EmpiricalFinding>,
+    /// Coverage and integrity status of the empirical storage snapshot's
+    /// manifest. `None` when empirical validation did not run, or ran
+    /// against a live RPC sample rather than a manifest-bearing local
+    /// snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_integrity: Option<crate::snapshot_manifest::SnapshotIntegrityReport>,
+    /// The upgrade's impact graph, present only when `--impact-graph`
+    /// requested it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact_graph: Option<crate::impact_graph::ImpactGraph>,
+    /// How many live historical versions lineage validation actually
+    /// checked the candidate against, present only when
+    /// `--lineage-store` was given. `Some(0)` means the candidate
+    /// passed *vacuously* (nothing in history was compared against it,
+    /// typically `--max-live-versions 0`), not that history was checked
+    /// and found compatible — see `docs/lineage-walkthrough.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_versions_checked: Option<usize>,
+    /// What this run recorded about a `--policy-bundle`, present only
+    /// when one was given — and, since a failed bundle aborts the run
+    /// before a report exists, always reflects a *verified* bundle. See
+    /// `docs/policy-bundles.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_bundle: Option<crate::policy_bundle::BundleProvenance>,
     /// Configured compatibility budgets ([`crate::budget`]) that were exceeded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub budget_violations: Vec<crate::budget::BudgetViolation>,
@@ -454,6 +480,31 @@ impl RenderableReport {
         self.to_text_with_width(explain, None)
     }
 
+    /// Filter displayed text findings without changing counts or verdicts.
+    pub fn to_text_with_min_severity(
+        &self,
+        explain: bool,
+        width: Option<usize>,
+        minimum: &Severity,
+    ) -> String {
+        if *minimum == Severity::Info {
+            return self.to_text_with_width(explain, width);
+        }
+        let mut view = self.clone();
+        let visible = |finding: &ReportedFinding| match minimum {
+            Severity::Info => true,
+            Severity::Warning => finding.finding.severity != Severity::Info,
+            Severity::Critical => finding.finding.severity == Severity::Critical,
+        };
+        for findings in view.findings_by_category.values_mut() {
+            findings.retain(&visible);
+        }
+        for findings in view.findings_by_axis.values_mut() {
+            findings.retain(&visible);
+        }
+        view.to_text_with_width(explain, width)
+    }
+
     /// Render as plain text, word-wrapping each finding message to fit
     /// `width` columns when given. `None` renders exactly like [`Self::to_text`]
     /// — unwrapped, matching current behavior. The wrap is applied only to
@@ -668,6 +719,93 @@ impl RenderableReport {
                 }
             ));
             output.push_str("Limits: Stellar RPC does not support wildcard ledger enumeration. Coverage is bounded to instance storage or offline files.\n");
+
+            if let Some(integrity) = &self.snapshot_integrity {
+                use crate::snapshot_manifest::SnapshotIntegrity;
+                output.push_str("\nSnapshot Integrity:\n");
+                let status_label = match integrity.integrity {
+                    SnapshotIntegrity::Verified => "verified".green().to_string(),
+                    SnapshotIntegrity::Unverified => {
+                        "unverified (no manifest)".yellow().to_string()
+                    }
+                    SnapshotIntegrity::Failed => "failed".red().bold().to_string(),
+                };
+                output.push_str(&format!("  - Status: {}\n", status_label));
+                output.push_str(&format!(
+                    "  - Coverage: {}/{} entries verified\n",
+                    integrity.entries_verified, integrity.entries_total
+                ));
+                if let Some(cid) = &integrity.contract_id {
+                    output.push_str(&format!("  - Contract: {cid}\n"));
+                }
+                if let Some(ledger) = integrity.ledger_sequence {
+                    output.push_str(&format!("  - Ledger sequence: {ledger}\n"));
+                }
+                for issue in &integrity.issues {
+                    output.push_str(&format!("  - ⚠️  {issue}\n"));
+                }
+            }
+        }
+
+        if let Some(graph) = &self.impact_graph {
+            output.push('\n');
+            output.push_str(
+                &"========================================\n"
+                    .bold()
+                    .to_string(),
+            );
+            output.push_str(&"    IMPACT GRAPH\n".bold().cyan().to_string());
+            output.push_str(
+                &"========================================\n"
+                    .bold()
+                    .to_string(),
+            );
+            output.push_str(&format!(
+                "Nodes: {}  Edges: {}\n",
+                graph.limits.node_count, graph.limits.edge_count
+            ));
+            if graph.limits.truncated {
+                output.push_str(
+                    &format!(
+                        "⚠️  Truncated to fit limits (max {} nodes / {} edges; full graph had {} nodes / {} edges)\n",
+                        graph.limits.max_nodes,
+                        graph.limits.max_edges,
+                        graph.limits.total_nodes,
+                        graph.limits.total_edges
+                    )
+                    .yellow()
+                    .to_string(),
+                );
+            }
+            output.push_str(
+                "See --format json for the full graph (nodes, edges, and their kinds).\n",
+            );
+        }
+
+        if let Some(checked) = self.lineage_versions_checked {
+            output.push('\n');
+            if checked == 0 {
+                output.push_str(
+                    &"⚠️  Lineage: 0 historical versions checked — the candidate passed \
+                       vacuously; nothing in history was actually compared against it \
+                       (see --max-live-versions).\n"
+                        .yellow()
+                        .to_string(),
+                );
+            } else {
+                output.push_str(&format!(
+                    "Lineage: {checked} historical version(s) checked.\n"
+                ));
+            }
+        }
+
+        if let Some(bundle) = &self.policy_bundle {
+            output.push('\n');
+            output.push_str(&format!(
+                "🏛️  Policy bundle: {} (signer(s): {})\n",
+                bundle.bundle_id,
+                bundle.signer_identities.join(", ")
+            ));
         }
 
         if !self.budget_violations.is_empty() {
@@ -933,6 +1071,26 @@ impl RenderableReport {
         output.push('\n');
     }
 
+    /// Filter displayed findings while retaining the original counts and verdict.
+    pub fn to_markdown_with_min_severity(&self, minimum: &Severity) -> String {
+        if *minimum == Severity::Info {
+            return self.to_markdown();
+        }
+        let mut view = self.clone();
+        let visible = |finding: &ReportedFinding| match minimum {
+            Severity::Info => true,
+            Severity::Warning => finding.finding.severity != Severity::Info,
+            Severity::Critical => finding.finding.severity == Severity::Critical,
+        };
+        for findings in view.findings_by_category.values_mut() {
+            findings.retain(&visible);
+        }
+        for findings in view.findings_by_axis.values_mut() {
+            findings.retain(&visible);
+        }
+        view.to_markdown()
+    }
+
     pub fn to_markdown(&self) -> String {
         let mut output = String::new();
         output.push_str("# Soroban Upgrade Safety Report\n\n");
@@ -1086,6 +1244,76 @@ impl RenderableReport {
             output.push_str(&format!("- **Decoded Successfully**: {}\n", successes));
             output.push_str(&format!("- **Failed to Decode**: {}\n", failures));
             output.push_str("- **Limits**: Stellar RPC does not support wildcard ledger enumeration. Coverage is bounded to instance storage or offline files.\n\n");
+
+            if let Some(integrity) = &self.snapshot_integrity {
+                use crate::snapshot_manifest::SnapshotIntegrity;
+                output.push_str("#### Snapshot Integrity\n\n");
+                let status_label = match integrity.integrity {
+                    SnapshotIntegrity::Verified => "✅ verified",
+                    SnapshotIntegrity::Unverified => "⚠️ unverified (no manifest)",
+                    SnapshotIntegrity::Failed => "🔴 failed",
+                };
+                output.push_str(&format!("- **Status**: {}\n", status_label));
+                output.push_str(&format!(
+                    "- **Coverage**: {}/{} entries verified\n",
+                    integrity.entries_verified, integrity.entries_total
+                ));
+                if let Some(cid) = &integrity.contract_id {
+                    output.push_str(&format!("- **Contract**: `{cid}`\n"));
+                }
+                if let Some(ledger) = integrity.ledger_sequence {
+                    output.push_str(&format!("- **Ledger sequence**: {ledger}\n"));
+                }
+                if !integrity.issues.is_empty() {
+                    output.push_str("- **Issues**:\n");
+                    for issue in &integrity.issues {
+                        output.push_str(&format!("  - {issue}\n"));
+                    }
+                }
+                output.push('\n');
+            }
+        }
+
+        if let Some(graph) = &self.impact_graph {
+            output.push_str("### 🕸️ Impact Graph\n\n");
+            output.push_str(&format!(
+                "- **Nodes**: {}\n- **Edges**: {}\n",
+                graph.limits.node_count, graph.limits.edge_count
+            ));
+            if graph.limits.truncated {
+                output.push_str(&format!(
+                    "- **Truncated**: yes (max {} nodes / {} edges; full graph had {} nodes / {} edges)\n",
+                    graph.limits.max_nodes,
+                    graph.limits.max_edges,
+                    graph.limits.total_nodes,
+                    graph.limits.total_edges
+                ));
+            }
+            output.push_str(
+                "- See `--format json` for the full graph (nodes, edges, and their kinds).\n\n",
+            );
+        }
+
+        if let Some(checked) = self.lineage_versions_checked {
+            if checked == 0 {
+                output.push_str(
+                    "### ⚠️ Lineage\n\n0 historical versions checked — the candidate passed \
+                     vacuously; nothing in history was actually compared against it (see \
+                     `--max-live-versions`).\n\n",
+                );
+            } else {
+                output.push_str(&format!(
+                    "### Lineage\n\n{checked} historical version(s) checked.\n\n"
+                ));
+            }
+        }
+
+        if let Some(bundle) = &self.policy_bundle {
+            output.push_str(&format!(
+                "### 🏛️ Policy Bundle\n\n- **Bundle ID**: {}\n- **Signer(s)**: {}\n\n",
+                bundle.bundle_id,
+                bundle.signer_identities.join(", ")
+            ));
         }
 
         if !self.budget_violations.is_empty() {
@@ -1113,6 +1341,60 @@ impl RenderableReport {
             }
         }
 
+        output
+    }
+
+    /// Render GitHub Actions workflow command annotations.
+    ///
+    /// Emits one annotation per finding, levelled to match the severity:
+    /// - `Critical` → `::error`
+    /// - `Warning`  → `::warning`
+    /// - `Info`     → `::notice`
+    ///
+    /// Suppressed findings are emitted as `::notice` instead of their original
+    /// severity, so they appear in the log without blocking the run.
+    /// Filter annotations without changing the final pass/fail line.
+    pub fn to_github_actions_with_min_severity(&self, minimum: &Severity) -> String {
+        if *minimum == Severity::Info {
+            return self.to_github_actions();
+        }
+        let mut view = self.clone();
+        for findings in view.findings_by_category.values_mut() {
+            findings.retain(|reported| match minimum {
+                Severity::Info => true,
+                Severity::Warning => reported.finding.severity != Severity::Info,
+                Severity::Critical => reported.finding.severity == Severity::Critical,
+            });
+        }
+        view.to_github_actions()
+    }
+
+    pub fn to_github_actions(&self) -> String {
+        let mut output = String::new();
+        let mut categories: Vec<_> = self.findings_by_category.keys().collect();
+        categories.sort();
+        for category in categories {
+            if let Some(findings) = self.findings_by_category.get(category) {
+                for reported in findings {
+                    let finding = &reported.finding;
+                    let level = if reported.suppressed {
+                        "notice"
+                    } else {
+                        match finding.severity {
+                            Severity::Critical => "error",
+                            Severity::Warning => "warning",
+                            Severity::Info => "notice",
+                        }
+                    };
+                    let message = finding.message.replace(['\r', '\n'], " ");
+                    output.push_str(&format!("::{level}::[{category}] {message}\n"));
+                }
+            }
+        }
+        output.push_str(&format!(
+            "Soroban Upgrade Safeguard: {}\n",
+            if self.is_safe { "PASSED" } else { "FAILED" }
+        ));
         output
     }
 
@@ -1367,9 +1649,13 @@ mod tests {
     #[test]
     fn round_trip_text_matches_a_live_run() {
         let live = sample_report();
-        let live_text = live.generate_summary_text(false);
+        // `to_renderable` re-stamps the clock on every call, so both sides of
+        // the comparison must share one render to stay independent of the wall
+        // clock second boundary.
+        let live_renderable = live.to_renderable();
+        let live_text = live_renderable.to_text(false);
 
-        let json = serde_json::to_string_pretty(&live.to_renderable()).unwrap();
+        let json = serde_json::to_string_pretty(&live_renderable).unwrap();
         let restored = RenderableReport::from_json_str(&json).unwrap();
 
         assert_eq!(restored.to_text(false), live_text);
@@ -1378,9 +1664,10 @@ mod tests {
     #[test]
     fn round_trip_markdown_matches_a_live_run() {
         let live = sample_report();
-        let live_markdown = live.generate_summary_markdown();
+        let live_renderable = live.to_renderable();
+        let live_markdown = live_renderable.to_markdown();
 
-        let json = serde_json::to_string_pretty(&live.to_renderable()).unwrap();
+        let json = serde_json::to_string_pretty(&live_renderable).unwrap();
         let restored = RenderableReport::from_json_str(&json).unwrap();
 
         assert_eq!(restored.to_markdown(), live_markdown);
@@ -1406,12 +1693,13 @@ mod tests {
             None,
         );
 
-        let json = serde_json::to_string(&live.to_renderable()).unwrap();
+        let live_renderable = live.to_renderable();
+        let json = serde_json::to_string(&live_renderable).unwrap();
         let restored = RenderableReport::from_json_str(&json).unwrap();
 
         assert_eq!(
             restored.to_text(true),
-            live.generate_summary_text(true),
+            live_renderable.to_text(true),
             "remediation guidance must survive the round trip"
         );
         assert!(restored.to_text(true).contains("guidance:"));
@@ -1700,7 +1988,7 @@ mod tests {
         let lines = wrapped_finding_lines(&text);
 
         let mut expected = vec!["🔴 abcdefgh abcdefgh".to_string()];
-        expected.extend(std::iter::repeat("  abcdefgh abcdefgh".to_string()).take(9));
+        expected.extend(std::iter::repeat_n("  abcdefgh abcdefgh".to_string(), 9));
         assert_eq!(lines, expected, "full text was:\n{text}");
     }
 
@@ -1710,8 +1998,8 @@ mod tests {
         let text = report.generate_summary_text_with_width(false, Some(DEFAULT_TEXT_WIDTH));
         let lines = wrapped_finding_lines(&text);
 
-        let eight_words = vec!["abcdefgh"; 8].join(" ");
-        let four_words = vec!["abcdefgh"; 4].join(" ");
+        let eight_words = ["abcdefgh"; 8].join(" ");
+        let four_words = ["abcdefgh"; 4].join(" ");
         let expected = vec![
             format!("🔴 {eight_words}"),
             format!("  {eight_words}"),

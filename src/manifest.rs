@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Composable batch manifests: includes, shared defaults, and per-pair overrides.
 //!
 //! A batch manifest lists the contract pairs a run compares. Historically it was
@@ -136,6 +138,9 @@ pub struct RawManifest {
     /// Only version 1 is currently supported.
     #[serde(default = "default_manifest_version")]
     pub version: u32,
+    /// Schema reference for editor autocompletion and hover metadata.
+    #[serde(default, rename = "$schema")]
+    pub schema: Option<String>,
     /// Other manifest files to compose in, depth-first, in order.
     #[serde(default)]
     pub include: Vec<PathBuf>,
@@ -158,6 +163,7 @@ impl Default for RawManifest {
     fn default() -> Self {
         Self {
             version: 1,
+            schema: None,
             include: Vec::new(),
             defaults: RawDefaults::default(),
             pairs: Vec::new(),
@@ -187,7 +193,7 @@ pub struct RawDefaults {
     /// Axis gating overrides folded onto the suppression config's policy.
     #[serde(default)]
     pub policy: PolicyOverrides,
-    /// Resource limit overrides. Resolved and reported, not yet enforced.
+    /// Resource limit overrides for each pair's decode and type walk.
     #[serde(default)]
     pub limits: LimitsConfig,
 }
@@ -296,6 +302,204 @@ impl PolicyOverrides {
 
 // ── Provenance ───────────────────────────────────────────────────────────────
 
+/// A reproducible-build manifest describing the expected provenance of a
+/// contract artifact.
+///
+/// This is the strict, validated form of a build manifest. It records the
+/// source revision, toolchain versions, target, feature flags, build profile,
+/// and expected artifact digests that a release pipeline commits alongside the
+/// source. Comparing it against embedded contract metadata and the actual
+/// artifact hash lets the tool report provenance mismatches without claiming
+/// that metadata alone proves source equivalence.
+///
+/// Both TOML and JSON encodings are accepted; the parser picks per file, the
+/// same way [`RawManifest`] does. Unknown fields are rejected so a typo in a
+/// committed manifest is a hard error rather than a silently ignored check.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct BuildManifest {
+    /// Manifest format version. Only version 1 is currently supported.
+    #[serde(default = "default_manifest_version")]
+    pub version: u32,
+    /// Source revision the artifact was built from (e.g. a git commit SHA).
+    #[serde(default)]
+    pub source_revision: Option<String>,
+    /// Rust compiler version used for the build.
+    #[serde(default)]
+    pub rust_version: Option<String>,
+    /// Soroban SDK version used for the build.
+    #[serde(default)]
+    pub sdk_version: Option<String>,
+    /// Compilation target triple (e.g. `wasm32-unknown-unknown`).
+    #[serde(default)]
+    pub target: Option<String>,
+    /// Cargo feature flags enabled for the build.
+    #[serde(default)]
+    pub features: Vec<String>,
+    /// Build profile (e.g. `release`).
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Expected SHA-256 digest of the built artifact, hex-encoded.
+    #[serde(default)]
+    pub artifact_sha256: Option<String>,
+    /// Expected size of the built artifact in bytes.
+    #[serde(default)]
+    pub artifact_size: Option<u64>,
+}
+
+impl BuildManifest {
+    /// Parse a build manifest from TOML or JSON text.
+    ///
+    /// The format is chosen by attempting TOML first and falling back to JSON,
+    /// mirroring how batch manifests are loaded. Validation is strict: unknown
+    /// fields and unsupported versions are rejected.
+    pub fn parse(text: &str) -> Result<Self> {
+        let manifest: Self = toml::from_str(text)
+            .or_else(|_| serde_json::from_str(text))
+            .context("failed to parse build manifest as TOML or JSON")?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    /// Parse a build manifest whose serialization format is known up front.
+    ///
+    /// Unlike [`BuildManifest::parse`], which tries TOML then JSON, this
+    /// rejects input that does not match the given format exactly. Validation
+    /// is the same: unknown fields and unsupported versions are rejected.
+    pub fn parse_with_format(text: &str, format: ManifestFormat) -> Result<Self> {
+        let manifest: Self = match format {
+            ManifestFormat::Json => {
+                serde_json::from_str(text).context("failed to parse build manifest as JSON")?
+            }
+            ManifestFormat::Toml => {
+                toml::from_str(text).context("failed to parse build manifest as TOML")?
+            }
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    /// Validate the manifest's structural invariants.
+    ///
+    /// This is deliberately independent of interface compatibility gating:
+    /// a manifest may be structurally valid while still describing a build
+    /// that does not match the artifact under analysis. Mismatches are reported
+    /// as provenance findings, not as parse errors.
+    pub fn validate(&self) -> Result<()> {
+        if self.version != 1 {
+            bail!(
+                "unsupported build manifest version {}; only version 1 is supported",
+                self.version
+            );
+        }
+        if let Some(rev) = &self.source_revision {
+            if rev.trim().is_empty() {
+                bail!("build manifest source_revision must not be empty");
+            }
+        }
+        if let Some(sha) = &self.artifact_sha256 {
+            let sha = sha.trim();
+            if sha.len() != 64 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                bail!("build manifest artifact_sha256 must be a 64-character hex digest");
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A single provenance mismatch between a build manifest and the artifact.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ProvenanceFinding {
+    /// The manifest field that mismatched (e.g. `source_revision`).
+    pub field: String,
+    /// The value recorded in the build manifest, if any.
+    pub expected: Option<String>,
+    /// The value observed in the artifact metadata, if any.
+    pub actual: Option<String>,
+    /// Human-readable explanation of the mismatch.
+    pub message: String,
+}
+
+/// The result of comparing a build manifest against an artifact.
+///
+/// Verified and unverified metadata fields are recorded separately so a report
+/// can distinguish "checked and matched" from "not present in the manifest".
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct ProvenanceReport {
+    /// Fields that were present in the manifest and matched the artifact.
+    pub verified: Vec<String>,
+    /// Fields that were present in the manifest but could not be checked
+    /// against the artifact (e.g. absent from embedded metadata).
+    pub unverified: Vec<String>,
+    /// Fields that were present in both and disagreed.
+    pub mismatches: Vec<ProvenanceFinding>,
+}
+
+/// The serialization format of a build manifest file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestFormat {
+    /// JSON encoding.
+    Json,
+    /// TOML encoding.
+    Toml,
+}
+
+/// One manifest field that disagreed with the artifact's embedded metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+pub struct ManifestMismatch {
+    /// The manifest field that mismatched (e.g. `features`).
+    pub field: String,
+    /// The value recorded in the build manifest.
+    pub expected: String,
+    /// The value observed in the artifact metadata.
+    pub actual: String,
+}
+
+impl ProvenanceReport {
+    /// Compare a build manifest against observed artifact metadata.
+    ///
+    /// `observed` maps manifest field names to the values embedded in the
+    /// artifact. Fields absent from `observed` are recorded as unverified
+    /// rather than mismatched, since metadata alone cannot prove equivalence.
+    #[must_use]
+    pub fn compare(manifest: &BuildManifest, observed: &BTreeMap<String, String>) -> Self {
+        let mut report = Self::default();
+        let mut check = |field: &str, expected: Option<&str>| {
+            let Some(expected) = expected else {
+                return;
+            };
+            match observed.get(field) {
+                Some(actual) if actual == expected => {
+                    report.verified.push(field.to_string());
+                }
+                Some(actual) => {
+                    report.mismatches.push(ProvenanceFinding {
+                        field: field.to_string(),
+                        expected: Some(expected.to_string()),
+                        actual: Some(actual.clone()),
+                        message: format!(
+                            "{field} mismatch: manifest declares {expected:?}, artifact reports {actual:?}"
+                        ),
+                    });
+                }
+                None => {
+                    report.unverified.push(field.to_string());
+                }
+            }
+        };
+        check("source_revision", manifest.source_revision.as_deref());
+        check("rust_version", manifest.rust_version.as_deref());
+        check("sdk_version", manifest.sdk_version.as_deref());
+        check("target", manifest.target.as_deref());
+        check("profile", manifest.profile.as_deref());
+        if !manifest.features.is_empty() {
+            let expected = manifest.features.join(",");
+            check("features", Some(expected.as_str()));
+        }
+        report
+    }
+}
+
 /// Where a resolved value came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
@@ -379,8 +583,7 @@ impl ResolvedPolicy {
 
 /// Resource limits after the precedence fold.
 ///
-/// Resolved and reported for provenance; **not enforced** — `parser.rs` still
-/// decodes with `Limits::none()`. See `docs/batch_manifests.md`.
+/// Resolved and applied to each pair before comparison.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedLimits {
     pub max_xdr_depth: Sourced<u32>,
@@ -404,6 +607,17 @@ pub struct ResolvedSettings {
 }
 
 impl ResolvedSettings {
+    /// Build the resource policy selected by the precedence fold.
+    #[must_use]
+    pub fn resource_policy(&self) -> ResourcePolicy {
+        ResourcePolicy {
+            max_xdr_depth: self.limits.max_xdr_depth.value,
+            max_xdr_len: self.limits.max_xdr_len.value,
+            max_entries: self.limits.max_entries.value,
+            max_walk_depth: self.limits.max_walk_depth.value,
+        }
+    }
+
     /// Fold this pair's policy overrides onto `config`'s own policy.
     ///
     /// Kept here rather than in the binary so it works whether or not the
@@ -594,14 +808,23 @@ pub fn resolve(root: &Path, cli: &CliSettings) -> Result<ResolvedManifest> {
     // accidentally generated manifest with thousands of pairs is rejected as
     // a configuration error, not run until something else gives out.
     if walk.pairs.len() > cli.max_pairs {
+        let pair_word = if walk.pairs.len() == 1 {
+            "pair"
+        } else {
+            "pairs"
+        };
+        let max_word = if cli.max_pairs == 1 { "pair" } else { "pairs" };
         bail!(
-            "Manifest composition contains {} pairs, exceeding the maximum of {} (--max-pairs).\n  \
+            "Manifest composition contains {} {}, exceeding the maximum of {} {} (--max-pairs).\n  \
              root: {}\n\
-             Raise --max-pairs if this many pairs is intentional, or check for a manifest \
+             Raise --max-pairs if this many {} is intentional, or check for a manifest \
              generation mistake.",
             walk.pairs.len(),
+            pair_word,
             cli.max_pairs,
-            root.display()
+            max_word,
+            root.display(),
+            pair_word
         );
     }
 
@@ -1066,11 +1289,35 @@ fn parse_file(path: &Path) -> Result<RawManifest> {
         || content.trim_start().starts_with(['{', '[']);
 
     let toml_error = match toml::from_str::<RawManifest>(content) {
-        Ok(manifest) => return Ok(manifest),
+        Ok(manifest) => {
+            if manifest.version == 1 {
+                if let Err(diags) = crate::config_schema::validate_batch_manifest(content, path) {
+                    let formatted = diags
+                        .iter()
+                        .map(|d| d.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    bail!("Invalid manifest '{}':\n{}", path.display(), formatted);
+                }
+            }
+            return Ok(manifest);
+        }
         Err(e) => e.to_string(),
     };
     let json_error = match serde_json::from_str::<RawManifest>(content) {
-        Ok(manifest) => return Ok(manifest),
+        Ok(manifest) => {
+            if manifest.version == 1 {
+                if let Err(diags) = crate::config_schema::validate_batch_manifest(content, path) {
+                    let formatted = diags
+                        .iter()
+                        .map(|d| d.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    bail!("Invalid manifest '{}':\n{}", path.display(), formatted);
+                }
+            }
+            return Ok(manifest);
+        }
         Err(e) => format!("{e}"),
     };
 
@@ -2098,9 +2345,27 @@ mod tests {
             "got: {error}"
         );
         assert!(
-            error.contains(&format!("maximum of {DEFAULT_MAX_PAIRS}")),
+            error.contains(&format!("maximum of {DEFAULT_MAX_PAIRS} pairs")),
             "got: {error}"
         );
+        assert!(error.contains("--max-pairs"), "got: {error}");
+    }
+
+    #[test]
+    fn max_pairs_of_zero_rejects_any_manifest() {
+        // A ceiling of zero is degenerate but must still be a clear
+        // rejection, not a silent empty run: even a single-pair manifest
+        // exceeds it and is reported the same way any other over-cap
+        // manifest is.
+        let dir = temp_dir("max-pairs-zero");
+        let root = write(&dir, "root.toml", &pairs_toml(1));
+        let cli = CliSettings {
+            max_pairs: 0,
+            ..CliSettings::default()
+        };
+        let error = format!("{:#}", resolve(&root, &cli).unwrap_err());
+        assert!(error.contains("1 pair"), "got: {error}");
+        assert!(error.contains("maximum of 0 pairs"), "got: {error}");
         assert!(error.contains("--max-pairs"), "got: {error}");
     }
 
@@ -2140,7 +2405,44 @@ mod tests {
         };
         let error = format!("{:#}", resolve(&root, &cli).unwrap_err());
         assert!(error.contains("4 pairs"), "got: {error}");
-        assert!(error.contains("maximum of 3"), "got: {error}");
+        assert!(error.contains("maximum of 3 pairs"), "got: {error}");
+    }
+
+    #[test]
+    fn max_pairs_error_uses_correct_singular_and_plural_wording() {
+        // Test singular "1 pair" wording
+        let dir1 = temp_dir("max-pairs-singular");
+        let root1 = write(&dir1, "root.toml", &pairs_toml(1));
+        let cli1 = CliSettings {
+            max_pairs: 0,
+            ..CliSettings::default()
+        };
+        let error1 = format!("{:#}", resolve(&root1, &cli1).unwrap_err());
+        assert!(
+            error1.contains("1 pair,"),
+            "should use singular, got: {error1}"
+        );
+        assert!(
+            !error1.contains("1 pairs"),
+            "should not say '1 pairs', got: {error1}"
+        );
+
+        // Test plural "2 pairs" wording
+        let dir2 = temp_dir("max-pairs-plural");
+        let root2 = write(&dir2, "root.toml", &pairs_toml(2));
+        let cli2 = CliSettings {
+            max_pairs: 1,
+            ..CliSettings::default()
+        };
+        let error2 = format!("{:#}", resolve(&root2, &cli2).unwrap_err());
+        assert!(
+            error2.contains("2 pairs"),
+            "should use plural, got: {error2}"
+        );
+        assert!(
+            error2.contains("maximum of 1 pair"),
+            "should use singular for max, got: {error2}"
+        );
     }
 
     #[test]

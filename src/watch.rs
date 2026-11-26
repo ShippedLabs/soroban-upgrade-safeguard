@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Incremental batch watch mode: re-run only the pairs a file-system change
 //! actually affects, instead of recomputing every pair on every event.
 //!
@@ -67,6 +69,7 @@ use crate::{
     install_watch_sigterm_handler, oci_fetch_config, remote_fetch_config, render_batch_summary,
     render_gap_outputs, render_pair_outputs, resolve_text_width, watch_shutdown_requested, Args,
     BatchPair, BatchResult, BatchSummary, BuiltBatch, GapContract, NewOnlyContract, OutputSpec,
+    SkippedFile,
 };
 use soroban_upgrade_safeguard::manifest;
 
@@ -84,6 +87,8 @@ struct BatchPlan {
     gaps: Vec<GapContract>,
     /// New-only artifacts (directory mode).
     new_only: Vec<NewOnlyContract>,
+    /// Artifacts held back by `--exclude` (directory mode).
+    skipped: Vec<SkippedFile>,
     /// The composed manifest, when running in manifest mode.
     resolved_manifest: Option<manifest::ResolvedManifest>,
 }
@@ -128,6 +133,7 @@ impl BatchPlan {
             dirs_to_scan,
             gaps: built.gaps,
             new_only: built.new_only,
+            skipped: built.skipped,
             resolved_manifest: built.resolved_manifest,
         }
     }
@@ -517,6 +523,7 @@ pub fn run_batch_watch(
     )?;
     render_summary(&plan, &results, args, outputs, progress)?;
     report_new_only(&plan, progress);
+    report_skipped(&plan, progress);
 
     let mut cycle = 1u64;
     if args.watch_status_file.is_some() {
@@ -584,6 +591,7 @@ pub fn run_batch_watch(
                             plan = new_plan;
                             plan_rebuilt = true;
                             report_new_only(&plan, progress);
+                            report_skipped(&plan, progress);
                         }
                         Err(e) => {
                             progress(format!(
@@ -754,6 +762,7 @@ fn run_cycle(
                 args,
                 &remote_config,
                 &oci_config,
+                None,
                 &mut config_cache,
                 progress,
             );
@@ -791,6 +800,7 @@ fn render_summary(
         },
         outputs,
         progress,
+        args.min_severity.as_severity(),
     )?;
     Ok(())
 }
@@ -819,6 +829,37 @@ fn report_new_only(plan: &BatchPlan, progress: &dyn Fn(String)) {
         "  A new contract is expected here; a renamed one is not. If any of these \
          is a rename, the old-side file must share its name for the upgrade to be \
          checked."
+            .to_string(),
+    );
+}
+
+/// Surface the artifacts an `--exclude` pattern held back, the same way a
+/// one-shot batch run does. They are neither pairs nor findings, so they take
+/// no slot in the counter and cannot move the verdict — but naming them keeps
+/// a rescan honest about what its current plan is not covering, which matters
+/// more here than in a one-shot run: the plan is rebuilt on every structural
+/// change, and a pattern that started matching would otherwise quietly shrink
+/// what watch mode checks from that point on.
+fn report_skipped(plan: &BatchPlan, progress: &dyn Fn(String)) {
+    if plan.skipped.is_empty() {
+        return;
+    }
+    progress(format!(
+        "⏭️  Skipped {} .wasm artifact(s) matching --exclude:",
+        plan.skipped.len()
+    ));
+    for file in &plan.skipped {
+        progress(format!(
+            "  - {} [{} dir] matched '{}' ({})",
+            file.relative_path,
+            file.side.label(),
+            file.pattern,
+            file.path.display()
+        ));
+    }
+    progress(
+        "  These were not compared and did not affect the verdict. Narrow or drop \
+         --exclude to include them."
             .to_string(),
     );
 }
@@ -975,6 +1016,7 @@ mod tests {
             dirs_to_scan: vec![normalize_path(Path::new("dir"))],
             gaps: Vec::new(),
             new_only: Vec::new(),
+            skipped: Vec::new(),
             resolved_manifest: None,
         };
         let ignore = BatchIgnore::default();

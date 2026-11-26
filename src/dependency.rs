@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Inter-contract dependency model for cross-contract propagation of breaking changes.
 //!
 //! In a multi-contract protocol (token + pool + router + factory), a breaking change

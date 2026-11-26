@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Lightweight RPC connectivity preflight checks.
 //!
 //! Unlike the full analysis pipeline, a preflight check never fetches

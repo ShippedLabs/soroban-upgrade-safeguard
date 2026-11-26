@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! WebAssembly module runtime surface model, parser, and comparison.
 //!
 //! Beyond contract specs, imports, and exports, other WebAssembly module

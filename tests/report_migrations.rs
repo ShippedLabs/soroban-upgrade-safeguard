@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `upgrade-report` subcommand and the report
 //! migration framework, exercised end-to-end through the built binary.
 //!
@@ -212,4 +213,99 @@ fn a_missing_report_file_fails_with_a_clear_error() {
         .output()
         .expect("failed to run binary");
     assert_ne!(output.status.code(), Some(0));
+}
+
+#[test]
+fn empty_input_reports_empty_not_eof_error() {
+    let (stdout, stderr, code) = upgrade("");
+    assert_eq!(code, 1, "empty input must exit 1");
+    assert!(stdout.is_empty(), "empty input must not produce stdout");
+    assert!(
+        stderr.contains("empty or whitespace-only"),
+        "error must mention empty input, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Expected a saved JSON report"),
+        "error must mention expected input, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("EOF while parsing"),
+        "error must not show raw parser error, got: {stderr}"
+    );
+}
+
+#[test]
+fn whitespace_only_input_reports_empty_not_eof_error() {
+    let (stdout, stderr, code) = upgrade("  \n\t  \r\n  ");
+    assert_eq!(code, 1, "whitespace-only input must exit 1");
+    assert!(
+        stdout.is_empty(),
+        "whitespace-only input must not produce stdout"
+    );
+    assert!(
+        stderr.contains("empty or whitespace-only"),
+        "error must mention whitespace-only input, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Expected a saved JSON report"),
+        "error must mention expected input, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("EOF while parsing"),
+        "error must not show raw parser error, got: {stderr}"
+    );
+}
+
+#[test]
+fn empty_file_reports_empty_not_eof_error() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let empty_path = dir.join(format!("empty_report_{}.json", std::process::id()));
+    std::fs::write(&empty_path, "").expect("failed to write empty file");
+
+    let output = bin()
+        .arg("upgrade-report")
+        .arg(&empty_path)
+        .output()
+        .expect("failed to run binary");
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not valid UTF-8");
+    assert_eq!(output.status.code(), Some(1), "empty file must exit 1");
+    assert!(
+        stderr.contains("empty or whitespace-only"),
+        "error must mention empty input, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("EOF while parsing"),
+        "error must not show raw parser error, got: {stderr}"
+    );
+
+    // Clean up
+    let _ = std::fs::remove_file(&empty_path);
+}
+
+#[test]
+fn whitespace_file_reports_empty_not_eof_error() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let whitespace_path = dir.join(format!("whitespace_report_{}.json", std::process::id()));
+    std::fs::write(&whitespace_path, "   \n\t  \r\n   ").expect("failed to write whitespace file");
+
+    let output = bin()
+        .arg("upgrade-report")
+        .arg(&whitespace_path)
+        .output()
+        .expect("failed to run binary");
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not valid UTF-8");
+    assert_eq!(output.status.code(), Some(1), "whitespace file must exit 1");
+    assert!(
+        stderr.contains("empty or whitespace-only"),
+        "error must mention whitespace-only input, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("EOF while parsing"),
+        "error must not show raw parser error, got: {stderr}"
+    );
+
+    // Clean up
+    let _ = std::fs::remove_file(&whitespace_path);
 }

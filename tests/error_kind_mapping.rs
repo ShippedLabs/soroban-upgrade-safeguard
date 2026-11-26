@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Coverage for ErrorKind mapping from every Error variant.
 //!
 //! Each structured error variant maps to a stable ErrorKind, but a newly
@@ -218,6 +219,7 @@ fn all_error_kinds_are_covered_by_mapping() {
         ErrorKind::RpcSnapshotConsistency,
         ErrorKind::RpcIdMismatch,
         ErrorKind::SymlinkRejected,
+        ErrorKind::UnsupportedDecoderVersion,
     ];
 
     // Create one error of each variant to ensure they all map correctly
@@ -310,6 +312,10 @@ fn all_error_kinds_are_covered_by_mapping() {
         Error::SymlinkRejected {
             path: PathBuf::new(),
             resolved: None,
+        },
+        Error::UnsupportedDecoderVersion {
+            version_display: None,
+            message: String::new(),
         },
     ];
 

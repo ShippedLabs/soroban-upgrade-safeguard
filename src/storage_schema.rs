@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Declared storage schemas and evidence-based reconciliation.
 
 use serde::{Deserialize, Serialize};

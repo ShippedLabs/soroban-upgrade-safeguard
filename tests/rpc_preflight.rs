@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for the RPC connectivity preflight check.
 //!
 //! These exercise `soroban_upgrade_safeguard::preflight::run_preflight_with_timeout`
@@ -296,6 +297,7 @@ fn preflight_cli_subcommand_exits_zero_on_success() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
         .args(["preflight", "--rpc-url", &format!("http://{addr}")])
+        .arg("--allow-http-local")
         .output()
         .expect("failed to run binary");
 
@@ -315,10 +317,106 @@ fn preflight_cli_subcommand_exits_nonzero_on_auth_failure() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
         .args(["preflight", "--rpc-url", &format!("http://{addr}")])
+        .arg("--allow-http-local")
         .output()
         .expect("failed to run binary");
 
     assert_ne!(output.status.code(), Some(0));
     let stdout = String::from_utf8(output.stdout).expect("stdout not UTF-8");
     assert!(stdout.contains("FAIL"));
+}
+
+/// `--rpc-header NAME=ENV_VAR` reads the secret from the named environment
+/// variable at resolution time. Header resolution happens before any network
+/// I/O (see `preflight::run_preflight_with_timeout`), so an unset variable
+/// must fail clearly — naming the variable — without ever contacting the
+/// (bogus, unreachable) RPC endpoint.
+#[test]
+fn preflight_cli_subcommand_fails_clearly_when_rpc_header_env_var_is_unset() {
+    const UNSET_VAR: &str = "SOROBAN_SAFEGUARD_TEST_UNSET_RPC_HEADER_SECRET_655";
+
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args([
+            "preflight",
+            "--rpc-url",
+            "http://127.0.0.1:1",
+            "--rpc-header",
+            &format!("X-Api-Key={UNSET_VAR}"),
+        ])
+        .arg("--allow-http-local")
+        .env_remove(UNSET_VAR)
+        .output()
+        .expect("failed to run binary");
+
+    assert_ne!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).expect("stdout not UTF-8");
+    assert!(stdout.contains("FAIL"), "stdout: {stdout}");
+    assert!(
+        stdout.contains(UNSET_VAR),
+        "error must name the unset variable, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("is not set"),
+        "error must state the variable is unset, got: {stdout}"
+    );
+}
+
+/// `--rpc-header` expects `NAME=ENV_VAR`. A value missing the `=ENV_VAR`
+/// portion must be rejected with a clear message, without ever contacting
+/// the (bogus, unreachable) RPC endpoint.
+#[test]
+fn preflight_cli_subcommand_fails_clearly_when_rpc_header_is_malformed() {
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args([
+            "preflight",
+            "--rpc-url",
+            "http://127.0.0.1:1",
+            "--rpc-header",
+            "X-Api-Key-Without-Env-Var",
+        ])
+        .arg("--allow-http-local")
+        .output()
+        .expect("failed to run binary");
+
+    assert_ne!(
+        output.status.code(),
+        Some(0),
+        "a malformed --rpc-header value must not succeed"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr not UTF-8");
+    assert!(
+        stderr.contains("Invalid --rpc-header"),
+        "error must flag the malformed --rpc-header value, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("NAME=ENV_VAR"),
+        "error must state the expected NAME=ENV_VAR format, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("X-Api-Key-Without-Env-Var"),
+        "error must echo back the offending value, got: {stderr}"
+    );
+}
+
+/// Without `--allow-http-local` the `preflight` subcommand keeps the
+/// HTTPS-only default, so a plain-HTTP endpoint is rejected before any
+/// request is attempted. The flag only relaxes the rule for loopback
+/// hosts, and never for a non-loopback one.
+#[test]
+fn preflight_cli_subcommand_rejects_plain_http_without_the_flag() {
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args(["preflight", "--rpc-url", "http://127.0.0.1:1"])
+        .output()
+        .expect("failed to run binary");
+
+    assert_ne!(
+        output.status.code(),
+        Some(0),
+        "a plain-HTTP RPC URL must be rejected without --allow-http-local"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr not UTF-8");
+    assert!(
+        stderr.contains("allow-http-local") && stderr.to_lowercase().contains("loopback"),
+        "error should explain the HTTPS-only policy and the opt-in flag, got: {stderr}"
+    );
 }

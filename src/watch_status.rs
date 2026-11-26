@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Structured, atomically-written status file for `--watch` mode.
 //!
 //! External build systems and service managers need a cheap way to check

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Process-level test for clean SIGTERM shutdown in `--watch` mode.
 //!
 //! Watch mode is a long-running loop; the only way to verify it actually

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for ledger-entry expiration (`liveUntilLedgerSeq`) metadata surfaced
 //! by the RPC loader's empirical storage fetch.
 //!

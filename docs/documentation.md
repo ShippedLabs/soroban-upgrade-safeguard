@@ -251,16 +251,56 @@ soroban-upgrade-safeguard <NEW_WASM> \
   --interface-lockfile <LOCKFILE>
 ```
 
-- Glob pair mode (pair matches by file stem):
+The first form (two positional paths) remains the simplest for ad-hoc, local checks.
+RPC mode fetches the baseline from chain and verifies it cryptographically; manifest and
+directory modes run batch comparisons. The full usage strings and options
+match the CLI help output (`--help`) and the `override_usage` in `src/main.rs`.
+
+In directory mode, `--exclude <GLOB>` (repeatable) leaves matching `.wasm`
+artifacts out of the scan — vendored, example, or test builds — on both the
+old and new sides. An excluded artifact is reported as skipped, naming the
+pattern responsible, rather than silently dropped, and it can never move the
+verdict. Patterns match the path relative to the scanned directory, with `*`,
+`?`, and `**` as wildcards. See
+[Excluding artifacts from a directory scan](../README.md#excluding-artifacts-from-a-directory-scan)
+in the README for the full semantics and examples.
+### Choosing a batch input mode
+
+Two modes drive a batch comparison: a manifest, or a pair of directories.
+
+| Mode | Flag(s) | Pairing | Use when |
+| :--- | :--- | :--- | :--- |
+| [Manifest](batch_manifests.md) | `--manifest <PATH>` | Explicit: each pair is listed by hand (`old`/`new`), optionally with per-pair settings, storage schemas, ids, and labels. | You need per-pair configuration, storage-schema verification, or a reviewable, version-controlled list of exactly which contracts are compared. |
+| [Directory scan](#directory-scan) | `--old-dir <DIR> --new-dir <DIR>` | Implicit: every `.wasm` file in `<OLD_DIR>` is paired with the identically-named file in `<NEW_DIR>`. | You just want to diff two build output directories as they are, with no manifest to maintain — storage schemas and per-pair settings aren't needed. |
+
+The two are mutually exclusive, not layered: passing both `--manifest` and
+`--old-dir`/`--new-dir` in the same invocation is a hard configuration error
+("Cannot specify both --manifest and --old-dir/--new-dir at the same time")
+rather than one silently taking precedence over the other. Pick one mode per
+run.
+
+### Enumerating finding categories
+
+`categories` lists the full catalog of finding categories the analysis can
+emit, each with its default severity, what triggers it, and remediation
+guidance:
 
 ```bash
-soroban-upgrade-safeguard --old-glob '<OLD_PATTERN>' --new-glob '<NEW_PATTERN>'
+soroban-upgrade-safeguard categories
 ```
 
-The first form (two positional paths) remains the simplest for ad-hoc, local checks.
-RPC mode fetches the baseline from chain and verifies it cryptographically; manifest,
-directory, and glob modes run batch comparisons. The full usage strings and options
-match the CLI help output (`--help`) and the `override_usage` in `src/main.rs`.
+Pass `--format json` for a machine-readable array — one object per category
+with `category`, `severity`, `trigger_description`, and `remediation` — for
+scripting and CI:
+
+```bash
+soroban-upgrade-safeguard categories --format json
+```
+
+Both formats are generated from the same source of truth the analysis uses
+(`FindingCategory::all`), so the listing cannot drift from the categories the
+tool actually emits. The same data is maintained as a static reference in
+[finding-categories.md](finding-categories.md).
 
 Common flags: `--format <text|json|markdown|html|github-actions|junit>`, `--explain`, `--strict`, `--expect-bump <patch|minor|major>`, `--config <PATH>`, the resource-limit overrides `--max-xdr-depth`, `--max-xdr-len`, `--max-entries`, and `--max-walk-depth` (see [Resource Limits](#resource-limits-and-hardening-against-malicious-input)), the `https://` input overrides `--remote-max-bytes`, `--remote-timeout-secs`, `--remote-max-redirects`, `--remote-cache-dir`, `--no-remote-cache`, and `--clear-remote-cache` (see [Remote HTTPS inputs](#remote-https-inputs)), and `--no-symlinks` for local paths (see [Local file inputs](#local-file-inputs)).
 
@@ -737,7 +777,9 @@ interface-only because it has no schema discovery step.
 
 ### Manifest format
 
-TOML and JSON are both accepted with the same shape. A ready-to-copy template lives at [`.storage-schema.example.toml`](../.storage-schema.example.toml).
+TOML and JSON are both accepted with the same shape. See the
+[Storage Schema Cookbook](storage-schema-cookbook.md) for ready-to-copy,
+worked examples.
 
 ```toml
 # Storage-key types: what addresses your entries.
@@ -850,6 +892,12 @@ interface and environment metadata; it must not be read as storage verified.
 ## Detection Categories
 
 The comparison stage looks for the following classes of change.
+
+Run `soroban-upgrade-safeguard categories` (or `--format json`) to enumerate the
+exact, current category strings with their default severities, triggers, and
+remediation — useful when writing suppression rules. The authoritative, always
+current list lives in `src/category.rs` and is mirrored in
+[finding-categories.md](finding-categories.md).
 
 ### Functions
 
@@ -1221,30 +1269,33 @@ Example JSON excerpt:
 ## JSON Schema
 
 The JSON output is the integration surface for dashboards, bots, and other
-tooling, so its shape is published as a JSON Schema (Draft 2020-12) under
-[`schema/`](../schema):
+tooling, so its shape is published as a JSON Schema (Draft 7). The schema is
+**derived from the Rust output types**, not hand-written: `src/report_schema.rs`
+generates it with [`schemars`](https://crates.io/crates/schemars) from the same
+`serde` types that produce every report, so it cannot silently drift from what
+the tool emits. Conditionally omitted fields (`suppressed`, `suppression_reason`,
+`remediation`, the interface hashes, …) are marked optional, and the enumerated
+fields (the `counts` severities) are constrained to their allowed values.
 
-- [`schema/report.schema.json`](../schema/report.schema.json) — the single-pair
-  document (`--format json` on a contract pair).
-- [`schema/batch-report.schema.json`](../schema/batch-report.schema.json) — the
-  batch document (`--manifest`, `--old-dir`/`--new-dir`, or `--old-glob`/`--new-glob` with `--format json`),
-  whose top level differs from the single-pair shape and embeds a single-pair
-  report per contract under `results`.
-
-Both schemas are **derived from the Rust output types**, not hand-written, so
-they cannot silently drift from what the tool emits: `tests/schema_validation.rs`
-regenerates them from the types and validates real emitted output — including a
-run with suppressed findings and one produced with `--explain` — against the
-committed files, failing if they diverge. Conditionally omitted fields
-(`suppressed`, `suppression_reason`, `remediation`, the duplicate-name lists, …)
-are marked optional, and the enumerated fields (the `counts` severities and
-`recommended_bump`) are constrained to their allowed values.
-
-To regenerate the committed schema after intentionally changing an output type:
+Fetch the schema from the running binary with the `print-schema` subcommand —
+no WASM inputs, no config, and no network access:
 
 ```bash
-UPDATE_SCHEMA=1 cargo test --test schema_validation schemas_match_the_types
+soroban-upgrade-safeguard print-schema
+
+# Single-line output, e.g. to pipe into a validator
+soroban-upgrade-safeguard print-schema --compact
 ```
+
+Fetching it from the binary rather than a checked-in file means the schema a
+consumer validates against is always the one the binary it invokes conforms
+to — there is no repository copy to locate and no risk of it lagging behind
+the installed version. The `report_schema_version` property carries the
+current version as its default, so tooling can pin to the exact shape in use.
+
+`tests/print_schema.rs` verifies the contract end to end: the output is valid
+JSON Schema, it requires no inputs, `--compact` emits a single line, and a
+live `--format json` report satisfies the schema the same binary prints.
 
 ### Stability
 

@@ -1,0 +1,6 @@
+# Cyclic profile inheritance
+[profiles.alpha]
+inherits = "beta"
+
+[profiles.beta]
+inherits = "alpha"

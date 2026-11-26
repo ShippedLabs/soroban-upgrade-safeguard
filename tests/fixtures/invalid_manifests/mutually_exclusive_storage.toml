@@ -1,0 +1,6 @@
+version = 1
+
+[[pairs]]
+old = "old.wasm"
+new = "new.wasm"
+old_storage_schema = "old.json"
