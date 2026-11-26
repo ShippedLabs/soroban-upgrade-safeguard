@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the cross-contract dependency propagation system.
 //!
 //! These tests exercise the acceptance criteria from the issue:

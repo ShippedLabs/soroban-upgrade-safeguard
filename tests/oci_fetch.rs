@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Hermetic local-registry integration tests for the `oci://` input resolver
 //! (`src/oci.rs`).
 //!

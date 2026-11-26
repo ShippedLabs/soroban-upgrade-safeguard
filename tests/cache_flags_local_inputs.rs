@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `--no-remote-cache` and `--no-oci-cache` only apply to `https://` and
 //! `oci://` inputs, so they must have no effect on local files.
 

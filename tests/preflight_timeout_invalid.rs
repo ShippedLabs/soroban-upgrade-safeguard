@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test for a non-numeric `--timeout-secs` passed to `preflight`.
 //!
 //! Clap validates the value type before any network connection is attempted,

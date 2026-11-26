@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for preserving trailing newlines in report file outputs.
 
 use std::fs;

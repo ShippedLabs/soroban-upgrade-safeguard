@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration coverage for directory scans with no WASM artifacts.
 
 use std::fs;

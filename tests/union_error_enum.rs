@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Fixture-pair tests for union and error-enum diff coverage.
 
 use soroban_upgrade_safeguard::diff::{compare, Severity};

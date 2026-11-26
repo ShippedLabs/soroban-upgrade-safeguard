@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration test for `--clear-metadata-cache`.
 //!
 //! No existing test uses this flag. This spawns the binary directly, as

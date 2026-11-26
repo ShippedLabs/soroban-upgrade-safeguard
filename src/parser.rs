@@ -6,7 +6,7 @@ use wasmparser::{CompositeType, Parser, Payload, TypeRef, ValType};
 
 use crate::decoder_registry::{InterfaceVersion, SpecDecoderRegistry};
 use crate::error::Error;
-use crate::limits::ResourcePolicy;
+use crate::limits::{EntryKind, LimitError, ResourcePolicy};
 use crate::runtime_surface::{extract_runtime_surface, RuntimeSurface};
 use crate::storage_inference::{infer_storage, StorageInference};
 
@@ -158,6 +158,76 @@ fn decode_env_meta_entries(data: &[u8]) -> Result<Vec<ScEnvMetaEntry>, Error> {
 pub fn decode_env_meta(data: &[u8]) -> Result<ContractEnvMeta, Error> {
     let entries = decode_env_meta_entries(data)?;
     Ok(ContractEnvMeta { entries })
+}
+
+/// Check a manifest pair's resource budget before the normal comparison path.
+pub fn enforce_limits(bytes: &[u8], policy: &ResourcePolicy) -> anyhow::Result<()> {
+    let mut spec_entries = Vec::new();
+    let mut env_entries = 0usize;
+
+    for payload in Parser::new(0).parse_all(bytes) {
+        let payload = payload?;
+        let Payload::CustomSection(section) = payload else {
+            continue;
+        };
+        let data = section.data();
+        match section.name() {
+            "contractspecv0" => {
+                let mut reader = Limited::new(Cursor::new(data), policy.xdr_limits());
+                while (reader.inner.position() as usize) < data.len() {
+                    let entry = ScSpecEntry::read_xdr(&mut reader).map_err(|error| {
+                        LimitError::from_xdr_error(&error, policy)
+                            .map(anyhow::Error::new)
+                            .unwrap_or_else(|| anyhow::Error::new(error))
+                    })?;
+                    spec_entries.push(entry);
+                    if spec_entries.len() > policy.max_entries {
+                        return Err(LimitError::EntryCountExceeded {
+                            limit: policy.max_entries,
+                            kind: EntryKind::Spec,
+                        }
+                        .into());
+                    }
+                }
+            }
+            "contractenvmetav0" => {
+                let mut reader = Limited::new(Cursor::new(data), policy.xdr_limits());
+                while (reader.inner.position() as usize) < data.len() {
+                    ScEnvMetaEntry::read_xdr(&mut reader).map_err(|error| {
+                        LimitError::from_xdr_error(&error, policy)
+                            .map(anyhow::Error::new)
+                            .unwrap_or_else(|| anyhow::Error::new(error))
+                    })?;
+                    env_entries += 1;
+                    if env_entries > policy.max_entries {
+                        return Err(LimitError::EntryCountExceeded {
+                            limit: policy.max_entries,
+                            kind: EntryKind::EnvMeta,
+                        }
+                        .into());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let lint = crate::lint::lint(
+        &spec_entries,
+        &crate::lint::LintOptions {
+            policy: *policy,
+            ..Default::default()
+        },
+    );
+    if lint.findings.iter().any(|finding| {
+        finding.rule_id == crate::lint::LintRuleId::UnanalyzableRecursiveShape.as_str()
+    }) {
+        return Err(LimitError::WalkDepthExceeded {
+            limit: policy.max_walk_depth,
+        }
+        .into());
+    }
+    Ok(())
 }
 
 /// Parses the WASM bytes to extract Soroban-specific custom sections and decodes them.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration tests for the content-addressed metadata cache.
 //!
 //! These tests exercise the cache end-to-end: round-trips through

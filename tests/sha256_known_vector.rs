@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Known-vector test for the WASM SHA-256 helper.
 //!
 //! The loader exposes a SHA-256 helper used in report provenance and hash

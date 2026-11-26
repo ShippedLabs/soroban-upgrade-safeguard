@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `--contract-id` / `--rpc-url` RPC fetch mode.
 //!
 //! These tests spin up a lightweight HTTP mock server that emulates the

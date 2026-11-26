@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Regression tests for reports that omit optional provenance fields.
 //!
 //! Report consumers may receive older or manually generated JSON that omits

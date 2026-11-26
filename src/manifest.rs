@@ -193,7 +193,7 @@ pub struct RawDefaults {
     /// Axis gating overrides folded onto the suppression config's policy.
     #[serde(default)]
     pub policy: PolicyOverrides,
-    /// Resource limit overrides. Resolved and reported, not yet enforced.
+    /// Resource limit overrides for each pair's decode and type walk.
     #[serde(default)]
     pub limits: LimitsConfig,
 }
@@ -583,8 +583,7 @@ impl ResolvedPolicy {
 
 /// Resource limits after the precedence fold.
 ///
-/// Resolved and reported for provenance; **not enforced** — `parser.rs` still
-/// decodes with `Limits::none()`. See `docs/batch_manifests.md`.
+/// Resolved and applied to each pair before comparison.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedLimits {
     pub max_xdr_depth: Sourced<u32>,
@@ -608,6 +607,17 @@ pub struct ResolvedSettings {
 }
 
 impl ResolvedSettings {
+    /// Build the resource policy selected by the precedence fold.
+    #[must_use]
+    pub fn resource_policy(&self) -> ResourcePolicy {
+        ResourcePolicy {
+            max_xdr_depth: self.limits.max_xdr_depth.value,
+            max_xdr_len: self.limits.max_xdr_len.value,
+            max_entries: self.limits.max_entries.value,
+            max_walk_depth: self.limits.max_walk_depth.value,
+        }
+    }
+
     /// Fold this pair's policy overrides onto `config`'s own policy.
     ///
     /// Kept here rather than in the binary so it works whether or not the

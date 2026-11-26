@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! CLI-level wiring tests for `oci://` input positions.
 //!
 //! These don't hit the network (the CLI's OCI-fetch policy always sets

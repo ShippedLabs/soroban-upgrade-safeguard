@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `--plain` flag: a single switch that disables
 //! color, Unicode markers, and decorative separators together, for log
 //! processors that can't handle any of the three. Covers stdout, file

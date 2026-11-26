@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Test that --metadata-cache-stats does not report cache activity when
 //! --no-metadata-cache is set.
 

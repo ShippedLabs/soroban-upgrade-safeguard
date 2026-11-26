@@ -293,11 +293,24 @@ impl LintReport {
     }
 
     pub fn render_text(&self, explain: bool) -> String {
+        self.render_text_with_min_severity(explain, LintSeverity::Info)
+    }
+
+    /// Hide lower-severity detail lines without changing summary counts.
+    pub fn render_text_with_min_severity(
+        &self,
+        explain: bool,
+        min_severity: LintSeverity,
+    ) -> String {
         if self.is_clean() {
             return "[PASS] No lint findings.\n".to_string();
         }
         let mut out = String::new();
-        for finding in &self.findings {
+        for finding in self
+            .findings
+            .iter()
+            .filter(|finding| finding.severity >= min_severity)
+        {
             out.push_str(&format!(
                 "[{}] {} ({}): {}\n",
                 finding.severity.label(),
@@ -343,6 +356,31 @@ impl LintReport {
         out.push_str(&format!(
             "\n_{errors} error(s), {warnings} warning(s), {infos} info finding(s)_\n"
         ));
+        out
+    }
+
+    /// Emit one GitHub Actions annotation for each finding.
+    pub fn render_github_actions(&self, explain: bool) -> String {
+        let mut out = String::new();
+        for finding in &self.findings {
+            let level = match finding.severity {
+                LintSeverity::Info => "notice",
+                LintSeverity::Warning => "warning",
+                LintSeverity::Error => "error",
+            };
+            let mut message = format!(
+                "{} ({}): {}",
+                finding.target, finding.rule_id, finding.message
+            );
+            if explain {
+                message.push_str(&format!(" Remediation: {}", finding.remediation));
+            }
+            let escaped = message
+                .replace('%', "%25")
+                .replace('\r', "%0D")
+                .replace('\n', "%0A");
+            out.push_str(&format!("::{level}::{escaped}\n"));
+        }
         out
     }
 }
@@ -906,6 +944,65 @@ mod tests {
             inferred_storage: None,
             policy: ResourcePolicy::default(),
         }
+    }
+
+    #[test]
+    fn github_actions_annotations_match_severity_and_escape_newlines() {
+        let report = LintReport {
+            findings: vec![
+                LintFinding {
+                    rule_id: "info",
+                    severity: LintSeverity::Info,
+                    target: LintTarget::new("function", "added"),
+                    message: "new\nfunction".to_string(),
+                    remediation: "review",
+                },
+                LintFinding {
+                    rule_id: "warning",
+                    severity: LintSeverity::Warning,
+                    target: LintTarget::new("struct", "unused"),
+                    message: "unused".to_string(),
+                    remediation: "review",
+                },
+                LintFinding {
+                    rule_id: "error",
+                    severity: LintSeverity::Error,
+                    target: LintTarget::new("enum", "invalid"),
+                    message: "invalid".to_string(),
+                    remediation: "review",
+                },
+            ],
+        };
+        let annotations = report.render_github_actions(false);
+        let lines: Vec<_> = annotations.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("::notice::"));
+        assert!(lines[0].contains("new%0Afunction"));
+        assert!(lines[1].starts_with("::warning::"));
+        assert!(lines[2].starts_with("::error::"));
+    }
+
+    #[test]
+    fn minimum_severity_filters_details_but_preserves_counts_and_status() {
+        let report = LintReport {
+            findings: vec![
+                LintFinding::new(
+                    LintRuleId::UnreachableDeclaration,
+                    LintTarget::new("struct", "Unused"),
+                    "unused type",
+                ),
+                LintFinding::new(
+                    LintRuleId::DuplicateCaseName,
+                    LintTarget::new("enum", "Duplicate"),
+                    "duplicate case",
+                ),
+            ],
+        };
+        let output = report.render_text_with_min_severity(false, LintSeverity::Warning);
+        assert!(!output.contains("unused type"));
+        assert!(output.contains("duplicate case"));
+        assert!(output.contains("0 error(s), 1 warning(s), 1 info finding(s)"));
+        assert!(report.has_warnings());
     }
 
     #[test]

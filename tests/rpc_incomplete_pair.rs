@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for incomplete `--contract-id` / `--rpc-url` pairs.
 //!
 //! Both flags are required together (`clap`'s `requires` attribute enforces
@@ -91,6 +92,27 @@ fn comparison_mode_rejects_rpc_url_without_contract_id() {
     cmd.args(["--rpc-url", UNROUTABLE_RPC_URL])
         .arg(wasm_fixture("v2.wasm"));
     assert_rejected_before_any_network_request(cmd, "--contract-id");
+}
+
+#[test]
+fn comparison_mode_rejects_rpc_allow_id_mismatch_without_rpc_url() {
+    let mut cmd = bin();
+    cmd.args(["--rpc-allow-id-mismatch"])
+        .arg(wasm_fixture("v1.wasm"))
+        .arg(wasm_fixture("v2.wasm"));
+    let output = cmd.output().expect("failed to run binary");
+    let stderr = String::from_utf8(output.stderr).expect("stderr not UTF-8");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "using --rpc-allow-id-mismatch without --rpc-url should be a CLI usage error; \
+         stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("--rpc-url"),
+        "error should name --rpc-url, got: {stderr}"
+    );
 }
 
 #[test]

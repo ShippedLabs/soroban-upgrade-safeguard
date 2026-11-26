@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for named policy profiles, exercised end-to-end through
 //! [`ResolvedConfig::resolve`] the same way the CLI would use them.
 

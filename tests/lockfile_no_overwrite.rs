@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that `lockfile` refuses to replace an existing lockfile without `--force`.
 
 use std::fs;

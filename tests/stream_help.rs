@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests verifying that `stream --help` documents the job schema,
 //! result schema, input descriptors, and status values.
 //!

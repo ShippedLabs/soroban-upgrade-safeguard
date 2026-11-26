@@ -8,6 +8,8 @@ use std::io::{IsTerminal, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
+mod timestamp;
+
 use soroban_upgrade_safeguard::{
     attestation::{
         canonical_json_bytes, sign_statement, verify_artifacts, verify_signatures, ArtifactDigest,
@@ -525,7 +527,7 @@ struct Args {
     /// Accept a JSON-RPC response whose `id` is missing or does not match
     /// the request's `id`. Off by default; only use this for a provider
     /// known not to echo request IDs correctly.
-    #[arg(long)]
+    #[arg(long, requires = "rpc_url")]
     rpc_allow_id_mismatch: bool,
 
     /// Path to a suppression config acknowledging known, intentional breaking
@@ -722,7 +724,8 @@ struct Args {
         alias = "report-name-template",
         alias = "filename-template",
         value_name = "TEMPLATE",
-        default_value = "{name}.{ext}"
+        default_value = "{name}.{ext}",
+        requires = "per_contract_output_dir"
     )]
     per_contract_output_name_template: String,
 
@@ -741,6 +744,7 @@ struct Args {
         value_name = "MILLISECONDS",
         default_value_t = DEFAULT_WATCH_DEBOUNCE_MS,
         value_parser = parse_watch_debounce_ms,
+        requires = "watch",
     )]
     watch_debounce_ms: u64,
 
@@ -1028,6 +1032,10 @@ struct LintArgs {
     #[arg(long, value_enum, ignore_case = true, default_value_t = LintOutputFormat::Text)]
     format: LintOutputFormat,
 
+    /// Minimum severity shown in text output; summary counts stay unchanged.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = LintMinimumSeverity::Info)]
+    min_severity: LintMinimumSeverity,
+
     /// Include remediation guidance for each finding.
     #[arg(long)]
     explain: bool,
@@ -1058,6 +1066,25 @@ enum LintOutputFormat {
     Text,
     Json,
     Markdown,
+    GithubActions,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum LintMinimumSeverity {
+    #[default]
+    Info,
+    Warning,
+    Error,
+}
+
+impl From<LintMinimumSeverity> for lint::LintSeverity {
+    fn from(value: LintMinimumSeverity) -> Self {
+        match value {
+            LintMinimumSeverity::Info => Self::Info,
+            LintMinimumSeverity::Warning => Self::Warning,
+            LintMinimumSeverity::Error => Self::Error,
+        }
+    }
 }
 
 #[derive(ClapArgs, Debug)]
@@ -1087,6 +1114,9 @@ struct AttestArgs {
 struct VerifyAttestationArgs {
     #[arg(value_name = "DSSE_JSON")]
     attestation: PathBuf,
+    /// Verification output format.
+    #[arg(long, value_enum, ignore_case = true, default_value_t = AttestationOutputFormat::Json)]
+    format: AttestationOutputFormat,
     #[arg(long, value_name = "REPORT_JSON")]
     report: Option<PathBuf>,
     #[arg(long, value_name = "WASM")]
@@ -1103,6 +1133,12 @@ struct VerifyAttestationArgs {
     /// Unix timestamp after which the verification policy is expired.
     #[arg(long, value_name = "UNIX_SECONDS")]
     policy_expires_at: Option<u64>,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum AttestationOutputFormat {
+    Json,
+    Text,
 }
 
 /// `stream`: JSON Lines streaming batch mode.
@@ -1221,6 +1257,10 @@ struct RenderArgs {
     /// Output format
     #[arg(long, value_enum, ignore_case = true, default_value_t = RenderFormat::Text)]
     format: RenderFormat,
+
+    /// Minimum severity shown in text output; counts and verdict stay unchanged.
+    #[arg(long, value_enum, default_value = "info")]
+    min_severity: MinimumSeverity,
 
     /// Write the rendered report atomically to this path instead of stdout.
     #[arg(long, value_name = "PATH")]
@@ -1747,7 +1787,7 @@ fn run_categories(args: &CategoriesArgs) -> Result<()> {
         let all_categories = category::FindingCategory::all();
         let found = all_categories
             .iter()
-            .find(|cat| cat.as_str() == category_name);
+            .find(|cat| cat.as_str().eq_ignore_ascii_case(category_name));
 
         match found {
             Some(cat) => {
@@ -1820,11 +1860,33 @@ fn run_doctor(args: &DoctorArgs) -> Result<()> {
         colored::control::set_override(false);
     }
 
-    let (suppressions, config_source) = load_suppressions(
+    // doctor exists to diagnose a broken setup, so a config that fails to load
+    // is reported in the output instead of aborting the command.
+    let (suppressions, config_source, config_error) = match load_suppressions(
         args.no_config,
         args.config.as_deref(),
         args.search_parent_config,
-    )?;
+    ) {
+        Ok((suppressions, source)) => (suppressions, source, None),
+        Err(err) => {
+            let source = if let Some(path) = args.config.as_deref() {
+                Some((path.to_path_buf(), ConfigSource::Cli))
+            } else if let Some(env_path) = std::env::var_os(CONFIG_PATH_ENV_VAR) {
+                Some((PathBuf::from(env_path), ConfigSource::Env))
+            } else if Path::new(DEFAULT_CONFIG_FILE).exists() {
+                Some((
+                    PathBuf::from(DEFAULT_CONFIG_FILE),
+                    ConfigSource::AutoDiscovered,
+                ))
+            } else {
+                resolve_ancestor_config(args.search_parent_config)
+                    .ok()
+                    .flatten()
+                    .map(|path| (path, ConfigSource::AncestorSearch))
+            };
+            (SuppressionConfig::default(), source, Some(format!("{err:#}")))
+        }
+    };
 
     let version = env!("CARGO_PKG_VERSION");
 
@@ -1884,6 +1946,7 @@ fn run_doctor(args: &DoctorArgs) -> Result<()> {
                     }),
                 },
             );
+            config.insert("load_error".to_string(), serde_json::json!(config_error));
             config.insert(
                 "suppression_count".to_string(),
                 serde_json::json!(suppressions.rules().len()),
@@ -1902,6 +1965,7 @@ fn run_doctor(args: &DoctorArgs) -> Result<()> {
             &oci_cache_dir,
             &metadata_cache_dir,
             &config_source,
+            config_error.as_deref(),
             &suppressions,
         ),
     };
@@ -1917,6 +1981,7 @@ fn render_doctor_text(
     oci_cache_dir: &Path,
     metadata_cache_dir: &Path,
     config_source: &Option<(PathBuf, ConfigSource)>,
+    config_error: Option<&str>,
     suppressions: &SuppressionConfig,
 ) -> String {
     let mut out = String::new();
@@ -1966,6 +2031,9 @@ fn render_doctor_text(
             out.push_str("  Config file: (none found)\n");
             out.push_str("  Source:      default\n");
         }
+    }
+    if let Some(error) = config_error {
+        out.push_str(&format!("  Load error:  {}\n", error));
     }
     out.push_str(&format!(
         "  Suppressions loaded: {}\n",
@@ -2488,6 +2556,7 @@ fn run_lint(args: &LintArgs) -> Result<()> {
     let output_text = match args.format {
         LintOutputFormat::Text => report.render_text(args.explain),
         LintOutputFormat::Markdown => report.render_markdown(args.explain),
+        LintOutputFormat::GithubActions => report.render_github_actions(args.explain),
         LintOutputFormat::Json => {
             format!(
                 "{}\n",
@@ -2644,7 +2713,7 @@ fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
                     message: error.to_string(),
                 }],
             });
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            println!("{}", render_attestation_verification(&result, args.format)?);
             std::io::stdout().flush().ok();
             std::process::exit(1);
         }
@@ -2704,12 +2773,76 @@ fn run_verify_attestation(args: &VerifyAttestationArgs) -> Result<()> {
         "signer_identities": signatures.signer_identities,
         "failures": failures,
     });
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    println!("{}", render_attestation_verification(&result, args.format)?);
     if result["verified"] != true {
         std::io::stdout().flush().ok();
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn render_attestation_verification(
+    result: &serde_json::Value,
+    format: AttestationOutputFormat,
+) -> Result<String> {
+    if format == AttestationOutputFormat::Json {
+        return Ok(serde_json::to_string_pretty(result)?);
+    }
+
+    let verified = result["verified"] == true;
+    let identities = result["signer_identities"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let mut lines = vec![
+        format!("Verified: {}", if verified { "yes" } else { "no" }),
+        format!(
+            "Signer identities: {}",
+            if identities.is_empty() {
+                "none"
+            } else {
+                &identities
+            }
+        ),
+    ];
+    if let Some(failures) = result["failures"].as_array() {
+        for failure in failures {
+            lines.push(format!(
+                "Failure: {}",
+                failure["message"].as_str().unwrap_or("unknown failure")
+            ));
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod attestation_format_tests {
+    use super::*;
+
+    #[test]
+    fn renders_json_and_text() {
+        let result = serde_json::json!({
+            "verified": false,
+            "signer_identities": ["build-key"],
+            "failures": [{"message": "signature mismatch"}],
+        });
+        let json = render_attestation_verification(&result, AttestationOutputFormat::Json).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            result
+        );
+        let text = render_attestation_verification(&result, AttestationOutputFormat::Text).unwrap();
+        assert!(text.contains("Verified: no"));
+        assert!(text.contains("Signer identities: build-key"));
+        assert!(text.contains("Failure: signature mismatch"));
+    }
 }
 
 /// Run the streaming JSONL batch protocol.
@@ -2788,7 +2921,11 @@ fn run_render(args: &RenderArgs) -> Result<()> {
     let rendered = match args.format {
         RenderFormat::Text => {
             let width = resolve_text_width(args.width, std::io::stdout().is_terminal());
-            let text = report.to_text_with_width(args.explain, width);
+            let text = report.to_text_with_min_severity(
+                args.explain,
+                width,
+                args.min_severity.as_severity(),
+            );
             let text = if args.plain {
                 report::plainify(&text)
             } else {
@@ -2797,7 +2934,7 @@ fn run_render(args: &RenderArgs) -> Result<()> {
             format!("{text}\n")
         }
         RenderFormat::Markdown => {
-            let markdown = report.to_markdown();
+            let markdown = report.to_markdown_with_min_severity(args.min_severity.as_severity());
             let markdown = if args.plain {
                 report::plainify(&markdown)
             } else {
@@ -2810,7 +2947,10 @@ fn run_render(args: &RenderArgs) -> Result<()> {
             colored::control::set_override(false);
             // The trailing newline matches what the live comparison prints,
             // so a re-rendered report is byte-identical to the original run.
-            format!("{}\n", report.to_github_actions())
+            format!(
+                "{}\n",
+                report.to_github_actions_with_min_severity(args.min_severity.as_severity())
+            )
         }
     };
 
@@ -3245,11 +3385,6 @@ fn main() -> Result<()> {
     if args.interface_lockfile.is_some() && is_batch {
         anyhow::bail!("Cannot use --interface-lockfile with batch mode");
     }
-    if args.policy_bundle.is_some() && is_batch {
-        anyhow::bail!(
-            "--policy-bundle is not yet supported in batch mode (--manifest or --old-dir/--new-dir)"
-        );
-    }
     if args.interface_lockfile.is_some() && args.contract_id.is_some() {
         anyhow::bail!("Cannot use --interface-lockfile with --contract-id; the lockfile supplies the baseline");
     }
@@ -3405,7 +3540,7 @@ struct BuiltBatch {
 /// Manifest mode resolves includes, defaults and per-pair overrides up front —
 /// including duplicate-identity detection, so a collision fails before any pair
 /// runs rather than mid-loop with earlier reports already on disk. Directory
-/// mode sweeps both directories for shared-name `.wasm` artifacts, leaving out
+/// mode sweeps both trees for shared relative-path `.wasm` artifacts, leaving out
 /// anything an `--exclude` pattern matches.
 fn build_batch(args: &Args) -> Result<BuiltBatch> {
     let cli = cli_settings(args)?;
@@ -3451,6 +3586,9 @@ fn build_batch(args: &Args) -> Result<BuiltBatch> {
 /// `Ok(false)` for an unsafe verdict, which the caller turns into exit code 1
 /// *after* it has written `--metrics-file`; exiting here would skip that write.
 fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> Result<bool> {
+    if args.watch && args.policy_bundle.is_some() {
+        anyhow::bail!("--policy-bundle cannot be combined with --watch in batch mode");
+    }
     // Watch mode for a whole batch re-runs only the pairs whose inputs
     // changed, rather than recomputing every pair on every file event.
     if args.watch {
@@ -3468,6 +3606,8 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
     // Manifest mode resolves includes, defaults and per-pair overrides up front —
     // including duplicate-identity detection, so a collision fails before any
     // pair runs rather than mid-loop with earlier reports already on disk.
+    // Reject an unverified bundle before any batch WASM is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
     let built = build_batch(args)?;
     let (resolved_manifest, pairs, mut gaps, new_only, skipped) = (
         built.resolved_manifest,
@@ -3664,6 +3804,7 @@ fn run_batch(args: &Args, outputs: &[OutputSpec], progress: &dyn Fn(String)) -> 
             args,
             &remote_config,
             &oci_config,
+            verified_bundle.as_ref(),
             &mut config_cache,
             progress,
         );
@@ -3910,6 +4051,7 @@ fn compare_batch_pair(
     args: &Args,
     remote_config: &RemoteFetchConfig,
     oci_config: &OciFetchConfig,
+    verified_bundle: Option<&VerifiedPolicyBundle>,
     config_cache: &mut HashMap<PathBuf, SuppressionConfig>,
     progress: &dyn Fn(String),
 ) -> BatchResult {
@@ -3921,7 +4063,7 @@ fn compare_batch_pair(
     let settings = &pair.settings;
     let explain = settings.explain.value;
 
-    let pair_suppressions = match suppressions_for_pair(settings, config_cache) {
+    let mut pair_suppressions = match suppressions_for_pair(settings, config_cache) {
         Ok(suppressions) => suppressions,
         Err(e) => {
             let enriched_error = format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
@@ -3950,6 +4092,13 @@ fn compare_batch_pair(
         }
     };
 
+    if let Some(verified) = verified_bundle {
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut pair_suppressions,
+            &verified.policy,
+        );
+    }
+
     let mut pair_error = None;
     let report = match (
         load_wasm_input(
@@ -3970,7 +4119,15 @@ fn compare_batch_pair(
         (Ok(old_wasm), Ok(new_wasm)) => {
             log.timing("Loading batch pair inputs", pair_start);
             let compare_start = std::time::Instant::now();
-            match load_pair_storage_schemas(pair).and_then(|storage_schemas| {
+            let policy = settings.resource_policy();
+            let limited_inputs = parser::enforce_limits(&old_wasm.bytes, &policy)
+                .context("Old WASM exceeded the manifest resource limits")
+                .and_then(|_| {
+                    parser::enforce_limits(&new_wasm.bytes, &policy)
+                        .context("New WASM exceeded the manifest resource limits")
+                });
+            let comparison = limited_inputs.and_then(|_| load_pair_storage_schemas(pair));
+            match comparison.and_then(|storage_schemas| {
                 if let Some(storage_schemas) = storage_schemas.as_ref() {
                     log.sections("Old", &old_wasm.bytes);
                     log.sections("New", &new_wasm.bytes);
@@ -4020,11 +4177,15 @@ fn compare_batch_pair(
             }) {
                 Ok(report) => {
                     log.timing("Batch pair comparison", compare_start);
-                    report.with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
+                    report
+                        .with_policy_bundle(
+                            verified_bundle.map(|verified| verified.provenance.clone()),
+                        )
+                        .with_symlinks(old_wasm.symlink.clone(), new_wasm.symlink.clone())
                 }
                 Err(e) => {
                     let enriched_error =
-                        format!("pair '{}' (id: {}): {}", contract_name, contract_id, e);
+                        format!("pair '{}' (id: {}): {e:#}", contract_name, contract_id);
                     pair_error = Some(enriched_error.clone());
                     progress(format!(
                         "  ⚠️  Comparison failed for '{}': {}",
@@ -4585,7 +4746,9 @@ fn render_batch_summary(
                     if let BatchResult::Error { error, .. } = result {
                         markdown.push_str(&format!("**Pair error**: `{}`\n\n", error));
                     }
-                    let report_md = report.generate_summary_markdown();
+                    let report_md = report
+                        .to_renderable()
+                        .to_markdown_with_min_severity(min_severity);
                     let stripped_md = report_md.replace("# Soroban Upgrade Safety Report\n\n", "");
                     markdown.push_str(&stripped_md);
                     markdown.push_str("\n---\n\n");
@@ -4681,7 +4844,11 @@ fn render_batch_summary(
                 for result in results {
                     output.push_str(&format!("::group::{}\n", result.name()));
                     let report = result.report();
-                    output.push_str(&report.to_renderable().to_github_actions());
+                    output.push_str(
+                        &report
+                            .to_renderable()
+                            .to_github_actions_with_min_severity(min_severity),
+                    );
                     output.push_str("::endgroup::\n");
                 }
                 output.push_str(&format!(
@@ -4731,6 +4898,49 @@ fn load_policy_bundle_bytes(source: &str, args: &Args) -> Result<(Vec<u8>, Strin
             Ok((bytes, source.to_string()))
         }
     }
+}
+
+struct VerifiedPolicyBundle {
+    policy: soroban_upgrade_safeguard::policy_bundle::PolicyBundle,
+    provenance: soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
+}
+
+fn verify_policy_bundle(
+    args: &Args,
+    progress: &dyn Fn(String),
+) -> Result<Option<VerifiedPolicyBundle>> {
+    let Some(source) = args.policy_bundle.as_deref() else {
+        return Ok(None);
+    };
+    let (bytes, source_label) = load_policy_bundle_bytes(source, args)?;
+    let mut trusted = std::collections::BTreeMap::new();
+    for item in &args.trusted_bundle_key {
+        let (id, path) = item.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
+        })?;
+        trusted.insert(
+            id.to_string(),
+            std::fs::read(path)
+                .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
+        );
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (policy, provenance) = soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
+        &bytes,
+        &trusted,
+        now,
+        &source_label,
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+    progress(format!(
+        "Policy bundle '{}' verified (signer(s): {})",
+        provenance.bundle_id,
+        provenance.signer_identities.join(", ")
+    ));
+    Ok(Some(VerifiedPolicyBundle { policy, provenance }))
 }
 
 /// Run a single-pair comparison. Returns `Ok(true)` for a safe verdict and
@@ -4815,50 +5025,18 @@ fn run_single(
         .and_then(|stem| stem.to_str())
         .map(String::from);
 
-    // --policy-bundle: opt-in, verified, and applied *before* any WASM is
-    // loaded (see docs/policy-bundles.md). `--manifest`/`--old-dir` batch
-    // mode already rejected this combination earlier in `main()`, so by
-    // construction nothing below needs to special-case batch mode.
-    let mut owned_suppressions: Option<SuppressionConfig> = None;
-    let mut policy_bundle_provenance: Option<
-        soroban_upgrade_safeguard::policy_bundle::BundleProvenance,
-    > = None;
-    if let Some(bundle_source) = &args.policy_bundle {
-        let (bytes, source_label) = load_policy_bundle_bytes(bundle_source, args)?;
-        let mut trusted = std::collections::BTreeMap::new();
-        for item in &args.trusted_bundle_key {
-            let (id, path) = item.split_once('=').ok_or_else(|| {
-                anyhow::anyhow!("Invalid --trusted-bundle-key '{}'; expected ID=PATH", item)
-            })?;
-            trusted.insert(
-                id.to_string(),
-                std::fs::read(path)
-                    .with_context(|| format!("Failed to read trusted bundle key '{id}'."))?,
-            );
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let (bundle, provenance) =
-            soroban_upgrade_safeguard::policy_bundle::verify_bundle_envelope(
-                &bytes,
-                &trusted,
-                now,
-                &source_label,
-            )
-            .map_err(|e| anyhow::anyhow!(e))?;
-        progress(format!(
-            "🏛️  Policy bundle '{}' verified (signer(s): {})",
-            provenance.bundle_id,
-            provenance.signer_identities.join(", ")
-        ));
+    // Verify the bundle before either WASM input is loaded.
+    let verified_bundle = verify_policy_bundle(args, progress)?;
+    let owned_suppressions = verified_bundle.as_ref().map(|verified| {
         let mut merged = suppressions.clone();
-        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(&mut merged, &bundle);
-        owned_suppressions = Some(merged);
-        policy_bundle_provenance = Some(provenance);
-    }
+        soroban_upgrade_safeguard::policy_bundle::apply_bundle_policy(
+            &mut merged,
+            &verified.policy,
+        );
+        merged
+    });
     let suppressions: &SuppressionConfig = owned_suppressions.as_ref().unwrap_or(suppressions);
+    let policy_bundle_provenance = verified_bundle.as_ref().map(|verified| &verified.provenance);
 
     let run_comparison = |progress: &dyn Fn(String)| -> Result<bool> {
         let log = DiagnosticLog::new(args, true);
@@ -4899,7 +5077,7 @@ fn run_single(
             args.no_symlinks,
             progress,
         )?;
-        use_metadata_cache(new_wasm_path, &new, &mc_config, &mut mc_stats);
+        use_metadata_cache(&new, &mc_config, &mut mc_stats);
 
         let mut store_opt = if let Some(ref path) = args.lineage_store {
             let mut store = if path.exists() {
@@ -4985,7 +5163,7 @@ fn run_single(
                     args.no_symlinks,
                     progress,
                 )?;
-                use_metadata_cache(&args.wasm_paths[0], &old, &mc_config, &mut mc_stats);
+                use_metadata_cache(&old, &mc_config, &mut mc_stats);
                 old
             };
 
@@ -5019,7 +5197,7 @@ fn run_single(
                     rpc_headers: &args.rpc_headers,
                     rpc_allow_id_mismatch: args.rpc_allow_id_mismatch,
                     allow_http_local: args.allow_http_local,
-                    policy_bundle: policy_bundle_provenance.as_ref(),
+                    policy_bundle: policy_bundle_provenance,
                     lineage_store: store_opt.as_ref(),
                     contract: contract_name.as_deref(),
                     complexity_budget: None,
@@ -5047,7 +5225,7 @@ fn run_single(
             let record = soroban_upgrade_safeguard::lineage::LineageRecord {
                 version_id: version_id.clone(),
                 order: 0,
-                created_at: "2026-08-25T00:00:00Z".to_string(),
+                created_at: timestamp::now_rfc3339(),
                 status: soroban_upgrade_safeguard::lineage::LiveStatus::Live,
                 wasm_hash: loader::sha256_hex(&new.bytes),
                 interface_hash: soroban_upgrade_safeguard::interface_hash::InterfaceHash::of_spec(
@@ -5083,10 +5261,7 @@ fn run_single(
         log.timing("Comparison cycle", cycle_start);
 
         let is_safe = safety_report.is_safe();
-        if !is_safe {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(is_safe)
     };
 
     let cycle_counter = std::cell::Cell::new(0u64);
@@ -5336,14 +5511,16 @@ fn render_single(
     match format {
         OutputFormat::Json => Ok(serde_json::to_string_pretty(&renderable)?),
         OutputFormat::Markdown => {
-            let markdown = renderable.to_markdown();
+            let markdown = renderable.to_markdown_with_min_severity(min_severity);
             Ok(destyle_text(markdown, ascii, plain))
         }
         OutputFormat::Text => {
             let text = renderable.to_text_with_min_severity(explain, width, min_severity);
             Ok(destyle_text(text, ascii, plain))
         }
-        OutputFormat::GithubActions => Ok(renderable.to_github_actions()),
+        OutputFormat::GithubActions => {
+            Ok(renderable.to_github_actions_with_min_severity(min_severity))
+        }
     }
 }
 
@@ -5720,25 +5897,18 @@ fn load_wasm_input(
     Ok(module)
 }
 
-/// Look up a locally loaded WASM in the metadata cache and, on a miss, decode
+/// Look up a loaded WASM in the metadata cache and, on a miss, decode
 /// it and store the result.
 ///
-/// Only local file inputs take part for now: stdin, `https://` and `oci://`
-/// inputs are skipped. The cache is advisory, so a decode failure here is
-/// ignored; the analysis itself reports it with full context.
+/// Every input kind takes part, including `https://` inputs, which are keyed by
+/// the content hash of the verified download. The cache is advisory, so a
+/// decode failure here is ignored; the analysis itself reports it with full
+/// context.
 fn use_metadata_cache(
-    path: &Path,
     module: &loader::WasmModule,
     config: &soroban_upgrade_safeguard::metadata_cache::MetadataCacheConfig,
     stats: &mut soroban_upgrade_safeguard::metadata_cache::CacheStats,
 ) {
-    let text = path.to_string_lossy();
-    let is_local = !is_stdin_wasm_path(path)
-        && !matches!(RemoteRef::parse(&text), Ok(Some(_)))
-        && !matches!(OciReference::parse(&text), Ok(Some(_)));
-    if !is_local {
-        return;
-    }
     let _ = soroban_upgrade_safeguard::metadata_cache::extract_with_cache(
         config,
         &module.sha256,
@@ -6842,10 +7012,8 @@ fn is_wasm_artifact(path: &Path) -> bool {
 /// literal rather than silently reinterpreted. Matching is case-sensitive over
 /// the path as the filesystem spelled it.
 ///
-/// Written out rather than pulled from a crate: the only strings ever matched
-/// are the names of files sitting in a directory, and a scan has no tree to
-/// walk and no pattern set worth compiling. A glob engine would be dependency
-/// weight with nothing to do, and the dialect above is the whole of it.
+/// Written out rather than pulled from a crate: patterns match the paths of
+/// scanned artifacts relative to their root, and the dialect above is complete.
 fn glob_matches(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = text.chars().collect();
@@ -7119,6 +7287,33 @@ struct ScannedArtifacts {
     skipped: Vec<SkippedFile>,
 }
 
+fn collect_wasm_artifacts(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut artifacts = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            // Do not descend through directory symlinks.
+            if entry.file_type()?.is_dir() {
+                pending.push(path);
+            } else if is_wasm_artifact(&path) {
+                artifacts.push(path);
+            }
+        }
+    }
+    artifacts.sort();
+    Ok(artifacts)
+}
+
+fn scan_contract_name(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .with_extension("")
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 fn scan_directories(
     old_dir: &Path,
     new_dir: &Path,
@@ -7135,12 +7330,7 @@ fn scan_directories(
     let mut pairs = Vec::new();
     let mut gaps = Vec::new();
     let mut skipped = Vec::new();
-    for entry in std::fs::read_dir(old_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_wasm_artifact(&path) {
-            continue;
-        }
+    for path in collect_wasm_artifacts(old_dir)? {
         if let Some(pattern) = excluded_by(&path, old_dir, exclude) {
             skipped.push(SkippedFile {
                 side: ScanSide::Old,
@@ -7151,10 +7341,10 @@ fn scan_directories(
             continue;
         }
         {
-            let filename = path.file_name().unwrap();
-            let new_path = new_dir.join(filename);
-            let name = path.file_stem().and_then(|s| s.to_str()).map(String::from);
-            if new_path.exists() {
+            let relative = path.strip_prefix(old_dir)?;
+            let new_path = new_dir.join(relative);
+            let name = scan_contract_name(&path, old_dir);
+            if new_path.is_file() {
                 // Reject self-comparison in directory scan mode too
                 use crate::manifest::canonical_identity;
                 if canonical_identity(&path) == canonical_identity(&new_path) {
@@ -7167,12 +7357,9 @@ fn scan_directories(
                         new_dir.display()
                     );
                 }
-                let derived = name
-                    .clone()
-                    .unwrap_or_else(|| filename.to_string_lossy().to_string());
                 pairs.push(BatchPair {
-                    name: derived.clone(),
-                    id: derived,
+                    name: name.clone(),
+                    id: name,
                     labels: Vec::new(),
                     old: path,
                     new: new_path,
@@ -7181,9 +7368,8 @@ fn scan_directories(
                     settings: settings.clone(),
                 });
             } else {
-                let gap_name = name.unwrap_or_else(|| filename.to_string_lossy().to_string());
                 gaps.push(GapContract {
-                    name: gap_name,
+                    name,
                     old_path: path,
                 });
             }
@@ -7192,18 +7378,13 @@ fn scan_directories(
 
     // The reverse sweep: new-side artifacts the old-side loop never looked at.
     // The match test mirrors that loop exactly — a pair is formed when the same
-    // file name exists as a file on both sides — so the two views can never
+    // relative path exists as a file on both sides — so the two views can never
     // disagree about what counts as matched. `--exclude` is applied here on the
     // same terms, and before the match test, so an excluded artifact is
     // accounted for as skipped rather than escaping through either the matched
     // branch or the new-only list.
     let mut new_only = Vec::new();
-    for entry in std::fs::read_dir(new_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_wasm_artifact(&path) {
-            continue;
-        }
+    for path in collect_wasm_artifacts(new_dir)? {
         if let Some(pattern) = excluded_by(&path, new_dir, exclude) {
             skipped.push(SkippedFile {
                 side: ScanSide::New,
@@ -7213,15 +7394,11 @@ fn scan_directories(
             });
             continue;
         }
-        let filename = path.file_name().unwrap();
-        if old_dir.join(filename).is_file() {
+        let relative = path.strip_prefix(new_dir)?;
+        if old_dir.join(relative).is_file() {
             continue;
         }
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| filename.to_string_lossy().to_string());
+        let name = scan_contract_name(&path, new_dir);
         new_only.push(NewOnlyContract {
             name,
             new_path: path,
@@ -7242,12 +7419,8 @@ fn scan_directories(
         if new_only.is_empty() {
             // Both directories contain no WASM files. Check if directories are truly empty
             // or just contain no WASM artifacts, for a better diagnostic.
-            let old_has_files = std::fs::read_dir(old_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
-            let new_has_files = std::fs::read_dir(new_dir)?
-                .filter_map(|e| e.ok())
-                .any(|e| e.path().is_file());
+            let old_has_files = std::fs::read_dir(old_dir)?.next().is_some();
+            let new_has_files = std::fs::read_dir(new_dir)?.next().is_some();
 
             if !old_has_files && !new_has_files {
                 anyhow::bail!(
@@ -7735,6 +7908,56 @@ mod tests {
         let spec: OutputSpec = "text".parse().unwrap();
         assert_eq!(spec.format, OutputFormat::Text);
         assert!(spec.path.is_none());
+    }
+
+    #[test]
+    fn output_name_template_without_output_dir_is_a_clap_error_naming_the_dir_flag() {
+        let err = Args::try_parse_from(["prog", "--per-contract-output-name-template", "{name}_x.{ext}"])
+            .expect_err("the template must require --per-contract-output-dir");
+        assert_eq!(err.exit_code(), 2);
+        assert!(
+            err.to_string().contains("--per-contract-output-dir"),
+            "error must name the missing flag: {err}"
+        );
+    }
+
+    #[test]
+    fn output_name_template_with_output_dir_is_accepted() {
+        let args = Args::try_parse_from([
+            "prog",
+            "--per-contract-output-dir",
+            "out",
+            "--per-contract-output-name-template",
+            "{name}_x.{ext}",
+        ])
+        .expect("template with an output dir must parse");
+        assert_eq!(args.per_contract_output_name_template, "{name}_x.{ext}");
+    }
+
+    #[test]
+    fn output_dir_alone_uses_default_template() {
+        let args = Args::try_parse_from(["prog", "--per-contract-output-dir", "out"])
+            .expect("output dir alone must parse");
+        assert_eq!(args.per_contract_output_name_template, "{name}.{ext}");
+    }
+
+    #[test]
+    fn watch_debounce_without_watch_is_a_clap_error_naming_watch() {
+        let err = Args::try_parse_from(["prog", "--watch-debounce-ms", "500"])
+            .expect_err("--watch-debounce-ms must require --watch");
+        assert_eq!(err.exit_code(), 2);
+        assert!(
+            err.to_string().contains("--watch"),
+            "error must name --watch: {err}"
+        );
+    }
+
+    #[test]
+    fn watch_debounce_with_watch_is_accepted() {
+        let args = Args::try_parse_from(["prog", "--watch", "--watch-debounce-ms", "500"])
+            .expect("--watch with --watch-debounce-ms must parse");
+        assert!(args.watch);
+        assert_eq!(args.watch_debounce_ms, 500);
     }
 
     #[test]

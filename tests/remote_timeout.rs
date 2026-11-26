@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Verifies that `--remote-timeout-secs 0` is a defined, fast failure
 //! rather than an unbounded wait.
 //!

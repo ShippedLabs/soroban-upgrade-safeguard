@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the persistent compatibility lineage ledger.
 
 use soroban_upgrade_safeguard::lineage::{
