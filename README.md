@@ -1970,6 +1970,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Adding a New Finding Category](docs/adding-finding-categories.md): contributor steps for adding a category with stable IDs, guidance, suppression rules, and tests.
 - [Lint Rules Reference](docs/lint_rules_reference.md): reference for rules applied by the lint subcommand to validate single contract specs.
 - [Capability Reference](docs/capability-reference.md): Soroban protocol capabilities used to classify host import changes.
+- [Updating the Capability Registry](docs/capability-registry.md): how to update the Soroban host import capability registry.
 - [Protocol-Versioned Contract-Spec Decoder Registry](docs/decoder_registry.md): how the contract-spec decoder is chosen by interface version from the contractenvmetav0 WASM custom section.
 - [Batch Manifests](docs/batch_manifests.md): the manifest schema, composing manifests with `include`, shared `[defaults]`, per-pair overrides, precedence, and resolution provenance.
 - [Contributing](docs/contributing.md): development setup, project structure, testing, and how to add new detection rules.

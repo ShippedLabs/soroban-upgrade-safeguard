@@ -498,6 +498,21 @@ impl SuppressionConfig {
             });
         }
 
+        let invalid_expiries = config
+            .rules
+            .iter()
+            .enumerate()
+            .filter_map(|(index, rule)| {
+                rule.expiry
+                    .as_deref()
+                    .and_then(|expiry| expiry_is_past(expiry).err())
+                    .map(|error| format!("rule #{}: {error}", index + 1))
+            })
+            .collect::<Vec<_>>();
+        if !invalid_expiries.is_empty() {
+            return Err(Error::SuppressionConfig {
+                path: None,
+                details: invalid_expiries.join("; "),
         let expired = expired_rule_errors(&config.rules);
         if !expired.is_empty() {
             return Err(Error::SuppressionConfig {
@@ -666,20 +681,22 @@ fn expired_rule_errors(rules: &[SuppressionRule]) -> Vec<String> {
 }
 
 fn expiry_is_past(expiry: &str) -> Result<bool, String> {
-    let mut parts = expiry.split('-');
-    let year: i32 = parts
-        .next()
-        .and_then(|value| value.parse().ok())
-        .ok_or_else(|| format!("invalid expiry '{expiry}', expected YYYY-MM-DD"))?;
-    let month: u32 = parts
-        .next()
-        .and_then(|value| value.parse().ok())
-        .ok_or_else(|| format!("invalid expiry '{expiry}', expected YYYY-MM-DD"))?;
-    let day: u32 = parts
-        .next()
-        .and_then(|value| value.parse().ok())
-        .ok_or_else(|| format!("invalid expiry '{expiry}', expected YYYY-MM-DD"))?;
-    if parts.next().is_some() || !valid_date(year, month, day) {
+    let bytes = expiry.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(index, byte)| index != 4 && index != 7 && !byte.is_ascii_digit())
+    {
+        return Err(format!("invalid expiry '{expiry}', expected YYYY-MM-DD"));
+    }
+
+    let year = expiry[..4].parse::<i32>().expect("four ASCII digits");
+    let month = expiry[5..7].parse::<u32>().expect("two ASCII digits");
+    let day = expiry[8..10].parse::<u32>().expect("two ASCII digits");
+    if !valid_date(year, month, day) {
         return Err(format!("invalid expiry '{expiry}', expected YYYY-MM-DD"));
     }
 

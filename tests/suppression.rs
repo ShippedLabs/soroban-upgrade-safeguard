@@ -817,3 +817,94 @@ fn validate_config_reports_require_reason_violations() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("require_reason"), "{stderr}");
 }
+
+#[test]
+fn validate_config_only_summarizes_unknown_categories_when_present() {
+    let invalid_expiry = write_config(
+        "validate-invalid-expiry",
+        r#"
+        [[suppress]]
+        category = "Struct Field Removed"
+        target = "ConfigData.threshold"
+        expiry = "31/12/2026"
+        "#,
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args(["--validate-config".as_ref(), invalid_expiry.as_os_str()])
+        .output()
+        .expect("failed to run binary");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!output.status.success());
+    assert!(
+        combined.contains("invalid expiry '31/12/2026'"),
+        "{combined}"
+    );
+    assert!(
+        !combined.contains("rule(s) name an unknown category"),
+        "{combined}"
+    );
+
+    let unknown_category = write_config(
+        "validate-unknown-category",
+        r#"
+        [[suppress]]
+        category = "Definitely Not A Category"
+        target = "anything"
+        "#,
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+        .args(["--validate-config".as_ref(), unknown_category.as_os_str()])
+        .output()
+        .expect("failed to run binary");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!output.status.success());
+    assert!(
+        combined.contains("1 rule(s) name an unknown category"),
+        "{combined}"
+    );
+}
+
+#[test]
+fn normal_run_rejects_malformed_suppression_expiries() {
+    for (index, expiry) in ["31/12/2026", "2026-13-45", "2026-1-2"]
+        .into_iter()
+        .enumerate()
+    {
+        let config = write_config(
+            &format!("normal-invalid-expiry-{index}"),
+            &format!(
+                r#"
+                [[suppress]]
+                category = "Struct Field Removed"
+                target = "ConfigData.threshold"
+                expiry = "{expiry}"
+                "#
+            ),
+        );
+        let output = Command::new(env!("CARGO_BIN_EXE_soroban-upgrade-safeguard"))
+            .arg(wasm("v1.wasm"))
+            .arg(wasm("v2.wasm"))
+            .args(["--config".as_ref(), config.as_os_str()])
+            .env_remove("SOROBAN_SAFEGUARD_CONFIG")
+            .output()
+            .expect("failed to run binary");
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!output.status.success(), "expiry {expiry} was accepted");
+        assert!(
+            combined.contains(&format!("invalid expiry '{expiry}', expected YYYY-MM-DD")),
+            "unexpected diagnostic for expiry {expiry}: {combined}"
+        );
+    }
+}

@@ -3389,6 +3389,15 @@ fn main() -> Result<()> {
 
     let is_batch = args.manifest.is_some() || (args.old_dir.is_some() && args.new_dir.is_some());
 
+    if args.per_contract_output_dir.is_some() && !is_batch {
+        Args::command()
+            .error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "--per-contract-output-dir requires --manifest or --old-dir/--new-dir batch input",
+            )
+            .exit();
+    }
+
     if args.manifest.is_some() && (args.old_dir.is_some() || args.new_dir.is_some()) {
         anyhow::bail!("Cannot specify both --manifest and --old-dir/--new-dir at the same time");
     }
@@ -6368,17 +6377,20 @@ fn validate_suppression_config(path: &Path) -> Result<()> {
         }
     };
 
-    if let Err(diags) = schema_check {
-        for d in diags {
-            eprintln!("{}", format!("❌ {d}").red());
+    let schema_valid = match schema_check {
+        Ok(()) => true,
+        Err(diags) => {
+            for d in diags {
+                eprintln!("{}", format!("❌ {d}").red());
+            }
+            false
         }
-        std::process::exit(1);
-    }
+    };
 
     println!("  Parsed {} rule(s).", config.rules.len());
 
     let validation = config.validate();
-    if validation.is_valid() {
+    if schema_valid && validation.is_valid() {
         println!("{}", "✅ Config is valid.".green().bold());
         return Ok(());
     }
@@ -6396,15 +6408,17 @@ fn validate_suppression_config(path: &Path) -> Result<()> {
     for error in &validation.errors {
         eprintln!("{}", format!("❌ {error}").red());
     }
-    eprintln!(
-        "{}",
-        format!(
-            "\n{} rule(s) name an unknown category. Fix the category name(s) above.",
-            validation.unknown_categories.len()
-        )
-        .red()
-        .bold()
-    );
+    if !validation.unknown_categories.is_empty() {
+        eprintln!(
+            "{}",
+            format!(
+                "\n{} rule(s) name an unknown category. Fix the category name(s) above.",
+                validation.unknown_categories.len()
+            )
+            .red()
+            .bold()
+        );
+    }
     std::process::exit(1);
 }
 
