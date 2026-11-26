@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Provenance-hash coverage: every loaded WASM carries a SHA-256 fingerprint.
 
 use std::path::Path;

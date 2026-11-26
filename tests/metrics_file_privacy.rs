@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Tests that the metrics file written by `--metrics-file` contains no input
 //! file paths.
 //!

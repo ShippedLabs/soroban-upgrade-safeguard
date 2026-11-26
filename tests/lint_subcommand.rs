@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the `lint` subcommand's `--output` flag.
 //!
 //! `lint` always printed to stdout. CI jobs that need to archive the result as

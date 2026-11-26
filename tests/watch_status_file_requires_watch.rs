@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `--watch-status-file` is only meaningful alongside `--watch` (it names the
 //! file that `--watch` mode updates after every cycle). clap enforces the
 //! dependency via `requires = "watch"` on the argument definition, and that

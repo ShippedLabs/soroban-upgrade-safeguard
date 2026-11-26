@@ -70,6 +70,7 @@ This compares the old build (`v1.wasm`) against the new build (`v2.wasm`) and re
   - [Wrapping text output](#wrapping-text-output)
   - [Multiple output formats](#multiple-output-formats)
   - [Quiet output](#quiet-output)
+  - [Diagnostic logging](#diagnostic-logging)
   - [Watch mode](#watch-mode)
   - [Comparing two directories of builds](#comparing-two-directories-of-builds)
   - [Excluding artifacts from a directory scan](#excluding-artifacts-from-a-directory-scan)
@@ -114,7 +115,7 @@ brew install soroban-upgrade-safeguard
 ```
 
 The Homebrew formula is published with the first binary release. To install
-from source, use:
+from source, use Rust 1.85 or later (the minimum supported Rust version):
 
 ```bash
 cargo install --path .
@@ -560,6 +561,10 @@ soroban-upgrade-safeguard verify-attestation report.dsse.json \
   --report report.json --old-wasm old.wasm --new-wasm new.wasm
 ```
 
+Pass `--policy-expires-at <UNIX_SECONDS>` to `verify-attestation` to reject an
+attestation whose policy has expired as of that Unix timestamp in seconds, for
+example `--policy-expires-at 1798761600`.
+
 See the [attestation guide](docs/attestations.md) for predicate details,
 resolved policy binding, offline verification, and key-handling guidance.
 
@@ -624,6 +629,14 @@ spec. The schema file may be JSON or TOML, inferred from the extension:
 
 ```bash
 soroban-upgrade-safeguard lint ./wasm/v1.wasm --storage-schema ./schemas/v1.json
+```
+
+Pass `--max-walk-depth <N>` to override the built-in maximum recursive
+type-walk depth. A type that nests containers deeper than `N` cannot be safely
+analyzed, so `lint` reports an `unanalyzable-recursive-shape` warning for it:
+
+```bash
+soroban-upgrade-safeguard lint ./wasm/v1.wasm --max-walk-depth 4
 ```
 
 Exit codes differ from the comparison command:
@@ -1617,6 +1630,12 @@ Pairs are formed by file name: every `.wasm` file in the old directory is
 matched with the file of the same name in the new directory, and the file stem
 becomes the contract's name in the report.
 
+Only files directly inside each directory are compared. Subdirectories are not
+scanned, so a nested `sub/z.wasm` is not found and a monorepo layout like that
+ends in `No .wasm files found in batch directories.` For nested layouts, list
+the pairs explicitly with `--manifest` (see
+[Comparing many contracts at once](#comparing-many-contracts-at-once)).
+
 ```text
 artifacts/
 ├── v1/                 ├── v2/
@@ -1924,6 +1943,7 @@ Watch mode (`--watch`) keeps the process running regardless of comparison verdic
 
 More detailed guides live in the [docs](docs/) folder. See the [Documentation Index](docs/README.md) for a complete listing.
 
+- [Examples](examples/README.md): a sample contract pair to run the tool against, and a script that turns the impact graph into Graphviz.
 - [Glossary](docs/glossary.md): definitions of core terms used in reports and configuration (finding, category, axis, verdict, suppression, cascade, etc.)
 - [Which subcommand do I want?](docs/subcommand-guide.md): a task-oriented guide mapping common goals to the right subcommand.
 - [Choosing an Input Source](docs/choosing-an-input-source.md): comparison of local file, stdin, RPC, HTTPS, and OCI input sources and when to use each.
@@ -1949,6 +1969,7 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Report Provenance Fields](docs/report-provenance.md): every field in the `provenance` block of a saved JSON report, with its type, meaning, and notes on which fields are omitted by `--no-timestamp` and `--redact-paths`.
 - [Watch Status File](docs/watch-status-file.md): the JSON shape `--watch-status-file` writes, its field semantics, why findings are never included, and how an external supervisor polls it for liveness.
 - [Multi-Axis Compatibility](docs/multi_axis_compatibility.md): covers the separate storage, call-ABI, and event-indexer compatibility axes and how findings are classified across each.
+- [Transitioning to Multi-Axis Compatibility Gating](docs/multi_axis_policy_tutorial.md): a step-by-step tutorial for moving CI from single-severity validation to per-axis gating.
 - [Compatibility Budgets](docs/compatibility_budgets.md): per-axis and per-rule compatibility budgets, how they are declared, and how budget exhaustion affects the run verdict.
 - [Named Policy Profiles](docs/named_policy_profiles.md): selecting named policy profiles from configuration and the CLI to apply pre-defined sets of compatibility rules.
 - [Configuration Resolution](docs/config-resolution.md): the precedence order for resolving a suppression config — CLI flag, environment variable, and default file discovery.

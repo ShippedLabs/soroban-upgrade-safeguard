@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Test that `lockfile` reports a directory output path clearly.
 
 use std::fs;

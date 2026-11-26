@@ -56,8 +56,10 @@ All input sources share the same cache directory: local files, `https://`,
 `oci://`, Soroban RPC, batch manifests, and watch mode all read from and
 write to the same location, maximizing hit rates across workflows.
 
-> **Current scope:** local WASM file inputs read from and write to the cache.
-> Other input kinds (stdin, `https://`, `oci://`, RPC) do not yet use it.
+> **Current scope:** local WASM files, `https://` and `oci://` inputs read from
+> and write to the cache. `https://` inputs are keyed by the content hash of the
+> digest-verified download, so a repeat run skips decoding the metadata again.
+> Other input kinds (stdin, RPC) do not yet use it.
 
 ## CLI Flags
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration regression test for CLI `--version` output.
 //!
 //! The executable derives its reported version from Cargo package metadata

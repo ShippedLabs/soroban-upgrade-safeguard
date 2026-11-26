@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration and unit tests for the WASM complexity profiler (Issue #328).
 //!
 //! Coverage:

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tests for JSON-RPC response `Content-Type` acceptance.
 //!
 //! Mirrors the mock-server pattern in `tests/rpc_fetch.rs`: a hand-rolled

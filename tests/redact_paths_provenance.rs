@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for --redact-paths with symlink target path redaction.
 //!
 //! --redact-paths replaces resolved symlink target paths in report provenance

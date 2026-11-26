@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for storage durability and namespace change detection.
 //!
 //! These tests exercise the cross-schema comparison introduced in issue #346.

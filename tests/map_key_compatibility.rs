@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Integration tests for map-key compatibility (Issue: Classify map-key
 //! compatibility and ordering changes).
 //!

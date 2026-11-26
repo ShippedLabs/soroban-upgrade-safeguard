@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Process-level tests for incremental batch `--watch` mode.
 //!
 //! Watch mode is a long-running loop, so the only way to verify its behavior

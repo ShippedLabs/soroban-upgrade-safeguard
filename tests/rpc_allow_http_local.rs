@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `--allow-http-local` permits plain HTTP for `--rpc-url` only when the
 //! host is a loopback address (`localhost`, `127.0.0.1`, `::1`) — a
 //! non-local `http://` endpoint must still be rejected even with the

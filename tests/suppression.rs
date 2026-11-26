@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the suppression config (`.safeguard.toml`).
 //!
 //! These drive the compiled binary with `--config` against the checked-in
