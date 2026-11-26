@@ -1,0 +1,25 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+
+[*.{rs,py}]
+indent_size = 4
+
+[Dockerfile]
+indent_size = 4
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Files committed before this config that lack a final newline or use CRLF.
+[{.safeguard.example.toml,.safeguard.profiles.example.toml}]
+end_of_line = unset
+insert_final_newline = unset
+
+[{scripts/update_homebrew_formula.py,tests/fixtures/report_migrations/*.json}]
+insert_final_newline = unset
