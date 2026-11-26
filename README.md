@@ -1949,7 +1949,10 @@ More detailed guides live in the [docs](docs/) folder. See the [Documentation In
 - [Choosing an Input Source](docs/choosing-an-input-source.md): comparison of local file, stdin, RPC, HTTPS, and OCI input sources and when to use each.
 - [Documentation](docs/documentation.md): full explanation of how the analysis pipeline works, severity levels, cascading layout breaks, and CI integration.
 - [Architecture Guide](docs/safeguard_architecture.md): internal design, module dependencies, and pipeline execution flow of the analysis engine.
+- [Release Compatibility Table](docs/compatibility-table.md): minimum Rust toolchain, Stellar XDR version, and report schema version for each release.
 - [Finding Category Reference](docs/finding-categories.md): every category emitted by the tool, with severity, trigger, and remediation guidance — the exact strings to use in suppression rules.
+- [Compatibility Rules Reference](docs/compatibility_rules_reference.md): every compatibility check, the axis it affects, and guidance for remediating findings.
+- [Adding a New Finding Category](docs/adding-finding-categories.md): contributor steps for adding a category with stable IDs, guidance, suppression rules, and tests.
 - [Lint Rules Reference](docs/lint_rules_reference.md): reference for rules applied by the lint subcommand to validate single contract specs.
 - [Capability Reference](docs/capability-reference.md): Soroban protocol capabilities used to classify host import changes.
 - [Protocol-Versioned Contract-Spec Decoder Registry](docs/decoder_registry.md): how the contract-spec decoder is chosen by interface version from the contractenvmetav0 WASM custom section.

@@ -101,16 +101,23 @@ The lineage ledger file is portable, machine-readable, and human-editable. It ca
 | CLI Flag | Description |
 | :--- | :--- |
 | `--lineage-store <PATH>` | Path to the lineage store file (`.json` or `.toml`). A missing file starts an empty in-memory store. |
+| `--list-versions` | Print each stored version's ID, order, status, and interface hash, then exit without analyzing. Requires `--lineage-store`; cannot be combined with `--record-version` or `--retire-version`. |
 | `--record-version <TAG>` | Record the candidate (`<NEW_WASM>`) as a new `Live` entry and write the store back to `<PATH>`. Runs whatever the verdict. |
 | `--retire-version <TAG>` | Mark an existing entry as `Retired` before validation. Persisted only when `--record-version` is also given. |
 | `--max-live-versions <N>`| Limit validation to the `N` most recent live entries. Saved to the store's `policy` when `--record-version` is also given. |
 
-All four flags do nothing without `--lineage-store`. They have no
+All five flags do nothing without `--lineage-store`. They have no
 environment-variable equivalents.
 
 ---
 
 ## Workflow Example
+
+To inspect a store without loading a WASM build:
+
+```bash
+soroban-upgrade-safeguard --lineage-store lineage.json --list-versions
+```
 
 See the [Lineage Tracking Walkthrough](lineage-walkthrough.md) for an
 end-to-end example that records several releases, validates a candidate
