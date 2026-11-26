@@ -1,5 +1,7 @@
 # ── Stage 1: Builder ──────────────────────────────────────────────────────────
-FROM rust:slim-bookworm AS builder
+# Pinned so the same commit builds the same image. To update, pick a newer
+# tag from https://hub.docker.com/_/rust and bump it here.
+FROM rust:1.100.0-slim-bookworm AS builder
 
 # ring 0.17 compiles C code via the `cc` crate; gcc and pkg-config are required.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,7 +33,9 @@ COPY src/ ./src/
 RUN cargo build --release
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+# Pinned to a dated snapshot. To update, pick a newer bookworm-YYYYMMDD-slim
+# tag from https://hub.docker.com/_/debian and bump it here.
+FROM debian:bookworm-20261123-slim AS runtime
 
 # ca-certificates is required by rustls/ureq when using --rpc-url (HTTPS).
 # Local-mode users (two WASM paths, no network) are unaffected but it is

@@ -16,6 +16,9 @@ description = "A safety tool to check for breaking changes in Soroban contract u
 keywords = ["soroban", "stellar", "wasm", "smart-contracts", "upgrade"]
 categories = ["command-line-utilities", "development-tools"]
 homepage = "https://github.com/ShippedLabs/soroban-upgrade-safeguard"
+license = "MIT"
+repository = "https://github.com/ShippedLabs/soroban-upgrade-safeguard"
+readme = "README.md"
 
 [lib]
 name = "soroban_upgrade_safeguard"
