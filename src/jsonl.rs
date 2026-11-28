@@ -85,8 +85,8 @@ pub struct StreamingJob {
 }
 
 /// Allowed analysis overrides for a single job.
-#[serde(deny_unknown_fields)]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct JobOverrides {
     /// Treat warnings as errors (mirrors `--strict`).
     #[serde(default)]
@@ -837,7 +837,12 @@ mod tests {
     fn overrides_reject_unknown_keys_and_accept_strict() {
         let unknown_key = r#"{"schema_version":1,"id":"typo","old":{"local":"x"},"new":{"local":"y"},"overrides":{"strictt":true}}"#;
         let mut output = Vec::new();
-        run_streaming(unknown_key.as_bytes(), &mut output, &StreamConfig::default()).unwrap();
+        run_streaming(
+            unknown_key.as_bytes(),
+            &mut output,
+            &StreamConfig::default(),
+        )
+        .unwrap();
 
         let result: serde_json::Value =
             serde_json::from_slice(&output).expect("result should be JSON");
@@ -921,7 +926,8 @@ mod tests {
 
     #[test]
     fn unknown_top_level_field_yields_malformed_result_naming_the_field() {
-        let json = r#"{"schema_version":1,"id":"a","old":{"local":"x"},"new":{"local":"y"},"bogus":1}"#;
+        let json =
+            r#"{"schema_version":1,"id":"a","old":{"local":"x"},"new":{"local":"y"},"bogus":1}"#;
         let mut output = Vec::new();
         let config = StreamConfig::default();
         run_streaming(json.as_bytes(), &mut output, &config).unwrap();

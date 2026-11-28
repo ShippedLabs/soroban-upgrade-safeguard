@@ -513,11 +513,6 @@ impl SuppressionConfig {
             return Err(Error::SuppressionConfig {
                 path: None,
                 details: invalid_expiries.join("; "),
-        let expired = expired_rule_errors(&config.rules);
-        if !expired.is_empty() {
-            return Err(Error::SuppressionConfig {
-                path: None,
-                details: expired.join("; "),
                 source: None,
             });
         }
